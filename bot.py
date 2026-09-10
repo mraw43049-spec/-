@@ -43,6 +43,10 @@ async def require_membership(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user = update.effective_user
     if user is None:
         return False
+    # Admins always retain access to the management panel, even if they are not
+    # subscribed to the required channel themselves.
+    if user.id in ADMIN_IDS:
+        return True
     if await is_member(context.bot, user.id):
         return True
 
@@ -449,6 +453,8 @@ async def membership_callback(update, context):
         await q.answer("هنوز عضویتت تأیید نشده.", show_alert=True)
 
 def main():
+    if not BOT_TOKEN:
+        raise RuntimeError('BOT_TOKEN is missing. Add BOT_TOKEN in Railway Variables.')
     init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
