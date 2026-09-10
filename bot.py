@@ -745,14 +745,35 @@ async def injured_fox_button(update, context):
     await q.answer("🦊 نجات موفق بود!" if final_status == "rescued" else "تلاش انجام شد.")
     try:
         if final_status == "rescued":
-            with open(INJURED_FOX_RESCUED_IMAGE, "rb") as photo:
-                media = InputMediaPhoto(media=InputFile(photo), caption=text)
-                await context.bot.edit_message_media(
-                    chat_id=final_chat_id,
-                    message_id=final_message_id,
-                    media=media,
-                    reply_markup=None,
-                )
+            # اول تلاش می‌کنیم همان پیام را از عکس «گرفتار» به عکس «نجات‌یافته»
+            # تبدیل کنیم. برای بعضی نسخه‌ها/شرایط Telegram، ویرایش media ممکن
+            # است خطا بدهد؛ در آن حالت حتماً fallback اجرا می‌شود تا کاربر
+            # عکس نجات‌یافته + متن پاداش را از دست ندهد.
+            try:
+                with open(INJURED_FOX_RESCUED_IMAGE, "rb") as photo:
+                    photo_input = InputFile(photo, filename=INJURED_FOX_RESCUED_IMAGE)
+                    media = InputMediaPhoto(media=photo_input, caption=text)
+                    await context.bot.edit_message_media(
+                        chat_id=final_chat_id,
+                        message_id=final_message_id,
+                        media=media,
+                        reply_markup=None,
+                    )
+            except Exception as edit_error:
+                logger.warning("edit rescued fox media failed; using send fallback: %s", edit_error)
+                # fallback مطمئن: پیام قدیمی را حذف و پیام نجات را با عکس دوم می‌فرستیم.
+                try:
+                    await context.bot.delete_message(
+                        chat_id=final_chat_id, message_id=final_message_id
+                    )
+                except Exception as delete_error:
+                    logger.warning("could not delete trapped fox message: %s", delete_error)
+                with open(INJURED_FOX_RESCUED_IMAGE, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=final_chat_id,
+                        photo=InputFile(photo, filename=INJURED_FOX_RESCUED_IMAGE),
+                        caption=text,
+                    )
         elif final_status == "dead":
             await context.bot.edit_message_caption(
                 chat_id=final_chat_id,
