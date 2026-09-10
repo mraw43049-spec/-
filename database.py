@@ -1,23 +1,23 @@
 from datetime import datetime, timezone
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, create_engine, inspect, text
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, Float, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from config import DATABASE_URL
 
-# SQLite is the default so Railway never needs a PostgreSQL driver during build.
-# If DATABASE_URL is explicitly PostgreSQL, SQLAlchemy will use psycopg only when
-# the optional driver is installed; otherwise use SQLite by default for reliability.
 if DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = 'postgresql://' + DATABASE_URL[len('postgres://'):]
 
 if DATABASE_URL.startswith('postgresql://'):
-    # Railway PostgreSQL support is optional in this build. Keep it configurable.
     try:
         import psycopg  # noqa: F401
         DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+psycopg://', 1)
     except ImportError:
         DATABASE_URL = 'sqlite:///bot.db'
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={'check_same_thread': False} if DATABASE_URL.startswith('sqlite') else {})
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    connect_args={'check_same_thread': False} if DATABASE_URL.startswith('sqlite') else {}
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
@@ -32,6 +32,17 @@ class User(Base):
     last_claim_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+    # داده‌های روباه؛ همه nullable/default هستند تا دیتابیس قبلی بدون حذف کاربران مهاجرت کند.
+    fox_name = Column(String, nullable=False, default='مکار')
+    fox_level = Column(Integer, nullable=False, default=1)
+    fox_belly = Column(Integer, nullable=False, default=3)
+    fox_points = Column(Integer, nullable=False, default=0)
+    fox_total_earned = Column(Integer, nullable=False, default=0)
+    fox_production_remainder = Column(Float, nullable=False, default=0.0)
+    fox_last_production_at = Column(DateTime(timezone=True), nullable=True)
+    last_hunt_at = Column(DateTime(timezone=True), nullable=True)
+    last_transfer_at = Column(DateTime(timezone=True), nullable=True)
+
 class Challenge(Base):
     __tablename__ = 'challenges'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -44,14 +55,48 @@ class Challenge(Base):
     status = Column(String, nullable=False, default='pending')
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+class FoxHunt(Base):
+    __tablename__ = 'fox_hunts'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    emoji = Column(String, nullable=False)
+    item_name = Column(String, nullable=False)
+    nutrition = Column(Integer, nullable=False)
+    sell_value = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, default='pending')
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 def init_db():
     Base.metadata.create_all(engine)
     inspector = inspect(engine)
     cols = {c['name'] for c in inspector.get_columns('users')}
-    if 'total_earned' not in cols:
-        with engine.begin() as conn:
-            conn.execute(text('ALTER TABLE users ADD COLUMN total_earned INTEGER NOT NULL DEFAULT 0'))
+    additions = {
+        'total_earned': 'INTEGER NOT NULL DEFAULT 0',
+        'fox_name': "VARCHAR DEFAULT 'مکار'",
+        'fox_level': 'INTEGER NOT NULL DEFAULT 1',
+        'fox_belly': 'INTEGER NOT NULL DEFAULT 3',
+        'fox_points': 'INTEGER NOT NULL DEFAULT 0',
+        'fox_total_earned': 'INTEGER NOT NULL DEFAULT 0',
+        'fox_production_remainder': 'FLOAT NOT NULL DEFAULT 0',
+        'fox_last_production_at': 'DATETIME',
+        'last_hunt_at': 'DATETIME',
+        'last_transfer_at': 'DATETIME',
+    }
+    with engine.begin() as conn:
+        for name, definition in additions.items():
+            if name not in cols:
+                conn.execute(text(f'ALTER TABLE users ADD COLUMN {name} {definition}'))
+        # دیتای قدیمی را حفظ می‌کنیم و فقط مقدارهای روباه را برای کاربران قدیمی آماده می‌کنیم.
+        conn.execute(text("UPDATE users SET fox_name = 'مکار' WHERE fox_name IS NULL OR fox_name = ''"))
+        conn.execute(text("UPDATE users SET fox_level = 1 WHERE fox_level IS NULL OR fox_level < 1"))
+        conn.execute(text("UPDATE users SET fox_belly = 3 WHERE fox_belly IS NULL OR fox_belly < 0"))
+        conn.execute(text("UPDATE users SET fox_points = 0 WHERE fox_points IS NULL OR fox_points < 0"))
+        conn.execute(text("UPDATE users SET fox_total_earned = 0 WHERE fox_total_earned IS NULL OR fox_total_earned < 0"))
+        conn.execute(text("UPDATE users SET fox_production_remainder = 0 WHERE fox_production_remainder IS NULL OR fox_production_remainder < 0"))
+        if 'total_earned' not in cols:
             conn.execute(text('UPDATE users SET total_earned = points WHERE total_earned = 0'))
+
 
 def get_session():
     return SessionLocal()
