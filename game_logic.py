@@ -27,7 +27,7 @@ def points_needed_for_level(level):
 FOX_RANKS=["روباه تازه‌کار","روباه کوچک","روباه چابک","روباه جنگلی","روباه زیرک","روباه تیزبین","روباه شکارچی","روباه ماهر","روباه زرنگ","روباه باتجربه","روباه سایه","روباه شب‌گرد","روباه رعد","روباه آذرخش","روباه سرخ","روباه نقره‌ای","روباه طلایی","روباه اشرافی","روباه سردار","روباه فرمانده","روباه بزرگ","روباه کهن","روباه افسانه‌ای","روباه سلطنتی","روباه شاهین‌دل","روباه اسطوره‌ای","روباه جاودان","روباه اعظم","روباه پادشاه","روباه شاهنشاه","روباه اژدها","روباه کیهانی","روباه بی‌رقیب","روباه افسانه‌ساز","روباه بزرگ‌مکار"]
 HUNT_ITEMS={"🐇":{"name":"خرگوش","nutrition":3,"sell":5000},"🐭":{"name":"موش","nutrition":1,"sell":1000},"🦡":{"name":"راکون","nutrition":3,"sell":5000},"🦆":{"name":"اردک","nutrition":2,"sell":3000},"🐤":{"name":"جوجه","nutrition":1,"sell":1000},"🐟":{"name":"ماهی","nutrition":1,"sell":1000},"🥕":{"name":"هویج","nutrition":1,"sell":1000},"🐿":{"name":"سنجاب","nutrition":2,"sell":3000},"🦗":{"name":"ملخ","nutrition":1,"sell":1000}}
 def fox_rank(level):return FOX_RANKS[max(1,min(35,int(level)))-1]
-def fox_capacity(level):return min(15,3+max(0,int(level)-1))
+def fox_capacity(level):return min(15,3+2*max(0,int(level)-1))
 def fox_upgrade_cost(level):return 500+max(0,int(level)-1)*3000
 def fox_production_per_second(level):return round(0.89+(max(1,int(level))-1)*0.54,2)
 def fox_level_reward(level):return 50*max(1,int(level)-1)

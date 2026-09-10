@@ -59,6 +59,26 @@ class Challenge(Base):
     status = Column(String, nullable=False, default='pending')
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+class GroupChat(Base):
+    __tablename__ = 'group_chats'
+    chat_id = Column(BigInteger, primary_key=True)
+    title = Column(String, nullable=True)
+    active = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class InjuredFox(Base):
+    __tablename__ = 'injured_foxes'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False)
+    message_id = Column(BigInteger, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    required_attempts = Column(Integer, nullable=False, default=1)
+    status = Column(String, nullable=False, default='pending')
+    rescuer_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class FoxHunt(Base):
     __tablename__ = 'fox_hunts'
     id = Column(Integer, primary_key=True, autoincrement=True)

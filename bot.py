@@ -4,7 +4,7 @@ import random
 import re
 from datetime import datetime, timezone, timedelta
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto
 from telegram.ext import (
     ApplicationBuilder, CallbackQueryHandler, CommandHandler,
     ContextTypes, MessageHandler, filters
@@ -14,7 +14,7 @@ from config import (
     ADMIN_IDS, BOT_TOKEN, CLAIM_COOLDOWN_SECONDS, CLAIM_KEYWORD,
     CLAIM_POINTS_MAX, CLAIM_POINTS_MIN, REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL
 )
-from database import Challenge, FoxHunt, User, get_session, init_db
+from database import Challenge, FoxHunt, GroupChat, InjuredFox, User, get_session, init_db
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_capacity, fox_level_reward,
     fox_production_per_second, fox_rank, fox_upgrade_cost, get_level_for_points,
@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 
 FOX_UNLOCK_LEVEL = 3
 FOX_MAX_LEVEL = 35
+INJURED_FOX_INTERVAL = 60
+INJURED_FOX_COST = 10
+INJURED_FOX_REWARD_MIN = 200
+INJURED_FOX_REWARD_MAX = 2000
+INJURED_FOX_MAX_CLAIMS = 5
 FOX_CLAIM_COOLDOWN = 5 * 60
 HUNT_COOLDOWN = 15 * 60
 HUNT_DECISION_TIMEOUT = 120
@@ -367,7 +372,7 @@ async def fox_button(update, context):
             if lvl >= FOX_MAX_LEVEL:
                 await q.answer("روباه به بالاترین لول رسیده! 🏆", show_alert=True)
             else:
-                cost = fox_level_requirement(lvl + 1)
+                cost = fox_upgrade_cost(lvl)
                 if user.fox_points < cost:
                     await q.answer(f"روب‌پوینت کافی نیست. {cost:,.0f} لازم داری.", show_alert=True)
                 else:
@@ -529,8 +534,8 @@ async def collect_fox_points(update,context):
     session=get_session()
     try:
         user=get_or_create_user(session,update.effective_user)
-        if user.level<2:
-            await update.message.reply_text("🔒 دریافت روب‌پوینت از سطح 2 باز می‌شود.",**reply_kwargs(update.message));return
+        if user.level<1:
+            await update.message.reply_text("🔒 دریافت روب‌پوینت از سطح 1 باز می‌شود.",**reply_kwargs(update.message));return
         left=seconds_left(user.last_fox_claim_at,FOX_CLAIM_COOLDOWN)
         if left:
             await update.message.reply_text(f"⏳ دریافت بعدی روب‌پوینت: {format_duration(left)} دیگر.",**reply_kwargs(update.message));return
@@ -585,6 +590,185 @@ async def fridge_command(update, context):
     finally:
         session.close()
     await update.message.reply_text(text, **reply_kwargs(update.message))
+
+
+# ---------- روباه زخمی در گپ ----------
+
+INJURED_FOX_TRAPPED_IMAGE = "injured_fox_trapped.png"
+INJURED_FOX_RESCUED_IMAGE = "injured_fox_rescued.png"
+
+
+def injured_fox_keyboard(event_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🦊 نجات", callback_data=f"injured:rescue:{event_id}")]
+    ])
+
+
+def injured_fox_text(attempts=0):
+    return (
+        "🦊 روباه زخمی پیدا شده، کسی نیست نجاتش بده 😢\n\n"
+        f"🛟 تلاش‌ها: {attempts}/3\n"
+        f"💰 هزینه هر تلاش: {INJURED_FOX_COST} روب‌پوینت"
+    )
+
+
+async def register_group_chat(update, context):
+    chat = update.effective_chat
+    if not chat or chat.type not in ("group", "supergroup"):
+        return
+    session = get_session()
+    try:
+        row = session.get(GroupChat, chat.id)
+        if row is None:
+            row = GroupChat(chat_id=chat.id, title=chat.title or "گپ", active=1)
+            session.add(row)
+        else:
+            row.title = chat.title or row.title
+            row.active = 1
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.warning("register group failed: %s", e)
+    finally:
+        session.close()
+
+
+async def post_injured_fox_job(context):
+    session = get_session()
+    try:
+        chats = session.query(GroupChat).filter(GroupChat.active == 1).all()
+        chat_ids = [c.chat_id for c in chats]
+    finally:
+        session.close()
+
+    for chat_id in chat_ids:
+        try:
+            # هر دقیقه یک روباه زخمی جدید در هر گپی که ربات در آن فعال دیده شده.
+            required = random.randint(1, 4)  # 1/2/3 = نجات در همان تلاش؛ 4 = هر سه تلاش ناموفق
+            session = get_session()
+            try:
+                event = InjuredFox(chat_id=chat_id, required_attempts=required, attempts=0, status="pending")
+                session.add(event)
+                session.commit()
+                event_id = event.id
+            finally:
+                session.close()
+
+            with open(INJURED_FOX_TRAPPED_IMAGE, "rb") as photo:
+                msg = await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=InputFile(photo),
+                    caption=injured_fox_text(0),
+                    reply_markup=injured_fox_keyboard(event_id),
+                )
+            session = get_session()
+            try:
+                event = session.get(InjuredFox, event_id)
+                if event:
+                    event.message_id = msg.message_id
+                    session.commit()
+            finally:
+                session.close()
+        except Exception as e:
+            logger.warning("post injured fox failed in %s: %s", chat_id, e)
+
+
+async def injured_fox_button(update, context):
+    q = update.callback_query
+    try:
+        _, action, event_id_s = q.data.split(":")
+        event_id = int(event_id_s)
+    except Exception:
+        await q.answer("درخواست نامعتبر است.", show_alert=True)
+        return
+    if action != "rescue":
+        return
+    if not await require_membership(update, context):
+        return
+
+    session = get_session()
+    try:
+        event = session.get(InjuredFox, event_id)
+        if not event or event.status != "pending":
+            await q.answer("این روباه دیگر قابل نجات نیست.", show_alert=True)
+            return
+        if event.attempts >= 3:
+            await q.answer("تمام تلاش‌ها انجام شده است.", show_alert=True)
+            return
+
+        user = get_or_create_user(session, q.from_user)
+        if (user.fox_points or 0) < INJURED_FOX_COST:
+            await q.answer("❌ برای نجات روباه حداقل 10 روب‌پوینت لازم داری.", show_alert=True)
+            return
+
+        user.fox_points -= INJURED_FOX_COST
+        event.attempts += 1
+        attempt = event.attempts
+
+        if attempt >= event.required_attempts and attempt <= 3:
+            event.status = "rescued"
+            event.rescuer_id = user.telegram_id
+            user.fox_rescued_count = (user.fox_rescued_count or 0) + 1
+            reward = random.randint(INJURED_FOX_REWARD_MIN, INJURED_FOX_REWARD_MAX)
+            claims = random.randint(1, INJURED_FOX_MAX_CLAIMS)
+            user.fox_points += reward
+            user.fox_claim_count = (user.fox_claim_count or 0) + claims
+            session.commit()
+            rescuer_name = user_display_name(user)
+            text = (
+                f"🦊 روباه زخمی پس از {attempt} تلاش نجات پیدا کرد 😇🦊\n\n"
+                f"👤 {rescuer_name} روباه زخمی را نجات داد.\n\n"
+                f"💝 پاداش ⬇️\n"
+                f"┘─ +{reward:,} روب‌پوینت 🪙\n"
+                f"┘─ روباه زخمی برای شما {claims} بار روب روب کرد 🐾"
+            )
+            message_id = event.message_id
+        else:
+            if attempt == 1:
+                text = injured_fox_text(1) + "\n\n🏹 شکارچی درحال نزدیک شدن است و روباه هنوز نجات پیدا نکرده 😢"
+            elif attempt == 2:
+                text = injured_fox_text(2) + "\n\n🐺 گله گرگ به روباه زخمی درحال نزدیک شدن است و کسی روباه زخمی را نجات نداد 😢"
+            else:
+                event.status = "dead"
+                text = "💔 روباه در اثر افتادن در تله جان داد 😢"
+            session.commit()
+            message_id = event.message_id
+    finally:
+        # مقادیر لازم را قبل از بستن session نگه می‌داریم؛ SQLAlchemy بعد از commit
+        # ممکن است attributeهای event را expire کند.
+        final_status = event.status
+        final_chat_id = event.chat_id
+        final_event_id = event.id
+        final_message_id = message_id
+        session.close()
+
+    await q.answer("🦊 نجات موفق بود!" if final_status == "rescued" else "تلاش انجام شد.")
+    try:
+        if final_status == "rescued":
+            with open(INJURED_FOX_RESCUED_IMAGE, "rb") as photo:
+                media = InputMediaPhoto(media=InputFile(photo), caption=text)
+                await context.bot.edit_message_media(
+                    chat_id=final_chat_id,
+                    message_id=final_message_id,
+                    media=media,
+                    reply_markup=None,
+                )
+        elif final_status == "dead":
+            await context.bot.edit_message_caption(
+                chat_id=final_chat_id,
+                message_id=final_message_id,
+                caption=text,
+                reply_markup=None,
+            )
+        else:
+            await context.bot.edit_message_caption(
+                chat_id=final_chat_id,
+                message_id=final_message_id,
+                caption=text,
+                reply_markup=injured_fox_keyboard(final_event_id),
+            )
+    except Exception as e:
+        logger.warning("update injured fox message failed: %s", e)
 
 # ---------- انتقال روب‌پوینت ----------
 
@@ -964,11 +1148,15 @@ def main():
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|لیدربرد)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
+    app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, register_group_chat), group=-1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text_router),group=2)
+    if app.job_queue:
+        app.job_queue.run_repeating(post_injured_fox_job, interval=INJURED_FOX_INTERVAL, first=10, name="injured-fox")
     logger.info("Bot started polling...")
     app.run_polling()
 
