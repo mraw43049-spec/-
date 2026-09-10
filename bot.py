@@ -900,6 +900,34 @@ async def text_router(update, context):
         await transfer_command(update, context); return
 
 
+async def persian_slash_router(update, context):
+    """
+    Telegram/Python-Telegram-Bot فقط command name های لاتین/ASCII را
+    برای CommandHandler قبول می‌کند. بنابراین /روباه و سایر دستورهای
+    فارسی را با MessageHandler پردازش می‌کنیم تا Railway موقع startup کرش نکند.
+    """
+    if not update.message or not update.message.text:
+        return
+    text = update.message.text.strip()
+    # @BotUsername در انتهای command در گروه‌ها مجاز است.
+    m = re.fullmatch(r"/(روباه|روبی|روباهیو|شکار|یخچال)(?:@\w+)?", text)
+    if m:
+        cmd = m.group(1)
+        if cmd in {"روباه", "روبی", "روباهیو"}:
+            await fox_command(update, context)
+        elif cmd == "شکار":
+            await hunt_command(update, context)
+        else:
+            await fridge_command(update, context)
+        return
+
+    # /انتقال روب پوینت 50 — انتقال همچنان فقط با Reply انجام می‌شود.
+    m = re.fullmatch(r"/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+([0-9,]+)", text)
+    if m:
+        context.user_data["transfer_amount"] = m.group(1)
+        await transfer_command(update, context)
+
+
 def main():
     if not BOT_TOKEN: raise RuntimeError('BOT_TOKEN is missing. Add BOT_TOKEN in Railway Variables.')
     init_db()
@@ -913,12 +941,6 @@ def main():
     app.add_handler(CommandHandler("transfer",transfer_command))
     app.add_handler(CommandHandler("hunt",hunt_command))
     app.add_handler(CommandHandler("fox",fox_command))
-    app.add_handler(CommandHandler("روباه",fox_command))
-    app.add_handler(CommandHandler("روبی",fox_command))
-    app.add_handler(CommandHandler("روباهیو",fox_command))
-    app.add_handler(CommandHandler("شکار",hunt_command))
-    app.add_handler(CommandHandler("یخچال",fridge_command))
-    app.add_handler(CommandHandler("انتقال",transfer_command))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|setlevel|setfoxpoints)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
@@ -926,6 +948,8 @@ def main():
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
+    # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
+    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text_router),group=2)
