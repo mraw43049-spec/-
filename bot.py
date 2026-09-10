@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import random
 import re
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 FOX_UNLOCK_LEVEL = 3
 FOX_MAX_LEVEL = 35
+FOX_CLAIM_COOLDOWN = 5 * 60
 HUNT_COOLDOWN = 15 * 60
 HUNT_DECISION_TIMEOUT = 120
 TRANSFER_COOLDOWN = 60
@@ -120,6 +122,7 @@ def get_or_create_user(session, tg_user):
             fox_points=0,
             fox_total_earned=0,
             fox_production_remainder=0.0,
+        fox_claim_count=0, hunt_count=0, fox_rescued_count=0,
         )
         session.add(user)
         session.commit()
@@ -141,6 +144,9 @@ def get_or_create_user(session, tg_user):
             user.fox_total_earned = 0; changed = True
         if user.fox_production_remainder is None:
             user.fox_production_remainder = 0.0; changed = True
+        if user.fox_claim_count is None: user.fox_claim_count = 0; changed = True
+        if user.hunt_count is None: user.hunt_count = 0; changed = True
+        if user.fox_rescued_count is None: user.fox_rescued_count = 0; changed = True
         calculated = get_level_for_points(user.points or 0)
         if user.level != calculated:
             user.level = calculated; changed = True
@@ -236,30 +242,19 @@ async def game_command(update, context):
 
 # ---------- روباه ----------
 
-def fox_keyboard(user_id, user_level):
-    rows = [
-        [InlineKeyboardButton("🧲 برداشت روب پوینت ها", callback_data=f"fox:collect:{user_id}")],
-        [InlineKeyboardButton("⭐ ارتقا مقام", callback_data=f"fox:upgrade:{user_id}")],
-        [InlineKeyboardButton("✏️ تغییر اسم روباه", callback_data=f"fox:rename:{user_id}")],
-    ]
+def fox_keyboard(user_id, user_level, fox_level=None):
+    rows=[[InlineKeyboardButton("🧲 برداشت روب پوینت ها",callback_data=f"fox:collect:{user_id}")]]
+    if fox_level is None or int(fox_level)<FOX_MAX_LEVEL:
+        rows.append([InlineKeyboardButton("⭐ ارتقا مقام",callback_data=f"fox:upgrade:{user_id}")])
+    rows.append([InlineKeyboardButton("✏️ تغییر اسم روباه",callback_data=f"fox:rename:{user_id}")])
     return InlineKeyboardMarkup(rows)
 
 
 def fox_profile_text(user):
-    lvl = max(1, min(FOX_MAX_LEVEL, user.fox_level or 1))
-    cap = fox_capacity(lvl)
-    rate = fox_production_per_second(lvl)
-    return (
-        f"🦊 {user.fox_name or 'مکار'}\n\n"
-        f"❤️ شکم روباه: {user.fox_belly}/{cap}\n\n"
-        f"🏅 مقام: {fox_rank(lvl)}\n"
-        f"⭐ لول روباه: {lvl}/{FOX_MAX_LEVEL}\n\n"
-        f"🪙 روب پوینت های تولید شده: {int(user.fox_points):,}\n"
-        f"⚡ روب پوینت در ثانیه: {rate:.2f}\n"
-        f"🎒 ظرفیت شکم: {cap:,}\n"
-        f"📦 ظرفیت ذخیره روب‌پوینت: {fox_storage_capacity(lvl):,}\n"
-        f"💰 هزینه ارتقا: {fox_upgrade_cost(lvl):,} روب پوینت"
-    )
+    lvl=max(1,min(FOX_MAX_LEVEL,user.fox_level or 1)); cap=fox_capacity(lvl); rate=fox_production_per_second(lvl)
+    lines=[f"🦊 {user.fox_name or 'مکار'}","",f"❤️ شکم روباه: {user.fox_belly}/{cap}","",f"🏅 مقام: {fox_rank(lvl)}",f"⭐ لول روباه: {lvl}/{FOX_MAX_LEVEL}","",f"🪙 روب پوینت های تولید شده: {int(user.fox_points):,}",f"⚡ روب پوینت در ثانیه: {rate:.2f}",f"📦 ظرفیت ذخیره روب پوینت: {fox_storage_capacity(lvl):,}"]
+    lines.append(f"💰 هزینه ارتقا: {fox_upgrade_cost(lvl):,} روب پوینت" if lvl<FOX_MAX_LEVEL else "🏆 روباه به آخرین سطح رسیده است.")
+    return "\n".join(lines)
 
 
 def update_fox_production(user):
@@ -303,6 +298,18 @@ def fox_storage_capacity(level):
     return 1000 + 2000 * n + 500 * n * n
 
 
+async def restore_fox_panel(bot, chat_id, message_id, owner_id):
+    await asyncio.sleep(4)
+    session=get_session()
+    try:
+        user=session.get(User,owner_id)
+        if not user or user.level<FOX_UNLOCK_LEVEL:return
+        settle_fox_production(user);session.commit();text=fox_profile_text(user);markup=fox_keyboard(user.telegram_id,user.level,user.fox_level)
+    finally:session.close()
+    try:await bot.edit_message_text(text=text,chat_id=chat_id,message_id=message_id,reply_markup=markup)
+    except Exception as e:logger.debug("restore fox panel: %s",e)
+
+
 async def fox_command(update, context):
     if not await require_membership(update, context):
         return
@@ -320,7 +327,7 @@ async def fox_command(update, context):
         text = fox_profile_text(user) + f"\n🧺 ظرفیت نگهداری روب‌پوینت: {fox_storage_capacity(user.fox_level):,}"
     finally:
         session.close()
-    await update.message.reply_text(text, reply_markup=fox_keyboard(update.effective_user.id, user.level), **reply_kwargs(update.message))
+    await update.message.reply_text(text, reply_markup=fox_keyboard(update.effective_user.id, user.level, user.fox_level), **reply_kwargs(update.message))
 
 
 async def fox_button(update, context):
@@ -352,14 +359,15 @@ async def fox_button(update, context):
                 nxt = next_fox_point_seconds(user)
                 next_text = f"⏱ روب‌پوینت بعدی حدود {format_duration(nxt)} دیگر تولید می‌شود." if nxt else "⏸ تولید متوقف است تا شکم کامل شود."
                 await q.answer("برداشت انجام شد! 💰")
-                await q.message.edit_text(fox_profile_text(user) + f"\n\n💰 {amount:,} روب پوینت برداشت شد.\n{next_text}", reply_markup=fox_keyboard(user.id, user.level))
+                await q.message.edit_text(fox_profile_text(user) + f"\n\n💰 {amount:,} روب پوینت برداشت شد.\n{next_text}")
+                asyncio.create_task(restore_fox_panel(context.bot,q.message.chat_id,q.message.message_id,user.telegram_id))
             return
         if action == "upgrade":
             lvl = user.fox_level
             if lvl >= FOX_MAX_LEVEL:
                 await q.answer("روباه به بالاترین لول رسیده! 🏆", show_alert=True)
             else:
-                cost = fox_upgrade_cost(lvl)
+                cost = fox_level_requirement(lvl + 1)
                 if user.fox_points < cost:
                     await q.answer(f"روب‌پوینت کافی نیست. {cost:,.0f} لازم داری.", show_alert=True)
                 else:
@@ -370,7 +378,8 @@ async def fox_button(update, context):
                     user.fox_last_production_at = now_utc()
                     session.commit()
                     await q.answer(f"🦊 روباه رفت لول {user.fox_level}!", show_alert=True)
-                    await q.message.edit_text(fox_profile_text(user) + f"\n\n🎉 روباه ارتقا یافت!\n🏅 مقام جدید: {fox_rank(user.fox_level)}", reply_markup=fox_keyboard(user.id, user.level))
+                    await q.message.edit_text(fox_profile_text(user) + f"\n\n🎉 روباه به لول {user.fox_level} رسید!\n🏅 مقام جدید: {fox_rank(user.fox_level)}")
+                    asyncio.create_task(restore_fox_panel(context.bot,q.message.chat_id,q.message.message_id,user.telegram_id))
                     return
         elif action == "hunt":
             await handle_hunt_request(q, session, user, context)
@@ -379,7 +388,7 @@ async def fox_button(update, context):
             if user.level < 7:
                 await q.answer("🧊 یخچال روبی در سطح 7 باز می‌شود.", show_alert=True)
                 return
-            items = session.query(FoxHunt).filter(FoxHunt.user_id == user.id, FoxHunt.status == "fridge").order_by(FoxHunt.id.desc()).limit(20).all()
+            items = session.query(FoxHunt).filter(FoxHunt.user_id == user.telegram_id, FoxHunt.status == "fridge").order_by(FoxHunt.id.desc()).limit(20).all()
             if not items:
                 await q.answer("یخچال روبی خالی است.", show_alert=True)
                 return
@@ -406,13 +415,14 @@ async def handle_hunt_request(q, session, user, context):
         return
     emoji = random.choice(list(HUNT_ITEMS.keys()))
     item = HUNT_ITEMS[emoji]
-    hunt = FoxHunt(user_id=user.id, emoji=emoji, item_name=item["name"], nutrition=item["nutrition"], sell_value=item["sell"], status="pending")
+    hunt = FoxHunt(user_id=user.telegram_id, emoji=emoji, item_name=item["name"], nutrition=item["nutrition"], sell_value=item["sell"], status="pending")
     user.last_hunt_at = now_utc()
+    user.hunt_count=(user.hunt_count or 0)+1
     session.add(hunt)
     session.commit()
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"hunt:feed:{hunt.id}:{user.id}"), InlineKeyboardButton("💰 فروختن", callback_data=f"hunt:sell:{hunt.id}:{user.id}")],
-        [InlineKeyboardButton("🧊 انداختن در یخچال روبی", callback_data=f"hunt:fridge:{hunt.id}:{user.id}")],
+        [InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"hunt:feed:{hunt.id}:{user.telegram_id}"), InlineKeyboardButton("💰 فروختن", callback_data=f"hunt:sell:{hunt.id}:{user.telegram_id}")],
+        [InlineKeyboardButton("🧊 انداختن در یخچال روبی", callback_data=f"hunt:fridge:{hunt.id}:{user.telegram_id}")],
     ])
     await q.answer()
     await q.message.reply_text(
@@ -439,13 +449,13 @@ async def hunt_command(update, context):
         # اینجا همان منطق دکمه شکار، اما با پیام واقعیِ ریپلای‌شده اجرا می‌شود.
         emoji = random.choice(list(HUNT_ITEMS.keys()))
         item = HUNT_ITEMS[emoji]
-        hunt = FoxHunt(user_id=user.id, emoji=emoji, item_name=item["name"], nutrition=item["nutrition"], sell_value=item["sell"], status="pending")
+        hunt = FoxHunt(user_id=user.telegram_id, emoji=emoji, item_name=item["name"], nutrition=item["nutrition"], sell_value=item["sell"], status="pending")
         user.last_hunt_at = now_utc()
         session.add(hunt)
         session.commit()
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"hunt:feed:{hunt.id}:{user.id}"), InlineKeyboardButton("💰 فروختن", callback_data=f"hunt:sell:{hunt.id}:{user.id}")],
-            [InlineKeyboardButton("🧊 انداختن در یخچال روبی", callback_data=f"hunt:fridge:{hunt.id}:{user.id}")],
+            [InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"hunt:feed:{hunt.id}:{user.telegram_id}"), InlineKeyboardButton("💰 فروختن", callback_data=f"hunt:sell:{hunt.id}:{user.telegram_id}")],
+            [InlineKeyboardButton("🧊 انداختن در یخچال روبی", callback_data=f"hunt:fridge:{hunt.id}:{user.telegram_id}")],
         ])
         await update.message.reply_text(
             f"{emoji}\n\n🎯 شما {item['name']} را شکار کردید!\n🍖 ارزش غذایی: {item['nutrition']}\n\n"
@@ -485,6 +495,7 @@ async def hunt_button(update, context):
             old = user.fox_belly
             user.fox_belly = min(fox_capacity(user.fox_level), user.fox_belly + hunt.nutrition)
             hunt.status = "fed"
+            user.fox_rescued_count=(user.fox_rescued_count or 0)+1
             session.commit()
             await q.answer("🦊 شکار به روباه داده شد!")
             await q.message.edit_text(
@@ -511,50 +522,23 @@ async def hunt_button(update, context):
 
 # ---------- جمع‌آوری روب‌پوینت ----------
 
-FOX_CLAIM_ALIASES = {"روب روب", "هور هور", "عو عو", "روب روب!", "هور هور!", "عو عو!"}
+FOX_CLAIM_ALIASES={"روب روب","هور هور","عو عو","روب روب!","هور هور!","عو عو!"}
 
-
-def next_fox_point_seconds(user):
-    if user.fox_belly < fox_capacity(user.fox_level):
-        return None
-    rate = fox_production_per_second(user.fox_level)
-    remainder = float(user.fox_production_remainder or 0.0)
-    return max(1, int((1.0 - remainder) / rate + 0.999999))
-
-
-async def collect_fox_points(update, context):
-    if not await require_membership(update, context):
-        return
-    session = get_session()
+async def collect_fox_points(update,context):
+    if not await require_membership(update,context):return
+    session=get_session()
     try:
-        user = get_or_create_user(session, update.effective_user)
-        if user.level < FOX_UNLOCK_LEVEL:
-            await update.message.reply_text("🔒 روباه در سطح 3 باز می‌شود.", **reply_kwargs(update.message))
-            return
-        before = user.fox_points
-        produced = settle_fox_production(user)
-        if user.fox_belly < fox_capacity(user.fox_level):
-            session.commit()
-            await update.message.reply_text(
-                f"🦊 روباه هنوز سیر نشده!\n❤️ شکم: {user.fox_belly}/{fox_capacity(user.fox_level)}\n"
-                "🏹 با «شکار» غذا پیدا کن و شکمش را کامل پر کن.\n"
-                f"⏱ شکار بعدی: {format_duration(seconds_left(user.last_hunt_at, HUNT_COOLDOWN)) if seconds_left(user.last_hunt_at, HUNT_COOLDOWN) else 'الان آماده است'}",
-                **reply_kwargs(update.message)
-            )
-            return
-        amount = user.fox_points
-        user.fox_points = 0
+        user=get_or_create_user(session,update.effective_user)
+        if user.level<2:
+            await update.message.reply_text("🔒 دریافت روب‌پوینت از سطح 2 باز می‌شود.",**reply_kwargs(update.message));return
+        left=seconds_left(user.last_fox_claim_at,FOX_CLAIM_COOLDOWN)
+        if left:
+            await update.message.reply_text(f"⏳ دریافت بعدی روب‌پوینت: {format_duration(left)} دیگر.",**reply_kwargs(update.message));return
+        earned=random.randint(CLAIM_POINTS_MIN,CLAIM_POINTS_MAX)
+        user.fox_points+=earned;user.fox_total_earned+=earned;user.fox_claim_count=(user.fox_claim_count or 0)+1;user.last_fox_claim_at=now_utc()
         session.commit()
-        nxt = next_fox_point_seconds(user)
-        next_text = f"⏱ روب‌پوینت بعدی حدود {format_duration(nxt)} دیگر تولید می‌شود." if nxt is not None else "⏸ تا وقتی شکم روباه کامل نباشد تولید متوقف است."
-        await update.message.reply_text(
-            f"🦊 برداشت روب پوینت ها\n\n💰 +{int(amount):,} روب پوینت برداشت شد.\n"
-            f"⚡ تولید فعلی: {fox_production_per_second(user.fox_level):.2f} روب‌پوینت در ثانیه\n"
-            f"📦 ظرفیت: {fox_storage_capacity(user.fox_level):,}\n{next_text}",
-            **reply_kwargs(update.message)
-        )
-    finally:
-        session.close()
+        await update.message.reply_text(f"🦊 +{earned:,} روب‌پوینت دریافت کردی!\n💰 موجودی روب‌پوینت: {user.fox_points:,}\n⏱ دریافت بعدی: 5 دقیقه دیگر",**reply_kwargs(update.message))
+    finally:session.close()
 
 # ---------- تغییر نام روباه ----------
 
@@ -590,7 +574,7 @@ async def fridge_command(update, context):
         if user.level < 7:
             await update.message.reply_text("🧊 یخچال روبی در سطح 7 باز می‌شود.", **reply_kwargs(update.message))
             return
-        items = session.query(FoxHunt).filter(FoxHunt.user_id == user.id, FoxHunt.status == "fridge").order_by(FoxHunt.id.desc()).limit(20).all()
+        items = session.query(FoxHunt).filter(FoxHunt.user_id == user.telegram_id, FoxHunt.status == "fridge").order_by(FoxHunt.id.desc()).limit(20).all()
         if not items:
             text = "🧊 یخچال روبی\n\nیخچال فعلاً خالی است."
         else:
@@ -642,9 +626,9 @@ async def transfer_command(update, context):
             await update.message.reply_text(f"❌ روب‌پوینت کافی نیست. موجودی: {int(sender.fox_points):,}", **reply_kwargs(update.message))
             return
         session.commit()
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ تایید", callback_data=f"transfer:yes:{sender.id}:{receiver.id}:{amount}"), InlineKeyboardButton("❌ لغو", callback_data=f"transfer:no:{sender.id}:{receiver.id}:{amount}")]])
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ تایید", callback_data=f"transfer:yes:{sender.telegram_id}:{receiver.telegram_id}:{amount}"), InlineKeyboardButton("❌ لغو", callback_data=f"transfer:no:{sender.telegram_id}:{receiver.telegram_id}:{amount}")]])
         await update.message.reply_text(
-            f"💸 انتقال روب پوینت\n\n🦊 فرستنده: {sender.first_name or sender.id}\n👤 گیرنده: {receiver.first_name or receiver.id}\n💰 مقدار: {amount:,}\n\nتایید می‌کنی؟",
+            f"💸 انتقال روب پوینت\n\n🦊 فرستنده: {sender.first_name or sender.telegram_id}\n👤 گیرنده: {receiver.first_name or receiver.telegram_id}\n💰 مقدار: {amount:,}\n\nتایید می‌کنی؟",
             reply_markup=kb, **reply_kwargs(update.message)
         )
     finally:
@@ -815,7 +799,7 @@ async def admin_command(update, context):
         [InlineKeyboardButton("📊 آمار کلی", callback_data="admin:stats")],
         [InlineKeyboardButton("👥 تعداد کاربران", callback_data="admin:users")],
         [InlineKeyboardButton("📣 پیام همگانی", callback_data="admin:broadcast")],
-        [InlineKeyboardButton("➕ دادن هور پوینت", callback_data="admin:addpoints")],
+        [InlineKeyboardButton("🦊 افزودن/کسر روب‌پوینت", callback_data="admin:addpoints")],
         [InlineKeyboardButton("⭐ تنظیم سطح", callback_data="admin:setlevel")],
         [InlineKeyboardButton("🦊 تنظیم روب‌پوینت", callback_data="admin:setfoxpoints")],
     ])
@@ -838,7 +822,7 @@ async def admin_callback(update, context):
         finally: session.close()
         await q.message.reply_text(f"👥 تعداد کاربران ثبت‌شده: {count}")
     elif action == "broadcast": context.user_data["admin_action"]="broadcast"; await q.message.reply_text("📣 متن پیام همگانی را بفرست.")
-    elif action == "addpoints": context.user_data["admin_action"]="addpoints"; await q.message.reply_text("➕ فرمت: آیدی عددی کاربر + مقدار")
+    elif action == "addpoints": context.user_data["admin_action"]="addpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی کاربر + مقدار روب‌پوینت")
     elif action == "setlevel": context.user_data["admin_action"]="setlevel"; await q.message.reply_text("⭐ فرمت: آیدی عددی کاربر + سطح")
     elif action == "setfoxpoints": context.user_data["admin_action"]="setfoxpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی کاربر + مقدار روب‌پوینت")
 
@@ -864,7 +848,7 @@ async def admin_text(update, context):
         user=session.get(User,uid)
         if not user: await update.message.reply_text("کاربر پیدا نشد.", **reply_kwargs(update.message)); return
         if action=="addpoints":
-            old=user.level; user.points=max(0,user.points+value); user.level=get_level_for_points(user.points); rewards=apply_level_rewards(session,user,old,user.level); session.commit(); await update.message.reply_text(f"✅ انجام شد.\nپوینت: {user.points}\nسطح: {user.level}\nروب‌پوینت جایزه: {sum(r for _,r in rewards):,}", **reply_kwargs(update.message))
+            user.fox_points=max(0,user.fox_points+value);session.commit();await update.message.reply_text(f"🦊 انجام شد.\nروب‌پوینت کاربر: {user.fox_points:,}",**reply_kwargs(update.message))
         elif action=="setlevel":
             if value<1 or value>100: await update.message.reply_text("سطح باید بین 1 تا 100 باشد.", **reply_kwargs(update.message)); return
             user.level=value; user.points=max(user.points,points_needed_for_level(value) or 0); session.commit(); await update.message.reply_text(f"✅ سطح کاربر شد {user.level} (پوینت: {user.points})", **reply_kwargs(update.message))
@@ -881,12 +865,43 @@ async def membership_callback(update, context):
     else: await q.answer("هنوز عضویتت تأیید نشده.",show_alert=True)
 
 
+def user_display_name(user):return user.username or user.first_name or str(user.telegram_id)
+def ranking_position(session,field,value):return session.query(User).filter(getattr(User,field)>value).count()+1
+def fox_level_requirement(level):
+    req={1:0,2:5,3:15,4:40,5:70,6:115,7:175,8:250,9:350,10:500,11:700,12:950,13:1250,14:1650,15:2150,16:2600,17:3600,18:4600,19:5800,20:7250}
+    if level<=20:return req[level]
+    value=7250;step=900
+    for _ in range(21,level+1):value+=step;step+=250
+    return value
+async def roobam_command(update,context):
+    if not await require_membership(update,context):return
+    target=update.message.reply_to_message.from_user if update.message.reply_to_message and update.message.reply_to_message.from_user else update.effective_user
+    session=get_session()
+    try:
+        user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0)
+        lvl=max(1,min(FOX_MAX_LEVEL,user.fox_level or 1));need=fox_level_requirement(lvl);progress=min(int(user.fox_points or 0),need);n=15;f=n if progress>=need else int(progress/need*n) if need else n;bar='▰'*f+'▱'*(n-f)
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_display_name(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🐈 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"╯─ ⭐️ سطح : {lvl} | {progress:,} / {need:,} {bar}")
+    finally:session.close()
+    await update.message.reply_text(text,**reply_kwargs(update.message))
+async def leaderboard_command(update,context):
+    if not await require_membership(update,context):return
+    session=get_session()
+    try:
+        configs=[('روب پوینت 🦊','fox_points'),('روباه های زخمی 🎃','fox_rescued_count'),('شکار ⚔️','hunt_count'),('روب روب 🐾','fox_claim_count')];blocks=[]
+        for title,field in configs:
+            users=session.query(User).order_by(getattr(User,field).desc(),User.telegram_id.asc()).limit(100).all();blocks.append('\n'.join([f'╭──「 {title} 」']+[f'{i}. {user_display_name(u)} — {int(getattr(u,field) or 0):,}' for i,u in enumerate(users,1)]))
+        text='\n\n'.join(blocks)
+    finally:session.close()
+    for i in range(0,len(text),3900):await update.message.reply_text(text[i:i+3900],**reply_kwargs(update.message))
+
 async def text_router(update, context):
     if not update.message or not update.message.text: return
     if await handle_fox_rename_text(update, context): return
     text=update.message.text.strip()
     if text in FOX_CLAIM_ALIASES:
         await collect_fox_points(update,context); return
+    if text in {"روبام","روبام!"}: await roobam_command(update,context); return
+    if text in {"لیدر برد","لیدربرد","leaderboard","Leaderboard"}: await leaderboard_command(update,context); return
     if text in {"روباه", "روبی", "روباهیو", "🦊 روباه", "🦊 روبی", "🦊 روباهیو"}:
         await fox_command(update, context); return
     if text in {"شکار", "شکار!", "🏹 شکار"}:
@@ -910,15 +925,14 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه|روبی|روباهیو|شکار|یخچال)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه|روبی|روباهیو|شکار|یخچال|روبام|لیدربرد)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
-        if cmd in {"روباه", "روبی", "روباهیو"}:
-            await fox_command(update, context)
-        elif cmd == "شکار":
-            await hunt_command(update, context)
-        else:
-            await fridge_command(update, context)
+        if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
+        elif cmd=="شکار": await hunt_command(update,context)
+        elif cmd=="یخچال": await fridge_command(update,context)
+        elif cmd=="روبام": await roobam_command(update,context)
+        else: await leaderboard_command(update,context)
         return
 
     # /انتقال روب پوینت 50 — انتقال همچنان فقط با Reply انجام می‌شود.
@@ -941,6 +955,8 @@ def main():
     app.add_handler(CommandHandler("transfer",transfer_command))
     app.add_handler(CommandHandler("hunt",hunt_command))
     app.add_handler(CommandHandler("fox",fox_command))
+    app.add_handler(CommandHandler("roobam",roobam_command))
+    app.add_handler(CommandHandler("leaderboard",leaderboard_command))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|setlevel|setfoxpoints)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
@@ -949,7 +965,7 @@ def main():
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
-    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|لیدربرد)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text_router),group=2)

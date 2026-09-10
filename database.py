@@ -42,6 +42,10 @@ class User(Base):
     fox_last_production_at = Column(DateTime(timezone=True), nullable=True)
     last_hunt_at = Column(DateTime(timezone=True), nullable=True)
     last_transfer_at = Column(DateTime(timezone=True), nullable=True)
+    last_fox_claim_at = Column(DateTime(timezone=True), nullable=True)
+    fox_claim_count = Column(Integer, nullable=False, default=0)
+    hunt_count = Column(Integer, nullable=False, default=0)
+    fox_rescued_count = Column(Integer, nullable=False, default=0)
 
 class Challenge(Base):
     __tablename__ = 'challenges'
@@ -82,6 +86,10 @@ def init_db():
         'fox_last_production_at': 'DATETIME',
         'last_hunt_at': 'DATETIME',
         'last_transfer_at': 'DATETIME',
+        'last_fox_claim_at': 'DATETIME',
+        'fox_claim_count': 'INTEGER NOT NULL DEFAULT 0',
+        'hunt_count': 'INTEGER NOT NULL DEFAULT 0',
+        'fox_rescued_count': 'INTEGER NOT NULL DEFAULT 0',
     }
     with engine.begin() as conn:
         for name, definition in additions.items():
@@ -94,6 +102,9 @@ def init_db():
         conn.execute(text("UPDATE users SET fox_points = 0 WHERE fox_points IS NULL OR fox_points < 0"))
         conn.execute(text("UPDATE users SET fox_total_earned = 0 WHERE fox_total_earned IS NULL OR fox_total_earned < 0"))
         conn.execute(text("UPDATE users SET fox_production_remainder = 0 WHERE fox_production_remainder IS NULL OR fox_production_remainder < 0"))
+        conn.execute(text("UPDATE users SET fox_claim_count = 0 WHERE fox_claim_count IS NULL OR fox_claim_count < 0"))
+        conn.execute(text("UPDATE users SET hunt_count = 0 WHERE hunt_count IS NULL OR hunt_count < 0"))
+        conn.execute(text("UPDATE users SET fox_rescued_count = 0 WHERE fox_rescued_count IS NULL OR fox_rescued_count < 0"))
         if 'total_earned' not in cols:
             conn.execute(text('UPDATE users SET total_earned = points WHERE total_earned = 0'))
 
