@@ -151,14 +151,18 @@ async def games_command(update, context):
         unlocked = get_unlocked_games(user.level)
     finally:
         session.close()
-    if not unlocked:
-        await update.message.reply_text(f"اول «{CLAIM_KEYWORD}» بفرست تا هور پوینت جمع کنی.")
-        return
     await update.message.reply_text(
-        "🎮 بازی‌های باز برای تو:\n" +
+        "🎮 منوی بازی\n\n" +
         "\n".join(f"• {GAME_NAMES_FA[g]} {GAME_EMOJIS[g]}" for g in unlocked) +
-        "\n\nبرای دعوت، روی پیام طرف ریپلای کن و بنویس:\n/challenge dice"
+        "\n\n👥 بازی دونفره در گروه:\n"
+        "1️⃣ روی پیام حریفت ریپلای کن\n"
+        "2️⃣ بنویس: /challenge dice\n"
+        "3️⃣ حریفت روی «قبول می‌کنم» بزند\n"
+        "4️⃣ هر نفر فقط دکمه خودش را بزند تا نتیجه در گروه اعلام شود."
     )
+
+async def game_command(update, context):
+    await games_command(update, context)
 
 # ---------- هور پوینت ----------
 
@@ -461,6 +465,7 @@ def main():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("profile", profile_command))
     app.add_handler(CommandHandler("games", games_command))
+    app.add_handler(CommandHandler("game", game_command))
     app.add_handler(CommandHandler("challenge", challenge_command))
     app.add_handler(CommandHandler("admin", admin_command))
 

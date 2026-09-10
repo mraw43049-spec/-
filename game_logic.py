@@ -13,7 +13,7 @@ GAME_NAMES_FA = {
 }
 # بازی‌ها با سطح باز می‌شوند.
 LEVELS = [
-    {"level": 1, "min_points": 0, "unlocks": None},
+    {"level": 1, "min_points": 0, "unlocks": "dice"},
     {"level": 2, "min_points": 50, "unlocks": "dice"},
     {"level": 3, "min_points": 150, "unlocks": "darts"},
     {"level": 4, "min_points": 300, "unlocks": "bowling"},
