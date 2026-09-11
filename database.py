@@ -68,6 +68,19 @@ class GroupChat(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+
+
+class RubyTable(Base):
+    __tablename__ = 'ruby_tables'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False)
+    game_type = Column(String, nullable=False)
+    creator_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    max_players = Column(Integer, nullable=False, default=2)
+    players = Column(String, nullable=False, default='')
+    status = Column(String, nullable=False, default='open')
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class InjuredFox(Base):
     __tablename__ = 'injured_foxes'
     id = Column(Integer, primary_key=True, autoincrement=True)

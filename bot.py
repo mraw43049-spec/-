@@ -14,7 +14,7 @@ from config import (
     ADMIN_IDS, BOT_TOKEN, CLAIM_COOLDOWN_SECONDS, CLAIM_KEYWORD,
     CLAIM_POINTS_MAX, CLAIM_POINTS_MIN, REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL
 )
-from database import Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, get_session, init_db
+from database import Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, get_session, init_db
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_capacity, fox_level_reward,
     fox_production_per_second, fox_rank, fox_upgrade_cost, get_level_for_points,
@@ -112,6 +112,25 @@ async def require_membership(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ---------- کاربران ----------
 
+def user_level_requirement(level):
+    level=max(1,int(level))
+    if level<=20:
+        return (level-1)*50
+    # ادامه بی‌نهایت؛ این جدول طوری تنظیم شده که نمونه‌ی 14997/15150 در لول 38 دقیقاً حفظ شود.
+    value=950
+    for lv in range(21,level+1):
+        value += 788 if lv in (21,22) else 789
+    if level>38:
+        value += (level-38)*789
+    return value
+
+def user_level_from_roobrub(count):
+    count=max(0,int(count or 0))
+    level=1
+    while user_level_requirement(level+1)<=count:
+        level+=1
+    return level
+
 def get_or_create_user(session, tg_user):
     user = session.get(User, tg_user.id)
     if user is None:
@@ -155,7 +174,7 @@ def get_or_create_user(session, tg_user):
         if user.hunt_count is None: user.hunt_count = 0; changed = True
         if user.fox_rescued_count is None: user.fox_rescued_count = 0; changed = True
         if user.fox_last_hunger_at is None: user.fox_last_hunger_at = now_utc(); changed = True
-        calculated = get_level_for_points(user.points or 0)
+        calculated = user_level_from_roobrub(user.fox_claim_count or 0)
         if user.level != calculated:
             user.level = calculated; changed = True
         if changed:
@@ -168,7 +187,7 @@ def add_points(session, user, amount):
     if amount > 0:
         user.total_earned += amount
     old = user.level
-    user.level = get_level_for_points(user.points)
+    user.level = user_level_from_roobrub(user.fox_claim_count or 0)
     return old, user.level
 
 
@@ -178,7 +197,7 @@ def apply_level_rewards(session, user, old_level, new_level):
     if new_level <= old_level:
         return rewards
     start = max(2, old_level + 1)
-    end = min(new_level, FOX_MAX_LEVEL)
+    end = new_level
     for lvl in range(start, end + 1):
         reward = fox_level_reward(lvl)
         user.fox_points += reward
@@ -270,6 +289,90 @@ async def ruby_game_select(update,context):
     await q.answer()
     await q.message.reply_text(f"{names.get(key,'🎮 بازی روبی')} انتخاب شد.\n\n⚠️ این نسخه بازی‌ها را بدون شرط‌بندی و پرداخت مبلغ اجرا می‌کند. برای شروع بازی، روی پیام حریف ریپلای کن و دعوت بازی را بفرست.")
 
+RUBY_GAME_CONFIG={
+    "xo":("🧩 بازی روبی دوز XO",2),"rps":("🔫 بازی روبی سنگ کاغذ قیچی",2),
+    "darts":("🎯 بازی روبی دارت",4),"basketball":("🏀 بازی روبی بسکتبال",3),"bowling":("🎳 بازی روبی بولینگ",4)
+}
+
+def ruby_table_keyboard(table_id):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🎮 شرکت کردن در بازی",callback_data=f"rjoin:{table_id}")]])
+
+async def ruby_game_select(update,context):
+    q=update.callback_query
+    if not await require_membership(update,context): return
+    key=q.data.split(":")[1]; name,maxp=RUBY_GAME_CONFIG[key]
+    await q.answer()
+    kb=InlineKeyboardMarkup([[InlineKeyboardButton("🛠 ساخت میز بازی",callback_data=f"rcreate:{key}")]])
+    await q.message.reply_text(f"🕹 {name}\n\n❗️ لطفا میز بازی را بچینید\n\n💰 مبلغ ورودی : رایگان ✅",reply_markup=kb)
+
+async def ruby_create_table(update,context):
+    q=update.callback_query; key=q.data.split(":")[1]
+    if not await require_membership(update,context): return
+    session=get_session()
+    try:
+        user=get_or_create_user(session,q.from_user); name,maxp=RUBY_GAME_CONFIG[key]
+        table=RubyTable(chat_id=q.message.chat_id,game_type=key,creator_id=user.telegram_id,max_players=maxp,status='open',players=str(user.telegram_id),created_at=now_utc())
+        session.add(table); session.commit(); tid=table.id
+    finally: session.close()
+    await q.answer("میز ساخته شد!")
+    await q.message.edit_text(f"🕹 {name}\n\n🏆 بازی رایگان روبی\n\n1️⃣ بازیکن : {user_display_name(user)}\n" + "\n".join(f"{i}️⃣ بازیکن : …" for i in range(2,maxp+1)) + "\n\n⏳ این میز بازی فقط 60 ثانیه اعتبار دارد…",reply_markup=ruby_table_keyboard(tid))
+    context.job_queue.run_once(expire_ruby_table,60,data=tid) if context.job_queue else None
+
+async def expire_ruby_table(context):
+    tid=int(context.job.data); session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if t and t.status=='open':
+            t.status='expired'; session.commit()
+            chat_id=t.chat_id
+        else:
+            return
+    finally:
+        session.close()
+    try:
+        await context.bot.send_message(chat_id=chat_id,text="⏰ مهلت ساخت میز بازی روبی تمام شد و میز بسته شد.")
+    except Exception:
+        pass
+
+async def ruby_join_table(update,context):
+    q=update.callback_query; tid=int(q.data.split(":")[1]); session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='open' or (now_utc()-aware(t.created_at)).total_seconds()>60:
+            if t: t.status='expired'; session.commit()
+            await q.answer("⏰ این میز دیگر فعال نیست.",show_alert=True); return
+        ids=[int(x) for x in (t.players or '').split(',') if x]
+        if q.from_user.id in ids: await q.answer("قبلاً وارد شده‌ای.",show_alert=True); return
+        if len(ids)>=t.max_players: await q.answer("میز پر شده است.",show_alert=True); return
+        get_or_create_user(session,q.from_user); ids.append(q.from_user.id); t.players=','.join(map(str,ids))
+        if len(ids)>=t.max_players: t.status='active'
+        session.commit(); players=[session.get(User,i) for i in ids]; name=RUBY_GAME_CONFIG[t.game_type][0]
+    finally: session.close()
+    await q.answer("🎮 وارد بازی شدی!")
+    if len(ids)>=t.max_players:
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ انجام حرکت",callback_data=f"rmove:{tid}")]])
+        await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u)}" for i,u in enumerate(players)),reply_markup=kb)
+    else:
+        await q.message.edit_text(f"🕹 {name}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u) if u else '…'}" for i,u in enumerate(players))+"\n\n⏳ منتظر بازیکن بعدی…",reply_markup=ruby_table_keyboard(tid))
+
+async def ruby_move(update,context):
+    q=update.callback_query; tid=int(q.data.split(":")[1]); session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active': await q.answer("بازی فعال نیست.",show_alert=True); return
+        ids=[int(x) for x in (t.players or '').split(',') if x]
+        if q.from_user.id not in ids: await q.answer("تو بازیکن این میز نیستی.",show_alert=True); return
+        if t.game_type=='darts': emoji='🎯'
+        elif t.game_type=='basketball': emoji='🏀'
+        elif t.game_type=='bowling': emoji='🎳'
+        else: emoji=None
+    finally: session.close()
+    if emoji:
+        await q.answer(); msg=await context.bot.send_dice(chat_id=t.chat_id,emoji=emoji); value=msg.dice.value
+        await context.bot.send_message(chat_id=t.chat_id,text=f"🎮 {user_display_name(q.from_user)} عدد {value} آورد.")
+    else:
+        await q.answer("برای این بازی، حرکت مخصوص آن در نسخه بعدی تکمیل می‌شود.",show_alert=True)
+
 async def game_command(update, context):
     await games_command(update, context)
 
@@ -342,9 +445,10 @@ async def fox_command(update, context):
         settle_fox_production(user)
         session.commit()
         text = fox_profile_text(user) + f"\n🧺 ظرفیت نگهداری روب‌پوینت: {fox_storage_capacity(user.fox_level):,}"
+        owner_level=user.level; owner_fox_level=user.fox_level
     finally:
         session.close()
-    await update.message.reply_text(text, reply_markup=fox_keyboard(update.effective_user.id, user.level, user.fox_level), **reply_kwargs(update.message))
+    await update.message.reply_text(text, reply_markup=fox_keyboard(update.effective_user.id, owner_level, owner_fox_level), **reply_kwargs(update.message))
 
 
 async def fox_button(update, context):
@@ -550,9 +654,14 @@ async def collect_fox_points(update,context):
         if left:
             await update.message.reply_text(f"⏳ دریافت بعدی روب‌پوینت: {format_duration(left)} دیگر.",**reply_kwargs(update.message));return
         earned=random.randint(CLAIM_POINTS_MIN,CLAIM_POINTS_MAX)
+        old_level=user.level
         user.fox_points+=earned;user.fox_total_earned+=earned;user.fox_claim_count=(user.fox_claim_count or 0)+1;user.last_fox_claim_at=now_utc()
+        user.level=user_level_from_roobrub(user.fox_claim_count)
+        rewards=apply_level_rewards(session,user,old_level,user.level)
         session.commit()
-        await update.message.reply_text(f"🦊 +{earned:,} روب‌پوینت دریافت کردی!\n💰 موجودی روب‌پوینت: {user.fox_points:,}\n⏱ دریافت بعدی: 5 دقیقه دیگر",**reply_kwargs(update.message))
+        text=f"🦊 +{earned:,} روب‌پوینت دریافت کردی!\n💰 موجودی روب‌پوینت: {user.fox_points:,}\n🐾 روب روب‌ها: {user.fox_claim_count:,}\n⏱ دریافت بعدی: 5 دقیقه دیگر"
+        if user.level>old_level: text += "\n\n"+level_up_message(old_level,user.level,rewards)
+        await update.message.reply_text(text,**reply_kwargs(update.message))
     finally:session.close()
 
 # ---------- تغییر نام روباه ----------
@@ -571,12 +680,16 @@ async def handle_bank_text(update, context):
             if amount<=0 or user.fox_points<amount: await update.message.reply_text('❌ روب‌پوینت کافی نیست.',**reply_kwargs(update.message)); return True
             user.fox_points-=amount; account.balance+=amount; session.add(BankTransaction(account_number=account.account_number,direction='deposit',amount=amount,description='واریز به بانک')); session.commit(); msg='➕ واریز انجام شد.'
         else:
-            parts=update.message.text.split();
+            parts=update.message.text.split()
             if len(parts)!=2: raise ValueError
             amount=parse_amount(parts[0]); dest=parts[1]
             target=session.get(BankAccount,dest)
             if not target or target.user_id==user.telegram_id or amount<=0 or user.fox_points<amount: raise ValueError
-            user.fox_points-=amount; target_user=session.get(User,target.user_id); target_user.fox_points+=amount; session.add(BankTransaction(account_number=account.account_number,counterparty_account=dest,counterparty_user_id=target.user_id,direction='card_transfer_out',amount=amount,description='کارت به کارت')); session.add(BankTransaction(account_number=dest,counterparty_account=account.account_number,counterparty_user_id=user.telegram_id,direction='card_transfer_in',amount=amount,description='کارت به کارت')); session.commit(); msg='💳 کارت به کارت با موفقیت انجام شد.'
+            target_user=session.get(User,target.user_id)
+            context.user_data['pending_bank_transfer']={'dest':dest,'amount':amount,'target_user_id':target.user_id}
+            kb=InlineKeyboardMarkup([[InlineKeyboardButton('✅ بله',callback_data=f'bankconfirm:yes:{user.telegram_id}'),InlineKeyboardButton('❌ خیر',callback_data=f'bankconfirm:no:{user.telegram_id}')]])
+            msg=(f'🦊 کارت به کارت روبی 💳\n\n❓ آیا از انتقال اطمینان دارید؟\n\n💰 مبلغ: {amount:,} روب‌پوینت\n💳 حساب مقصد: {dest}\n👤 گیرنده: {user_display_name(target_user)}')
+            await update.message.reply_text(msg,reply_markup=kb,**reply_kwargs(update.message)); return True
     except Exception:
         session.rollback(); msg='❌ فرمت یا موجودی/حساب مقصد نادرست است.'
     finally: session.close()
@@ -880,12 +993,15 @@ def bank_text(user, account):
     return (f'🦊 بانک روبی 🏦\n\n💳 شماره حساب : {account.account_number}\n👤 به نام : {user_display_name(user)}\n\n💰 موجودی حساب : {account.balance:,} 🪙\n\n🤑 سود بانکی\n┘─ 🛍 درصد سود : 3%\n┘─ 📥 مبلغ واریزی : محاسبه روزانه بر اساس موجودی\n┘─ ⏳ زمان واریز : هر 24 ساعت\n\n❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.')
 
 def parse_amount(raw):
-    s=str(raw).strip().lower().replace(',','').replace('٬','')
+    trans=str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
+    s=str(raw).strip().lower().translate(trans).replace(',','').replace('٬','').replace('٫','.')
     mult=1
-    if s.endswith(('k','کا')): mult=1000; s=s[:-1] if s.endswith('k') else s[:-2]
-    elif s.endswith(('m','م','میل')): mult=1_000_000; s=s[:-1] if s.endswith(('m','م')) else s[:-3]
+    for suffix, factor in (("میل",1_000_000),("m",1_000_000),("م",1_000_000),("کی",1_000),("کا",1_000),("k",1_000)):
+        if s.endswith(suffix):
+            mult=factor; s=s[:-len(suffix)]; break
     if not s.isdigit(): raise ValueError
     return int(s)*mult
+
 
 async def bank_command(update,context):
     if not await require_membership(update,context): return
@@ -920,7 +1036,7 @@ async def bank_button(update,context):
         if action=='transfer': context.user_data['bank_action']='transfer'; await q.answer(); await q.message.reply_text('🦊 کارت به کارت روبی 💳\n\n🔺 مبلغ و شماره حساب مقصد را در جواب همین پنل بفرست.\nمثال: 500 123456789000'); return
         if action=='transactions':
             rows=session.query(BankTransaction).filter(BankTransaction.account_number==account.account_number).order_by(BankTransaction.id.desc()).limit(10).all()
-            txt='📃 آخرین تراکنش‌ها\n\n' + ('\n'.join(f"{r.created_at:%Y-%m-%d %H:%M} | {r.direction} | {r.amount:,}" for r in rows[:3]) if rows else 'تراکنشی ثبت نشده است.')
+            txt='📃 آخرین تراکنش‌ها\n\n' + ('\n'.join(f"{r.created_at:%Y-%m-%d %H:%M} | {('به حساب ' + str(r.counterparty_user_id)) if r.direction in ('card_out','card_transfer_out') else ('از حساب ' + str(r.counterparty_user_id)) if r.counterparty_user_id else r.description or r.direction} | {r.amount:,} 🪙" for r in rows[:3]) if rows else 'تراکنشی ثبت نشده است.')
             await q.answer(); await q.message.reply_text(txt); return
         if action=='change':
             if user.fox_points < BANK_CHANGE_COST: await q.answer('❌ 3,000 روب‌پوینت لازم داری.',show_alert=True); return
@@ -932,6 +1048,33 @@ async def bank_button(update,context):
             account.account_number=newnum
             session.query(BankTransaction).filter(BankTransaction.account_number==oldnum).update({BankTransaction.account_number:newnum}, synchronize_session=False)
             session.commit(); await q.answer('✅ شماره حساب روبی تغییر کرد.'); return
+    finally: session.close()
+
+async def bank_transfer_confirm(update, context):
+    q=update.callback_query
+    try: _,action,uid_s=q.data.split(":"); uid=int(uid_s)
+    except Exception: return
+    if q.from_user.id!=uid:
+        await q.answer("⛔ این تأیید برای کاربر دیگری است.",show_alert=True); return
+    pending=context.user_data.get("pending_bank_transfer")
+    if not pending:
+        await q.answer("این انتقال دیگر فعال نیست.",show_alert=True); return
+    if action=="no":
+        context.user_data.pop("pending_bank_transfer",None)
+        await q.answer("لغو شد."); await q.message.edit_text("❌ کارت به کارت لغو شد."); return
+    session=get_session()
+    try:
+        user=session.get(User,uid); account=session.query(BankAccount).filter(BankAccount.user_id==uid).first()
+        dest=pending['dest']; amount=int(pending['amount']); target=session.get(BankAccount,dest)
+        if not user or not account or not target or target.user_id==uid or user.fox_points<amount:
+            await q.answer("❌ موجودی یا حساب مقصد نامعتبر است.",show_alert=True); return
+        target_user=session.get(User,target.user_id)
+        user.fox_points-=amount; target_user.fox_points+=amount
+        session.add(BankTransaction(account_number=account.account_number,counterparty_account=dest,counterparty_user_id=target.user_id,direction='card_out',amount=amount,description='کارت به کارت'))
+        session.add(BankTransaction(account_number=dest,counterparty_account=account.account_number,counterparty_user_id=uid,direction='card_in',amount=amount,description='کارت به کارت'))
+        session.commit(); context.user_data.pop('pending_bank_transfer',None)
+        await q.answer("✅ کارت به کارت انجام شد!")
+        await q.message.edit_text(f"✅ {amount:,} روب‌پوینت با موفقیت کارت به کارت شد.\n💳 حساب مقصد: {dest}\n👤 گیرنده: {user_display_name(target_user)}")
     finally: session.close()
 
 async def bank_withdraw_button(update,context):
@@ -960,7 +1103,7 @@ async def transfer_command(update, context):
         await update.message.reply_text("فرمت: انتقال روب پوینت 50", **reply_kwargs(update.message))
         return
     try:
-        amount = int(str(raw_amount).replace(",", ""))
+        amount = parse_amount(raw_amount)
     except ValueError:
         await update.message.reply_text("❌ مقدار انتقال باید عدد باشد.", **reply_kwargs(update.message))
         return
@@ -1063,12 +1206,12 @@ async def claim_points(update, context):
                 await update.message.reply_text(f"⏳ هنوز زوده! {format_duration(CLAIM_COOLDOWN_SECONDS - elapsed)} دیگه.", **reply_kwargs(update.message))
                 return
         earned = random.randint(CLAIM_POINTS_MIN, CLAIM_POINTS_MAX)
-        old_level = user.level
         user.points += earned
         user.total_earned += earned
         user.last_claim_at = now
-        user.level = get_level_for_points(user.points)
-        rewards = apply_level_rewards(session, user, old_level, user.level)
+        old_level = user.level
+        user.level = user_level_from_roobrub(user.fox_claim_count or 0)
+        rewards = []
         session.commit()
         text = f"⚡ +{earned} پوینت!\n💰 موجودی: {user.points}\n📈 کل کسب‌شده: {user.total_earned}"
         if user.level > old_level:
@@ -1223,7 +1366,7 @@ async def admin_text(update, context):
             user.fox_points=max(0,user.fox_points+value);session.commit();await update.message.reply_text(f"🦊 انجام شد.\nروب‌پوینت کاربر: {user.fox_points:,}",**reply_kwargs(update.message))
         elif action=="setlevel":
             if value<1 or value>100: await update.message.reply_text("سطح باید بین 1 تا 100 باشد.", **reply_kwargs(update.message)); return
-            user.level=value; user.points=max(user.points,points_needed_for_level(value) or 0); session.commit(); await update.message.reply_text(f"✅ سطح کاربر شد {user.level} (پوینت: {user.points})", **reply_kwargs(update.message))
+            user.level=value; user.fox_claim_count=max(int(user.fox_claim_count or 0),user_level_requirement(value)); session.commit(); await update.message.reply_text(f"✅ سطح کاربر شد {user.level}\n🐾 روب روب‌ها: {user.fox_claim_count:,}", **reply_kwargs(update.message))
         elif action=="setfoxpoints":
             user.fox_points=max(0,value); session.commit(); await update.message.reply_text(f"🦊 روب‌پوینت کاربر: {user.fox_points:,.2f}", **reply_kwargs(update.message))
     finally: session.close()
@@ -1251,8 +1394,8 @@ async def roobam_command(update,context):
     session=get_session()
     try:
         user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0)
-        lvl=max(1,min(FOX_MAX_LEVEL,user.fox_level or 1));need=fox_level_requirement(lvl);progress=min(int(user.fox_claim_count or 0),need);n=15;f=n if progress>=need else int(progress/need*n) if need else n;bar='▰'*f+'▱'*(n-f)
-        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_display_name(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🐈 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"╯─ ⭐️ سطح : {lvl} | {progress:,} / {need:,} {bar}")
+        lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); user_req=user_level_requirement(lvl+1); user_progress=min(claim_count,user_req) if user_req else 0; remaining=user_progress; n=15; f=n if user_req and claim_count>=user_req else (int(claim_count/user_req*n) if user_req else n); bar='▰'*f+'▱'*(n-f)
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_display_name(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🐈 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"╯─ ⭐️ سطح : {lvl} | {user_progress:,} / {user_req:,} {bar}")
     finally:session.close()
     await update.message.reply_text(text,**reply_kwargs(update.message))
 async def leaderboard_command(update,context):
@@ -1275,7 +1418,7 @@ async def text_router(update, context):
         await collect_fox_points(update,context); return
     if text in {"روبام","روبام!"}: await roobam_command(update,context); return
     if text in {"لیدر برد","لیدربرد","leaderboard","Leaderboard"}: await leaderboard_command(update,context); return
-    if text in {"روباه", "روبی", "روباهیو", "🦊 روباه", "🦊 روبی", "🦊 روباهیو"}:
+    if text in {"روباه", "روباه روباه", "روباه  روباه", "روبی", "روباهیو", "🦊 روباه", "🦊 روبی", "🦊 روباهیو"}:
         await fox_command(update, context); return
     if text in {"شکار", "شکار!", "🏹 شکار"}:
         await hunt_command(update, context); return
@@ -1286,7 +1429,7 @@ async def text_router(update, context):
     if text in {"بازی روبی", "بازی های روبی", "بازی‌های روبی", "🕹 بازی های روبی"}:
         await ruby_games_command(update, context); return
     # انتقال روب پوینت 50 — فقط با ریپلای به گیرنده
-    m = re.fullmatch(r"انتقال\s+روب\s+پوینت\s+([0-9,]+)", text)
+    m = re.fullmatch(r"انتقال\s+روب\s+پوینت\s+([0-9.,]+(?:k|کی|کا|m|م|میل)?)", text, re.I)
     if m:
         context.user_data["transfer_amount"] = m.group(1)
         await transfer_command(update, context); return
@@ -1302,7 +1445,7 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه|روبی|روباهیو|شکار|یخچال|روبام|لیدربرد)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|لیدربرد)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
@@ -1341,6 +1484,10 @@ def main():
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling)$"))
+    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling)$"))
+    app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_move,pattern=r"^rmove:\d+$"))
+    app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
     app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change):\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
