@@ -46,6 +46,7 @@ class User(Base):
     fox_claim_count = Column(Integer, nullable=False, default=0)
     hunt_count = Column(Integer, nullable=False, default=0)
     fox_rescued_count = Column(Integer, nullable=False, default=0)
+    fox_last_hunger_at = Column(DateTime(timezone=True), nullable=True)
 
 class Challenge(Base):
     __tablename__ = 'challenges'
@@ -76,6 +77,7 @@ class InjuredFox(Base):
     required_attempts = Column(Integer, nullable=False, default=1)
     status = Column(String, nullable=False, default='pending')
     rescuer_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=True)
+    attempt_log = Column(String, nullable=True, default='')
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -91,10 +93,31 @@ class FoxHunt(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class BankAccount(Base):
+    __tablename__ = 'bank_accounts'
+    account_number = Column(String(12), primary_key=True)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False, unique=True)
+    balance = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    last_interest_at = Column(DateTime(timezone=True), nullable=True)
+
+class BankTransaction(Base):
+    __tablename__ = 'bank_transactions'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_number = Column(String(12), ForeignKey('bank_accounts.account_number'), nullable=False)
+    counterparty_account = Column(String(12), nullable=True)
+    counterparty_user_id = Column(BigInteger, nullable=True)
+    direction = Column(String(10), nullable=False)
+    amount = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    description = Column(String, nullable=True)
+
+
 def init_db():
     Base.metadata.create_all(engine)
     inspector = inspect(engine)
     cols = {c['name'] for c in inspector.get_columns('users')}
+    injured_cols = {c['name'] for c in inspector.get_columns('injured_foxes')}
     additions = {
         'total_earned': 'INTEGER NOT NULL DEFAULT 0',
         'fox_name': "VARCHAR DEFAULT 'مکار'",
@@ -110,11 +133,14 @@ def init_db():
         'fox_claim_count': 'INTEGER NOT NULL DEFAULT 0',
         'hunt_count': 'INTEGER NOT NULL DEFAULT 0',
         'fox_rescued_count': 'INTEGER NOT NULL DEFAULT 0',
+        'fox_last_hunger_at': 'DATETIME',
     }
     with engine.begin() as conn:
         for name, definition in additions.items():
             if name not in cols:
                 conn.execute(text(f'ALTER TABLE users ADD COLUMN {name} {definition}'))
+        if 'attempt_log' not in injured_cols:
+            conn.execute(text("ALTER TABLE injured_foxes ADD COLUMN attempt_log VARCHAR"))
         # دیتای قدیمی را حفظ می‌کنیم و فقط مقدارهای روباه را برای کاربران قدیمی آماده می‌کنیم.
         conn.execute(text("UPDATE users SET fox_name = 'مکار' WHERE fox_name IS NULL OR fox_name = ''"))
         conn.execute(text("UPDATE users SET fox_level = 1 WHERE fox_level IS NULL OR fox_level < 1"))
