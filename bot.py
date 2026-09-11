@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto
 from telegram.ext import (
-    ApplicationBuilder, CallbackQueryHandler, CommandHandler,
+    ApplicationBuilder, CallbackQueryHandler, CommandHandler, ChatMemberHandler,
     ContextTypes, MessageHandler, filters
 )
 
@@ -18,7 +18,7 @@ from config import (
 from database import Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, get_session, init_db
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_capacity, fox_level_reward,
-    fox_production_per_second, fox_rank, fox_upgrade_cost, get_level_for_points,
+    fox_production_interval, fox_production_per_second, fox_rank, fox_upgrade_cost, fox_storage_capacity, get_level_for_points,
     get_unlocked_games, points_to_next_level, points_needed_for_level
 )
 
@@ -41,21 +41,7 @@ TRANSFER_MAX = 500_000
 WHEEL_COOLDOWN = 24 * 60 * 60
 WHEEL_REWARDS = [100, 250, 350, 450, 0, 500, 750, 1000]
 WHEEL_LABELS = ['100 روب پوینت', '250 روب پوینت', '350 روب پوینت', '450 روب پوینت', 'پوچ', '500 روب پوینت', '750 روب پوینت', '1000 روب پوینت']
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# پیدا کردن فایل‌های گردونه چه در پوشه wheel_gifs باشند چه کنار bot.py
-WHEEL_GIF_DIR = os.path.join(BASE_DIR, 'wheel_gifs')
-
-def find_wheel_gif(index):
-    name = f"wheel_{index}.gif"
-    paths = [
-        os.path.join(WHEEL_GIF_DIR, name),
-        os.path.join(BASE_DIR, name),
-    ]
-    for path in paths:
-        if os.path.exists(path):
-            return path
-    return None
+WHEEL_GIF_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wheel_gifs')
 
 # ---------- ابزارهای عمومی ----------
 
@@ -148,15 +134,21 @@ async def require_membership(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ---------- کاربران ----------
 
 def user_level_requirement(level):
-    level=max(1,int(level))
-    if level<=20:
-        return (level-1)*50
-    # ادامه بی‌نهایت؛ این جدول طوری تنظیم شده که نمونه‌ی 14997/15150 در لول 38 دقیقاً حفظ شود.
-    value=950
-    for lv in range(21,level+1):
-        value += 788 if lv in (21,22) else 789
-    if level>38:
-        value += (level-38)*789
+    """تعداد روب‌روب تجمعی لازم برای رسیدن به هر سطح کاربر."""
+    level = max(1, int(level))
+    req = {
+        1: 0, 2: 5, 3: 15, 4: 40, 5: 70, 6: 115, 7: 175, 8: 250,
+        9: 350, 10: 500, 11: 700, 12: 950, 13: 1250, 14: 1650,
+        15: 2150, 16: 2600, 17: 3600, 18: 4600, 19: 5800, 20: 7250,
+    }
+    if level <= 20:
+        return req[level]
+    # ادامه نامحدود بعد از سطح 20 با رشد تدریجی.
+    value = req[20]
+    step = 900
+    for lv in range(21, level + 1):
+        value += step
+        step += 250
     return value
 
 def user_level_from_roobrub(count):
@@ -253,16 +245,19 @@ async def start_command(update, context):
         get_or_create_user(session, update.effective_user)
     finally:
         session.close()
-    await update.message.reply_text(
-        f"🔥 خوش اومدی!\n\n"
-        f"برای پوینت معمولی «{CLAIM_KEYWORD}» رو بفرست.\n"
-        f"🦊 در لول 3 روباه برایت باز می‌شود.\n"
-        "🦊 دستورهای روباه: روباه / روبی / روباهیو\n"
-        "💰 جمع‌کردن روب‌پوینت: روب روب / هور هور / عو عو\n"
-        "🏹 شکار: شکار\n\n"
-        "📌 /profile — آمار کامل\n🎮 /games — بازی‌ها\n🛠 /admin — پنل مدیریت",
-        **reply_kwargs(update.message)
-    )
+    await update.message.reply_text("🦊 خوش اومدی! عضویتت تأیید شد. حالا دستورهای ربات برات آماده‌ست.", **reply_kwargs(update.message))
+    command_messages = [
+        ("💰 روب روب / هور هور / عو عو", "هر ۵ دقیقه یک‌بار برای دریافت روب‌پوینت؛ از لول ۱ فعال است."),
+        ("🏹 شکار", "از لول ۲ فعال است؛ هر ۱۵ دقیقه یک شکار و ۱۲۰ ثانیه برای تصمیم‌گیری."),
+        ("🦊 روباه / روبی / روباهیو", "از لول ۳ فعال است؛ پنل روباه، تولید روب‌پوینت، ارتقا و تغییر نام."),
+        ("🎮 بازی روبی", "از لول ۳ فعال است؛ منوی بازی‌های روبی و ساخت میز بازی."),
+        ("🏦 بانک / بانک روبی", "از لول ۴ فعال است؛ افتتاح حساب و مدیریت بانک."),
+        ("👤 روبام / روباش", "پروفایل روبی خودت یا کاربری که روی پیامش ریپلای کرده‌ای."),
+        ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار و روب روب."),
+        ("🎡 گردونه / چرخ شانس", "روزی یک‌بار؛ جایزه به‌صورت تصادفی انتخاب می‌شود."),
+    ]
+    for title, desc in command_messages:
+        await update.message.reply_text(f"{title}\n┘─ {desc}")
 
 
 async def profile_command(update, context):
@@ -441,7 +436,7 @@ async def wheel_command(update, context):
         if reward > 0:
             user.fox_points = int(user.fox_points or 0) + reward
         session.commit()
-        gif_path = find_wheel_gif(selected)
+        gif_path = os.path.join(WHEEL_GIF_DIR, f"wheel_{selected}.gif")
     except Exception:
         session.rollback()
         logger.exception("daily wheel failed")
@@ -500,7 +495,19 @@ def fox_keyboard(user_id, user_level, fox_level=None):
 
 def fox_profile_text(user):
     lvl=max(1,min(FOX_MAX_LEVEL,user.fox_level or 1)); cap=fox_capacity(lvl); rate=fox_production_per_second(lvl)
-    lines=[f"🦊 {user.fox_name or 'مکار'}","",f"❤️ شکم روباه: {user.fox_belly}/{cap}","",f"🏅 مقام: {fox_rank(lvl)}",f"⭐ لول روباه: {lvl}/{FOX_MAX_LEVEL}","",f"🪙 روب پوینت های تولید شده: {int(user.fox_points):,}",f"⚡ روب پوینت در ثانیه: {rate:.2f}",f"📦 ظرفیت ذخیره روب پوینت: {fox_storage_capacity(lvl):,}"]
+    interval = fox_production_interval(lvl)
+    lines=[
+        f"🦊 {user.fox_name or 'مکار'}",
+        "",
+        f"❤️ شکم روباه: {user.fox_belly}/{cap}",
+        "",
+        f"🏅 مقام: {fox_rank(lvl)}",
+        f"⭐ لول روباه: {lvl}/{FOX_MAX_LEVEL}",
+        "",
+        f"🪙 روب پوینت های تولید شده: {int(user.fox_points):,}",
+        f"⚡ تولید: هر {interval:g} ثانیه 1 روب‌پوینت",
+        f"📦 ظرفیت ذخیره روب‌پوینت: {fox_storage_capacity(lvl):,}",
+    ]
     if (user.fox_belly or 0) < 2: lines.append("🦊 من دیگه کار نمی‌کنم 🦊😡 شکمم حداقل 2 غذا می‌خواد.")
     lines.append(f"💰 هزینه ارتقا: {fox_upgrade_cost(lvl):,} روب پوینت" if lvl<FOX_MAX_LEVEL else "🏆 روباه به آخرین سطح رسیده است.")
     return "\n".join(lines)
@@ -551,12 +558,6 @@ def next_fox_point_seconds(user):
     remainder = float(user.fox_production_remainder or 0.0)
     needed = max(0.0, 1.0 - remainder)
     return max(1, int(needed / rate))
-
-def fox_storage_capacity(level):
-    # ظرفیت هر ارتقا دو برابر می‌شود و در سطح نهایی روی 1,950,000 قفل می‌شود.
-    level = max(1, int(level))
-    return min(1_950_000, 1000 * (2 ** (level - 1)))
-
 
 async def restore_fox_panel(bot, chat_id, message_id, owner_id):
     await asyncio.sleep(4)
@@ -631,7 +632,7 @@ async def fox_button(update, context):
                 else:
                     user.fox_points -= cost
                     user.fox_level += 1
-                    # با هر ارتقا فقط ظرفیت شکم +2 می‌شود؛ غذای فعلی مصرف یا اضافه نمی‌شود.
+                    # با هر ارتقا یک جای غذا به ظرفیت شکم اضافه می‌شود؛ غذای فعلی حفظ می‌شود.
                     user.fox_belly = min(user.fox_belly, fox_capacity(user.fox_level))
                     user.fox_last_production_at = now_utc()
                     session.commit()
@@ -900,6 +901,30 @@ def injured_fox_text(attempts=0):
     )
 
 
+
+async def bot_joined_group(update, context):
+    cm = update.my_chat_member
+    if not cm or cm.chat.type not in ("group", "supergroup"):
+        return
+    if cm.new_chat_member.status not in ("member", "administrator"):
+        return
+    session = get_session()
+    try:
+        row = session.get(GroupChat, cm.chat.id)
+        if row is None:
+            session.add(GroupChat(chat_id=cm.chat.id, title=cm.chat.title or "گپ", active=1))
+            session.commit()
+        else:
+            row.active = 1
+            row.title = cm.chat.title or row.title
+            session.commit()
+    finally:
+        session.close()
+    try:
+        await context.bot.send_message(chat_id=cm.chat.id, text="یه روباه مکار و باهوش اینجاست 🦊 نمی‌خوای روب روب کنی براش💲🎃")
+    except Exception:
+        pass
+
 async def register_group_chat(update, context):
     chat = update.effective_chat
     if not chat or chat.type not in ("group", "supergroup"):
@@ -907,6 +932,7 @@ async def register_group_chat(update, context):
     session = get_session()
     try:
         row = session.get(GroupChat, chat.id)
+        is_new = row is None
         if row is None:
             row = GroupChat(chat_id=chat.id, title=chat.title or "گپ", active=1)
             session.add(row)
@@ -914,6 +940,11 @@ async def register_group_chat(update, context):
             row.title = chat.title or row.title
             row.active = 1
         session.commit()
+        if is_new:
+            try:
+                await context.bot.send_message(chat_id=chat.id, text="یه روباه مکار و باهوش اینجاست 🦊 نمی‌خوای روب روب کنی براش💲🎃")
+            except Exception:
+                pass
     except Exception as e:
         session.rollback()
         logger.warning("register group failed: %s", e)
@@ -1327,7 +1358,7 @@ async def transfer_button(update, context):
 # ---------- سطح و قابلیت‌ها ----------
 
 def level_capabilities(level):
-    caps=[]
+    caps=["💰 روب روب / هور هور / عو عو"]
     if level >= 2: caps.append("🏹 شکار")
     if level >= 3: caps += ["🦊 روباه", "🎮 پیوستن به بازی", "🕹 ساخت بازی روبی"]
     if level >= 4: caps.append("🏦 بانک روبی")
@@ -1547,7 +1578,20 @@ async def membership_callback(update, context):
     q=update.callback_query
     if q.data!="check_membership": return
     if await is_member(context.bot,q.from_user.id):
-        await q.answer("عضویت تأیید شد! 🎉"); await q.message.edit_text(f"✅ تأیید شد!\n\nحالا «{CLAIM_KEYWORD}» رو بفرست.")
+        await q.answer("عضویت تأیید شد! 🎉")
+        await q.message.edit_text("✅ عضویتت تأیید شد!\n\n🦊 دستورهای ربات جداگانه برات ارسال می‌شوند.")
+        command_messages = [
+            ("💰 روب روب / هور هور / عو عو", "هر ۵ دقیقه یک‌بار برای دریافت روب‌پوینت؛ از لول ۱ فعال است."),
+            ("🏹 شکار", "از لول ۲ فعال است؛ هر ۱۵ دقیقه یک شکار و ۱۲۰ ثانیه برای تصمیم‌گیری."),
+            ("🦊 روباه / روبی / روباهیو", "از لول ۳ فعال است؛ پنل روباه، تولید روب‌پوینت، ارتقا و تغییر نام."),
+            ("🎮 بازی روبی", "از لول ۳ فعال است؛ منوی بازی‌های روبی و ساخت میز بازی."),
+            ("🏦 بانک / بانک روبی", "از لول ۴ فعال است؛ افتتاح حساب و مدیریت بانک."),
+            ("👤 روبام / روباش", "پروفایل روبی خودت یا کاربری که روی پیامش ریپلای کرده‌ای."),
+            ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار و روب روب."),
+            ("🎡 گردونه / چرخ شانس", "روزی یک‌بار؛ جایزه به‌صورت تصادفی انتخاب می‌شود."),
+        ]
+        for title, desc in command_messages:
+            await context.bot.send_message(chat_id=q.message.chat_id, text=f"{title}\n┘─ {desc}")
     else: await q.answer("هنوز عضویتت تأیید نشده.",show_alert=True)
 
 
@@ -1566,7 +1610,7 @@ async def roobam_command(update,context):
     try:
         user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0)
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
-        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_display_name(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🐈 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"╯─ ⭐️ سطح : {lvl} | {user_progress:,} / {needed:,} {bar}")
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_display_name(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🐈 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
     finally:session.close()
     await update.message.reply_text(text,**reply_kwargs(update.message))
 async def leaderboard_command(update,context):
@@ -1590,7 +1634,7 @@ async def text_router(update, context):
     if text in {"روبام","روبام!","روباش","روباش!"}: await roobam_command(update,context); return
     if text in {"گردونه", "چرخ شانس", "🎡 گردونه", "🎡 چرخ شانس"}: await wheel_command(update,context); return
     if text in {"لیدر برد","لیدربرد","leaderboard","Leaderboard"}: await leaderboard_command(update,context); return
-    if text in {"روباه", "روباه روباه", "روباه  روباه", "روبی", "روباهیو", "🦊 روباه", "🦊 روبی", "🦊 روباهیو"}:
+    if re.sub(r"\s+", " ", text) in {"روباه", "روباه روباه", "روبی", "روباهیو", "🦊 روباه", "🦊 روبی", "🦊 روباهیو"}:
         await fox_command(update, context); return
     if text in {"شکار", "شکار!", "🏹 شکار"}:
         await hunt_command(update, context); return
@@ -1617,10 +1661,11 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
+        elif cmd in {"بازی روبی","بازی"}: await ruby_games_command(update,context)
         elif cmd in {"گردونه","چرخ"}: await wheel_command(update,context)
         elif cmd=="شکار": await hunt_command(update,context)
         elif cmd=="یخچال": await fridge_command(update,context)
@@ -1668,9 +1713,10 @@ def main():
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
-    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
+    app.add_handler(ChatMemberHandler(bot_joined_group, ChatMemberHandler.MY_CHAT_MEMBER), group=-2)
     app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, register_group_chat), group=-1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text_router),group=2)
     if app.job_queue:
