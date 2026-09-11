@@ -41,7 +41,21 @@ TRANSFER_MAX = 500_000
 WHEEL_COOLDOWN = 24 * 60 * 60
 WHEEL_REWARDS = [100, 250, 350, 450, 0, 500, 750, 1000]
 WHEEL_LABELS = ['100 روب پوینت', '250 روب پوینت', '350 روب پوینت', '450 روب پوینت', 'پوچ', '500 روب پوینت', '750 روب پوینت', '1000 روب پوینت']
-WHEEL_GIF_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wheel_gifs')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# پیدا کردن فایل‌های گردونه چه در پوشه wheel_gifs باشند چه کنار bot.py
+WHEEL_GIF_DIR = os.path.join(BASE_DIR, 'wheel_gifs')
+
+def find_wheel_gif(index):
+    name = f"wheel_{index}.gif"
+    paths = [
+        os.path.join(WHEEL_GIF_DIR, name),
+        os.path.join(BASE_DIR, name),
+    ]
+    for path in paths:
+        if os.path.exists(path):
+            return path
+    return None
 
 # ---------- ابزارهای عمومی ----------
 
@@ -427,7 +441,7 @@ async def wheel_command(update, context):
         if reward > 0:
             user.fox_points = int(user.fox_points or 0) + reward
         session.commit()
-        gif_path = os.path.join(WHEEL_GIF_DIR, f"wheel_{selected}.gif")
+        gif_path = find_wheel_gif(selected)
     except Exception:
         session.rollback()
         logger.exception("daily wheel failed")
