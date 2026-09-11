@@ -38,6 +38,10 @@ HUNT_COOLDOWN = 15 * 60
 HUNT_DECISION_TIMEOUT = 120
 TRANSFER_COOLDOWN = 60
 TRANSFER_MAX = 500_000
+WHEEL_COOLDOWN = 24 * 60 * 60
+WHEEL_REWARDS = [100, 250, 350, 450, 0, 500, 750, 1000]
+WHEEL_LABELS = ['100 روب پوینت', '250 روب پوینت', '350 روب پوینت', '450 روب پوینت', 'پوچ', '500 روب پوینت', '750 روب پوینت', '1000 روب پوینت']
+WHEEL_GIF_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wheel_gifs')
 
 # ---------- ابزارهای عمومی ----------
 
@@ -166,6 +170,8 @@ def get_or_create_user(session, tg_user):
             fox_production_remainder=0.0,
         fox_claim_count=0, hunt_count=0, fox_rescued_count=0,
             fox_last_hunger_at=now_utc(),
+            wheel_last_spin_at=None,
+            wheel_last_reward=None,
         )
         session.add(user)
         session.commit()
@@ -191,6 +197,8 @@ def get_or_create_user(session, tg_user):
         if user.hunt_count is None: user.hunt_count = 0; changed = True
         if user.fox_rescued_count is None: user.fox_rescued_count = 0; changed = True
         if user.fox_last_hunger_at is None: user.fox_last_hunger_at = now_utc(); changed = True
+        if not hasattr(user, 'wheel_last_spin_at'): pass
+        if user.wheel_last_reward is None: user.wheel_last_reward = None
         calculated = user_level_from_roobrub(user.fox_claim_count or 0)
         if user.level != calculated:
             user.level = calculated; changed = True
@@ -392,6 +400,79 @@ async def ruby_move(update,context):
 
 async def game_command(update, context):
     await games_command(update, context)
+
+# ---------- گردونه روزانه روبی ----------
+
+async def wheel_command(update, context):
+    if not await require_membership(update, context):
+        return
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        last = aware(user.wheel_last_spin_at)
+        if last is not None:
+            remaining = WHEEL_COOLDOWN - (now_utc() - last).total_seconds()
+            if remaining > 0:
+                await update.message.reply_text(
+                    "🐾 حالا روب روب کن؛ برای گردونه هنوز زوده عزیزم🐾\n\n"
+                    f"⏱ زمان گردونه بعدی: {format_duration(remaining)} دیگر",
+                    **reply_kwargs(update.message)
+                )
+                return
+
+        selected = random.randrange(len(WHEEL_REWARDS))
+        reward = WHEEL_REWARDS[selected]
+        user.wheel_last_spin_at = now_utc()
+        user.wheel_last_reward = reward
+        if reward > 0:
+            user.fox_points = int(user.fox_points or 0) + reward
+        session.commit()
+        gif_path = os.path.join(WHEEL_GIF_DIR, f"wheel_{selected}.gif")
+    except Exception:
+        session.rollback()
+        logger.exception("daily wheel failed")
+        await update.message.reply_text("❌ گردونه فعلاً با مشکل روبه‌رو شد؛ دوباره تلاش کن.", **reply_kwargs(update.message))
+        return
+    finally:
+        session.close()
+
+    if not os.path.exists(gif_path):
+        await update.message.reply_text("❌ فایل گردونه پیدا نشد.", **reply_kwargs(update.message))
+        return
+
+    spin_caption = "🎡 گردونه روبی 🦊\n\nدر حال چرخش..."
+    try:
+        with open(gif_path, 'rb') as f:
+            sent = await update.message.reply_animation(
+                animation=InputFile(f),
+                caption=spin_caption,
+                **reply_kwargs(update.message)
+            )
+        await asyncio.sleep(4.15)
+        reward_text = "پوچ 😢" if reward == 0 else f"+{reward:,} روب پوینت 🪙"
+        final_caption = (
+            "🎡 گردونه روبی 🦊\n\n"
+            "🎉 گردونه متوقف شد!\n"
+            f"🏆 برنده شدی: {reward_text}\n\n"
+            "⏱ گردونه بعدی: 24 ساعت دیگر"
+        )
+        try:
+            await context.bot.edit_message_caption(
+                chat_id=sent.chat_id,
+                message_id=sent.message_id,
+                caption=final_caption
+            )
+        except Exception:
+            # اگر تلگرام ویرایش کپشن انیمیشن را نپذیرفت، نتیجه حتماً به‌صورت پیام جداگانه ارسال شود.
+            await context.bot.send_message(
+                chat_id=sent.chat_id,
+                text=final_caption,
+                reply_to_message_id=sent.message_id
+            )
+    except Exception:
+        logger.exception("wheel animation send failed")
+        await update.message.reply_text("❌ ارسال گردونه انجام نشد.", **reply_kwargs(update.message))
+
 
 # ---------- روباه ----------
 
@@ -1493,6 +1574,7 @@ async def text_router(update, context):
     if text in FOX_CLAIM_ALIASES:
         await collect_fox_points(update,context); return
     if text in {"روبام","روبام!","روباش","روباش!"}: await roobam_command(update,context); return
+    if text in {"گردونه", "چرخ شانس", "🎡 گردونه", "🎡 چرخ شانس"}: await wheel_command(update,context); return
     if text in {"لیدر برد","لیدربرد","leaderboard","Leaderboard"}: await leaderboard_command(update,context); return
     if text in {"روباه", "روباه روباه", "روباه  روباه", "روبی", "روباهیو", "🦊 روباه", "🦊 روبی", "🦊 روباهیو"}:
         await fox_command(update, context); return
@@ -1521,10 +1603,11 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
+        elif cmd in {"گردونه","چرخ"}: await wheel_command(update,context)
         elif cmd=="شکار": await hunt_command(update,context)
         elif cmd=="یخچال": await fridge_command(update,context)
         elif cmd in {"روبام","روباش"}: await roobam_command(update,context)
@@ -1571,7 +1654,7 @@ def main():
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
-    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
     app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, register_group_chat), group=-1)

@@ -47,6 +47,8 @@ class User(Base):
     hunt_count = Column(Integer, nullable=False, default=0)
     fox_rescued_count = Column(Integer, nullable=False, default=0)
     fox_last_hunger_at = Column(DateTime(timezone=True), nullable=True)
+    wheel_last_spin_at = Column(DateTime(timezone=True), nullable=True)
+    wheel_last_reward = Column(Integer, nullable=True)
 
 class Challenge(Base):
     __tablename__ = 'challenges'
@@ -147,6 +149,8 @@ def init_db():
         'hunt_count': 'INTEGER NOT NULL DEFAULT 0',
         'fox_rescued_count': 'INTEGER NOT NULL DEFAULT 0',
         'fox_last_hunger_at': 'DATETIME',
+        'wheel_last_spin_at': 'DATETIME',
+        'wheel_last_reward': 'INTEGER',
     }
     with engine.begin() as conn:
         for name, definition in additions.items():
