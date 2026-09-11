@@ -1,4 +1,4 @@
-python-telegram-bot==21.11
+python-telegram-bot[job-queue]==21.11
 SQLAlchemy==2.0.36
 python-dotenv==1.0.1
 
