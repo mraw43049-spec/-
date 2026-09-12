@@ -200,7 +200,7 @@ def init_db():
         conn.execute(text("UPDATE users SET fox_level = 1 WHERE fox_level IS NULL OR fox_level < 1"))
         conn.execute(text("UPDATE users SET fox_belly = 3 WHERE fox_belly IS NULL OR fox_belly < 0"))
         conn.execute(text(
-            "UPDATE users SET fox_belly_capacity = 3 + MAX(0, fox_level - 1) "
+            "UPDATE users SET fox_belly_capacity = 3 + COALESCE(fox_level, 1) - 1 "
             "WHERE fox_belly_capacity IS NULL OR fox_belly_capacity < 3"
         ))
         conn.execute(text("UPDATE users SET fox_points = 0 WHERE fox_points IS NULL OR fox_points < 0"))
