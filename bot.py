@@ -240,6 +240,71 @@ def apply_level_rewards(session, user, old_level, new_level):
 
 # ---------- پروفایل و منو ----------
 
+# حداقل تعداد اعضای گروه برای اینکه ربات در گروه فعال بماند.
+MIN_GROUP_MEMBERS = 20
+
+# فهرست یکپارچه‌ی راهنما؛ هم در پیام خوش‌آمدگویی و هم در دکمه‌های راهنمای کامل استفاده می‌شود.
+GUIDE_TOPICS = [
+    ("💰 روب روب / هور هور / عو عو", "هر ۵ دقیقه یک‌بار برای دریافت روب‌پوینت؛ از لول ۱ فعال است."),
+    ("🏹 شکار", "از لول ۲ فعال است؛ هر ۱۵ دقیقه یک شکار و ۱۲۰ ثانیه برای تصمیم‌گیری."),
+    ("🦊 روباه / روبی / روباهیو", "از لول ۳ فعال است؛ پنل روباه، تولید روب‌پوینت، ارتقا و تغییر نام."),
+    ("🎮 بازی روبی", "از لول ۳ فعال است؛ منوی بازی‌های روبی و ساخت میز بازی."),
+    ("🏦 بانک / بانک روبی", "از لول ۴ فعال است؛ افتتاح حساب و مدیریت بانک."),
+    ("👤 روبام / روباش", "پروفایل روبی خودت یا کاربری که روی پیامش ریپلای کرده‌ای."),
+    ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار و روب روب."),
+    ("🎡 گردونه / چرخ شانس", "روزی یک‌بار؛ جایزه به‌صورت تصادفی انتخاب می‌شود."),
+    ("➕ افزودن ربات به گروه", f"فقط گروه‌های بالای {MIN_GROUP_MEMBERS} عضو قابل قبولن؛ در غیر این صورت روباهیو خودش از گروه خارج می‌شه."),
+]
+
+
+def welcome_text():
+    return (
+        "🦊 ربات سرگرمی روباهیو 🦊\n\n"
+        "🦊 یه روباه بامزه برای گروهت...\n"
+        "کافیه توی گروه روب روب کنی تا روب‌پوینت بگیری\n"
+        "🌸\n\n"
+        "روب‌پوینت جمع کن و با بقیه رقابت کن ⭐\n"
+        "لیدربرد روباهیو رو فتح کن و سلطان روباه‌ها شو 🦊🏆\n\n"
+        "⭐ چرا روباهیو؟\n\n"
+        "⚡ پاسخگویی فوق‌العاده سریع\n"
+        "🛠 عملکرد پایدار و بدون باگ\n"
+        "🔔 آپدیت‌های هفتگی\n"
+        "👥 کامیونیتی فعال و پرانرژی\n"
+        "🚨 پشتیبانی ۲۴ ساعته\n"
+        "🟡 کاملاً رایگان برای همه\n\n"
+        "🦊 فقط کافیه ربات رو به گروهت اضافه کنی...\n"
+        f"┘─ گروه باید بالای {MIN_GROUP_MEMBERS} عضو داشته باشه، بعدش شروع کن به روب روب کردن! 🌸"
+    )
+
+
+def welcome_keyboard(context):
+    rows = []
+    username = getattr(context.bot, "username", None)
+    if username:
+        rows.append([InlineKeyboardButton("➕ افزودن من به گروه", url=f"https://t.me/{username}?startgroup=true")])
+    rows.append([InlineKeyboardButton("📖 راهنمای کامل ❓", callback_data="guide:main")])
+    return InlineKeyboardMarkup(rows)
+
+
+def guide_list_text():
+    return "📖 راهنمای کامل ربات روباهیو 🦊\n\nهر بخشی رو که می‌خوای بیشتر بدونی لمس کن ⬇️"
+
+
+def guide_list_keyboard():
+    rows = [[InlineKeyboardButton(title, callback_data=f"guide:item:{i}")] for i, (title, _desc) in enumerate(GUIDE_TOPICS)]
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="guide:home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def guide_item_text(idx):
+    title, desc = GUIDE_TOPICS[idx]
+    return f"{title}\n\n┘─ {desc}"
+
+
+def guide_item_keyboard(idx):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به راهنما", callback_data="guide:main")]])
+
+
 async def start_command(update, context):
     if not await require_membership(update, context):
         return
@@ -248,19 +313,36 @@ async def start_command(update, context):
         get_or_create_user(session, update.effective_user)
     finally:
         session.close()
-    await update.message.reply_text("🦊 خوش اومدی! عضویتت تأیید شد. حالا دستورهای ربات برات آماده‌ست.", **reply_kwargs(update.message))
-    command_messages = [
-        ("💰 روب روب / هور هور / عو عو", "هر ۵ دقیقه یک‌بار برای دریافت روب‌پوینت؛ از لول ۱ فعال است."),
-        ("🏹 شکار", "از لول ۲ فعال است؛ هر ۱۵ دقیقه یک شکار و ۱۲۰ ثانیه برای تصمیم‌گیری."),
-        ("🦊 روباه / روبی / روباهیو", "از لول ۳ فعال است؛ پنل روباه، تولید روب‌پوینت، ارتقا و تغییر نام."),
-        ("🎮 بازی روبی", "از لول ۳ فعال است؛ منوی بازی‌های روبی و ساخت میز بازی."),
-        ("🏦 بانک / بانک روبی", "از لول ۴ فعال است؛ افتتاح حساب و مدیریت بانک."),
-        ("👤 روبام / روباش", "پروفایل روبی خودت یا کاربری که روی پیامش ریپلای کرده‌ای."),
-        ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار و روب روب."),
-        ("🎡 گردونه / چرخ شانس", "روزی یک‌بار؛ جایزه به‌صورت تصادفی انتخاب می‌شود."),
-    ]
-    for title, desc in command_messages:
-        await update.message.reply_text(f"{title}\n┘─ {desc}")
+    await update.message.reply_text(welcome_text(), reply_markup=welcome_keyboard(context), **reply_kwargs(update.message))
+
+
+async def guide_callback(update, context):
+    q = update.callback_query
+    data = q.data or ""
+    if data == "guide:home":
+        await q.answer()
+        try:
+            await q.message.edit_text(welcome_text(), reply_markup=welcome_keyboard(context))
+        except Exception:
+            pass
+        return
+    if data == "guide:main":
+        await q.answer()
+        try:
+            await q.message.edit_text(guide_list_text(), reply_markup=guide_list_keyboard())
+        except Exception:
+            pass
+        return
+    m = re.fullmatch(r"guide:item:(\d+)", data)
+    if m:
+        idx = int(m.group(1))
+        if 0 <= idx < len(GUIDE_TOPICS):
+            await q.answer()
+            try:
+                await q.message.edit_text(guide_item_text(idx), reply_markup=guide_item_keyboard(idx))
+            except Exception:
+                pass
+        return
 
 
 async def profile_command(update, context):
@@ -1396,6 +1478,31 @@ async def bot_joined_group(update, context):
         return
     if cm.new_chat_member.status not in ("member", "administrator"):
         return
+    old_status = cm.old_chat_member.status if cm.old_chat_member else None
+    # فقط زمانی که ربات تازه به گروه اضافه شده (نه صرفا ارتقا به ادمین) تعداد اعضا چک می‌شود.
+    if old_status in (None, "left", "kicked"):
+        member_count = None
+        try:
+            member_count = await context.bot.get_chat_member_count(cm.chat.id)
+        except Exception as e:
+            logger.warning("get_chat_member_count failed: %s", e)
+        if member_count is not None and member_count <= MIN_GROUP_MEMBERS:
+            try:
+                await context.bot.send_message(
+                    chat_id=cm.chat.id,
+                    text=(
+                        f"🦊 ببخشید، روباهیو فقط توی گروه‌های بالای {MIN_GROUP_MEMBERS} نفر فعالیت می‌کنه.\n"
+                        f"این گروه الان {member_count} عضو داره.\n"
+                        "هروقت گروهت بزرگ‌تر شد، دوباره اضافه‌م کن! 🌸"
+                    ),
+                )
+            except Exception:
+                pass
+            try:
+                await context.bot.leave_chat(cm.chat.id)
+            except Exception as e:
+                logger.warning("leave_chat failed: %s", e)
+            return
     session = get_session()
     try:
         row = session.get(GroupChat, cm.chat.id)
@@ -2127,19 +2234,15 @@ async def membership_callback(update, context):
     if q.data!="check_membership": return
     if await is_member(context.bot,q.from_user.id):
         await q.answer("عضویت تأیید شد! 🎉")
-        await q.message.edit_text("✅ عضویتت تأیید شد!\n\n🦊 دستورهای ربات جداگانه برات ارسال می‌شوند.")
-        command_messages = [
-            ("💰 روب روب / هور هور / عو عو", "هر ۵ دقیقه یک‌بار برای دریافت روب‌پوینت؛ از لول ۱ فعال است."),
-            ("🏹 شکار", "از لول ۲ فعال است؛ هر ۱۵ دقیقه یک شکار و ۱۲۰ ثانیه برای تصمیم‌گیری."),
-            ("🦊 روباه / روبی / روباهیو", "از لول ۳ فعال است؛ پنل روباه، تولید روب‌پوینت، ارتقا و تغییر نام."),
-            ("🎮 بازی روبی", "از لول ۳ فعال است؛ منوی بازی‌های روبی و ساخت میز بازی."),
-            ("🏦 بانک / بانک روبی", "از لول ۴ فعال است؛ افتتاح حساب و مدیریت بانک."),
-            ("👤 روبام / روباش", "پروفایل روبی خودت یا کاربری که روی پیامش ریپلای کرده‌ای."),
-            ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار و روب روب."),
-            ("🎡 گردونه / چرخ شانس", "روزی یک‌بار؛ جایزه به‌صورت تصادفی انتخاب می‌شود."),
-        ]
-        for title, desc in command_messages:
-            await context.bot.send_message(chat_id=q.message.chat_id, text=f"{title}\n┘─ {desc}")
+        session = get_session()
+        try:
+            get_or_create_user(session, q.from_user)
+        finally:
+            session.close()
+        try:
+            await q.message.edit_text(welcome_text(), reply_markup=welcome_keyboard(context))
+        except Exception:
+            await context.bot.send_message(chat_id=q.message.chat_id, text=welcome_text(), reply_markup=welcome_keyboard(context))
     else: await q.answer("هنوز عضویتت تأیید نشده.",show_alert=True)
 
 
@@ -2247,6 +2350,7 @@ def main():
     app.add_handler(CommandHandler("roobam",roobam_command))
     app.add_handler(CommandHandler("leaderboard",leaderboard_command))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
+    app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
     app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|setlevel|setfoxpoints|backup)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
