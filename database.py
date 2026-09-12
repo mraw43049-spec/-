@@ -49,6 +49,7 @@ class User(Base):
     fox_last_hunger_at = Column(DateTime(timezone=True), nullable=True)
     wheel_last_spin_at = Column(DateTime(timezone=True), nullable=True)
     wheel_last_reward = Column(Integer, nullable=True)
+    last_ruby_game_at = Column(DateTime(timezone=True), nullable=True)
 
 class Challenge(Base):
     __tablename__ = 'challenges'
@@ -85,6 +86,7 @@ class RubyTable(Base):
     pot = Column(Integer, nullable=False, default=0)
     scores = Column(String, nullable=True, default='')
     message_id = Column(BigInteger, nullable=True)
+    state = Column(String, nullable=True, default='')
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class InjuredFox(Base):
@@ -155,6 +157,7 @@ def init_db():
         'fox_last_hunger_at': 'DATETIME',
         'wheel_last_spin_at': 'DATETIME',
         'wheel_last_reward': 'INTEGER',
+        'last_ruby_game_at': 'DATETIME',
     }
     with engine.begin() as conn:
         for name, definition in additions.items():
@@ -169,6 +172,7 @@ def init_db():
                 'pot': 'INTEGER NOT NULL DEFAULT 0',
                 'scores': "VARCHAR DEFAULT ''",
                 'message_id': 'BIGINT',
+                'state': "VARCHAR DEFAULT ''",
             }
             for name, definition in ruby_additions.items():
                 if name not in ruby_cols:

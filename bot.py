@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import random
@@ -317,7 +318,7 @@ async def ruby_games_command(update, context):
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
-    "xo":("🧩 بازی روبی دوز XO",2,2,False),"rps":("🔫 بازی روبی سنگ کاغذ قیچی",2,2,False),
+    "xo":("🧩 بازی روبی دوز XO",2,2,True),"rps":("🔫 بازی روبی سنگ کاغذ قیچی",2,2,True),
     "darts":("🎯 بازی روبی دارت",2,4,True),"basketball":("🏀 بازی روبی بسکتبال",2,3,True),"bowling":("🎳 بازی روبی بولینگ",2,4,True)
 }
 
@@ -325,13 +326,77 @@ RUBY_GAME_CONFIG={
 RUBY_GAME_EMOJI={"darts":"🎯","basketball":"🏀","bowling":"🎳"}
 RUBY_EMOJI_TO_GAME={v:k for k,v in RUBY_GAME_EMOJI.items()}
 
+RUBY_COOLDOWN_SECONDS = 90  # هر کاربر هر 1 دقیقه و 30 ثانیه فقط یک‌بار می‌تواند بازی روبی جدید بسازد/وارد شود
+
+RPS_CHOICES = {"rock": "✊", "paper": "🖐", "scissors": "✌️"}
+RPS_BEATS = {"rock": "scissors", "paper": "rock", "scissors": "paper"}
+RPS_TOTAL_ROUNDS = 5
+
+XO_LINES = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
+
+def ruby_cooldown_remaining(user):
+    last = aware(user.last_ruby_game_at)
+    if not last:
+        return 0
+    remaining = RUBY_COOLDOWN_SECONDS - (now_utc()-last).total_seconds()
+    return max(0, int(remaining))
+
 def ruby_table_keyboard(table_id):
     return InlineKeyboardMarkup([[InlineKeyboardButton("🎮 شرکت کردن در بازی",callback_data=f"rjoin:{table_id}")]])
+
+def rps_keyboard(tid):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(RPS_CHOICES['rock'],callback_data=f"rrps:{tid}:rock"),
+        InlineKeyboardButton(RPS_CHOICES['paper'],callback_data=f"rrps:{tid}:paper"),
+        InlineKeyboardButton(RPS_CHOICES['scissors'],callback_data=f"rrps:{tid}:scissors"),
+    ]])
+
+def render_rps_panel(tid,name,pot_line,ids,names_by_id,state,extra=""):
+    wins=state.get('wins',{})
+    lines=[f"👤 {names_by_id.get(uid,str(uid))} — {wins.get(str(uid),0)} برد" for uid in ids]
+    pending=[uid for uid in ids if str(uid) not in state.get('choices',{})]
+    wait_line=("\n\n⏳ در انتظار انتخاب: "+"، ".join(names_by_id.get(uid,str(uid)) for uid in pending)) if pending else ""
+    extra_block=f"{extra}\n\n" if extra else ""
+    text=(f"🕹 {name}\n\n🎮 بازی در جریانه!{pot_line}\n\n"
+          f"{extra_block}"
+          f"🔁 راند {state.get('round',1)} از {RPS_TOTAL_ROUNDS}\n\n"+"\n".join(lines)+wait_line)
+    return text,rps_keyboard(tid)
+
+def xo_keyboard(tid,board):
+    rows=[]
+    for r in range(3):
+        row=[]
+        for c in range(3):
+            i=r*3+c
+            label=board[i] if board[i] else "◻️"
+            row.append(InlineKeyboardButton(label,callback_data=f"rxo:{tid}:{i}"))
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+def render_xo_panel(tid,name,pot_line,ids,names_by_id,state):
+    turn_id=state['turn']; turn_symbol=state['symbols'].get(str(turn_id),'?')
+    lines=[f"{state['symbols'].get(str(uid),'?')} — {names_by_id.get(uid,str(uid))}" for uid in ids]
+    text=(f"🕹 {name}\n\n🎮 بازی در جریانه!{pot_line}\n\n"+"\n".join(lines)+
+          f"\n\n▶️ نوبت: {names_by_id.get(turn_id,str(turn_id))} ({turn_symbol})")
+    return text,xo_keyboard(tid,state['board'])
+
+def xo_winner_symbol(board):
+    for a,b,c in XO_LINES:
+        if board[a] and board[a]==board[b]==board[c]:
+            return board[a]
+    return None
 
 async def ruby_game_select(update,context):
     q=update.callback_query
     if not await require_membership(update,context): return
     key=q.data.split(":")[1]; name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
+    session=get_session()
+    try:
+        user=get_or_create_user(session,q.from_user)
+        remaining=ruby_cooldown_remaining(user)
+    finally: session.close()
+    if remaining>0:
+        await q.answer(f"⏳ هر {RUBY_COOLDOWN_SECONDS} ثانیه فقط یک‌بار می‌تونی بازی روبی بسازی/بری تو بازی. {remaining} ثانیه دیگه صبر کن.",show_alert=True); return
     await q.answer()
     chat_id=q.message.chat_id; message_id=q.message.message_id
     if minp==maxp:
@@ -405,10 +470,14 @@ async def ruby_create_table(update,context):
     session=get_session()
     try:
         user=get_or_create_user(session,q.from_user)
+        remaining=ruby_cooldown_remaining(user)
+        if remaining>0:
+            await q.answer(f"⏳ {remaining} ثانیه دیگه صبر کن تا بتونی دوباره بازی روبی بسازی.",show_alert=True); return
         if amount>0 and (user.fox_points or 0)<amount:
             await q.answer("❌ روب‌پوینت کافی نداری.",show_alert=True); return
         if amount>0:
             user.fox_points-=amount
+        user.last_ruby_game_at=now_utc()
         table=RubyTable(chat_id=q.message.chat_id,game_type=key,creator_id=user.telegram_id,max_players=count,entry_amount=amount,pot=amount,players=str(user.telegram_id),status='open',message_id=q.message.message_id,created_at=now_utc())
         session.add(table); session.commit(); tid=table.id
         creator_name=user_display_name(user)
@@ -461,25 +530,203 @@ async def ruby_join_table(update,context):
         if q.from_user.id in ids: await q.answer("قبلاً وارد شده‌ای.",show_alert=True); return
         if len(ids)>=t.max_players: await q.answer("میز پر شده است.",show_alert=True); return
         joiner=get_or_create_user(session,q.from_user)
+        remaining=ruby_cooldown_remaining(joiner)
+        if remaining>0:
+            await q.answer(f"⏳ {remaining} ثانیه دیگه صبر کن تا بتونی دوباره وارد بازی روبی بشی.",show_alert=True); return
         if t.entry_amount>0 and (joiner.fox_points or 0)<t.entry_amount:
             await q.answer(f"❌ برای ورود {t.entry_amount:,} روب‌پوینت لازم داری.",show_alert=True); return
         if t.entry_amount>0:
             joiner.fox_points-=t.entry_amount; t.pot=(t.pot or 0)+t.entry_amount
+        joiner.last_ruby_game_at=now_utc()
         ids.append(q.from_user.id); t.players=','.join(map(str,ids))
-        if len(ids)>=t.max_players: t.status='active'
-        session.commit(); players=[session.get(User,i) for i in ids]; name=RUBY_GAME_CONFIG[t.game_type][0]; pot=t.pot; entry=t.entry_amount
+        game_type=t.game_type
+        if len(ids)>=t.max_players:
+            t.status='active'
+            if game_type=='rps':
+                t.state=json.dumps({"round":1,"wins":{str(i):0 for i in ids},"choices":{}})
+            elif game_type=='xo':
+                t.state=json.dumps({"board":[""]*9,"turn":ids[0],"symbols":{str(ids[0]):"X",str(ids[1]):"O"}})
+        session.commit(); players=[session.get(User,i) for i in ids]; name=RUBY_GAME_CONFIG[t.game_type][0]; pot=t.pot; entry=t.entry_amount; state_raw=t.state; tid_=t.id
     finally: session.close()
     await q.answer("🎮 وارد بازی شدی!")
     if len(ids)>=t.max_players:
         pot_line = f"\n🏆 جایزه میز: {pot:,} روب‌پوینت" if entry>0 else ""
-        emoji=RUBY_GAME_EMOJI.get(t.game_type)
-        move_line = f"\n\n🎯 نوبت پرتابه! روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا خودت پرتاب کنی." if emoji else ""
-        await q.message.edit_text(
-            f"🕹 {name}\n\n🎮 بازی شروع شد!{pot_line}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u)} — ⏳ در انتظار پرتاب" for i,u in enumerate(players))+move_line,
-            reply_markup=None
-        )
+        names_by_id={u.telegram_id:user_display_name(u) for u in players if u}
+        if game_type in RUBY_GAME_EMOJI:
+            emoji=RUBY_GAME_EMOJI.get(game_type)
+            move_line = f"\n\n🎯 نوبت پرتابه! روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا خودت پرتاب کنی."
+            await q.message.edit_text(
+                f"🕹 {name}\n\n🎮 بازی شروع شد!{pot_line}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u)} — ⏳ در انتظار پرتاب" for i,u in enumerate(players))+move_line,
+                reply_markup=None
+            )
+        elif game_type=='rps':
+            state=json.loads(state_raw or '{}')
+            text,kb=render_rps_panel(tid_,name,pot_line,ids,names_by_id,state)
+            await q.message.edit_text(text,reply_markup=kb)
+        elif game_type=='xo':
+            state=json.loads(state_raw or '{}')
+            text,kb=render_xo_panel(tid_,name,pot_line,ids,names_by_id,state)
+            await q.message.edit_text(text,reply_markup=kb)
     else:
         await q.message.edit_text(f"🕹 {name}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u) if u else '…'}" for i,u in enumerate(players))+"\n\n⏳ منتظر بازیکن بعدی…",reply_markup=ruby_table_keyboard(tid))
+
+async def ruby_rps_choice(update,context):
+    q=update.callback_query; _,tid_s,choice=q.data.split(":"); tid=int(tid_s)
+    if choice not in RPS_CHOICES:
+        await q.answer(); return
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active' or t.game_type!='rps':
+            await q.answer("بازی فعال نیست.",show_alert=True); return
+        ids=[int(x) for x in (t.players or '').split(',') if x]
+        if q.from_user.id not in ids:
+            await q.answer("تو بازیکن این میز نیستی.",show_alert=True); return
+        state=json.loads(t.state or '{}'); state.setdefault('choices',{}); state.setdefault('wins',{}); state.setdefault('round',1)
+        uid_str=str(q.from_user.id)
+        if uid_str in state['choices']:
+            await q.answer("قبلاً انتخابتو کردی؛ منتظر حریف باش.",show_alert=True); return
+        state['choices'][uid_str]=choice
+        round_complete = all(str(i) in state['choices'] for i in ids)
+        round_no=state['round']; ca=cb=None; round_winner=None; match_finished=False; winners=None; pot=0
+        if round_complete:
+            ca=state['choices'][str(ids[0])]; cb=state['choices'][str(ids[1])]
+            if ca==cb: round_winner=None
+            elif RPS_BEATS[ca]==cb: round_winner=ids[0]
+            else: round_winner=ids[1]
+            if round_winner:
+                state['wins'][str(round_winner)]=state['wins'].get(str(round_winner),0)+1
+            state['round']+=1; state['choices']={}
+            if state['round']>RPS_TOTAL_ROUNDS:
+                match_finished=True; t.status='finished'
+                wins=state['wins']; best=max(wins.values()) if wins else 0
+                winners=[int(u) for u,v in wins.items() if v==best] if wins else []
+                pot=t.pot or 0
+                if pot>0 and winners:
+                    share=pot//len(winners)
+                    for uid in winners:
+                        u=session.get(User,uid)
+                        if u: u.fox_points=(u.fox_points or 0)+share
+        wins_snapshot=dict(state.get('wins',{}))
+        t.state=json.dumps(state)
+        players=[session.get(User,i) for i in ids]
+        names_by_id={u.telegram_id:user_display_name(u) for u in players if u}
+        name=RUBY_GAME_CONFIG['rps'][0]; entry=t.entry_amount; pot_total=t.pot; chat_id=t.chat_id; message_id=t.message_id
+        state_snapshot=dict(state); tid_=t.id
+        session.commit()
+    finally:
+        session.close()
+
+    await q.answer("راند تموم شد!" if round_complete else "انتخابت ثبت شد؛ منتظر حریف بمون.")
+    pot_line=f"\n🏆 جایزه میز: {pot_total:,} روب‌پوینت" if entry>0 else ""
+
+    if round_complete:
+        if round_winner:
+            reveal=(f"🔁 نتیجه راند {round_no}: {names_by_id.get(ids[0])} {RPS_CHOICES[ca]}"
+                    f"  در برابر  {names_by_id.get(ids[1])} {RPS_CHOICES[cb]}\n"
+                    f"🏅 برنده راند: {names_by_id.get(round_winner)}")
+        else:
+            reveal=(f"🔁 نتیجه راند {round_no}: {names_by_id.get(ids[0])} {RPS_CHOICES[ca]}"
+                    f"  در برابر  {names_by_id.get(ids[1])} {RPS_CHOICES[cb]}\n🤝 راند مساوی شد")
+    else:
+        reveal=""
+
+    if match_finished:
+        score_lines=[f"👤 {names_by_id.get(uid,str(uid))} — {wins_snapshot.get(str(uid),0)} برد" for uid in ids]
+        if winners and pot_total>0:
+            share=pot_total//len(winners)
+            wnames=[names_by_id.get(uid,str(uid)) for uid in winners]
+            if len(winners)==1:
+                result_line=f"🏆 {wnames[0]} برنده شد و {share:,} روب‌پوینت گرفت! 🎉"
+            else:
+                result_line=f"🤝 مساوی شد بین {', '.join(wnames)}؛ هرکدوم {share:,} روب‌پوینت گرفتن."
+        else:
+            result_line="🏁 بازی تموم شد."
+        text=(f"🕹 {name}\n\n"+(reveal+"\n\n" if reveal else "")+"\n".join(score_lines)+f"\n\n{result_line}")
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=None)
+        except Exception:
+            pass
+    else:
+        text,kb=render_rps_panel(tid_,name,pot_line,ids,names_by_id,state_snapshot,extra=reveal)
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+        except Exception:
+            pass
+
+async def ruby_xo_move(update,context):
+    q=update.callback_query; _,tid_s,cell_s=q.data.split(":"); tid=int(tid_s); cell=int(cell_s)
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active' or t.game_type!='xo':
+            await q.answer("بازی فعال نیست.",show_alert=True); return
+        ids=[int(x) for x in (t.players or '').split(',') if x]
+        if q.from_user.id not in ids:
+            await q.answer("تو بازیکن این میز نیستی.",show_alert=True); return
+        state=json.loads(t.state or '{}')
+        if state.get('turn')!=q.from_user.id:
+            await q.answer("نوبت تو نیست؛ صبر کن.",show_alert=True); return
+        board=state['board']
+        if board[cell]:
+            await q.answer("این خونه قبلاً پر شده.",show_alert=True); return
+        symbol=state['symbols'][str(q.from_user.id)]
+        board[cell]=symbol
+        other_id=[i for i in ids if i!=q.from_user.id][0]
+        win_symbol=xo_winner_symbol(board)
+        draw = (not win_symbol) and all(board)
+        match_finished=False; winner_id=None; pot=0
+        if win_symbol or draw:
+            match_finished=True; t.status='finished'
+            pot=t.pot or 0
+            if win_symbol:
+                winner_id=q.from_user.id
+                if pot>0:
+                    u=session.get(User,winner_id)
+                    if u: u.fox_points=(u.fox_points or 0)+pot
+            else:
+                if pot>0:
+                    share=pot//2
+                    for uid in ids:
+                        u=session.get(User,uid)
+                        if u: u.fox_points=(u.fox_points or 0)+share
+        else:
+            state['turn']=other_id
+        state['board']=board
+        t.state=json.dumps(state)
+        players=[session.get(User,i) for i in ids]
+        names_by_id={u.telegram_id:user_display_name(u) for u in players if u}
+        name=RUBY_GAME_CONFIG['xo'][0]; entry=t.entry_amount; pot_total=t.pot; chat_id=t.chat_id; message_id=t.message_id
+        state_snapshot=dict(state); state_snapshot['board']=list(board); tid_=t.id
+        session.commit()
+    finally:
+        session.close()
+
+    await q.answer()
+    pot_line=f"\n🏆 جایزه میز: {pot_total:,} روب‌پوینت" if entry>0 else ""
+    if match_finished:
+        lines=[f"{state_snapshot['symbols'].get(str(uid),'?')} — {names_by_id.get(uid,str(uid))}" for uid in ids]
+        if winner_id and pot_total>0:
+            result_line=f"🏆 {names_by_id.get(winner_id)} برنده شد و {pot_total:,} روب‌پوینت گرفت! 🎉"
+        elif winner_id:
+            result_line=f"🏆 {names_by_id.get(winner_id)} برنده شد!"
+        elif pot_total>0:
+            share=pot_total//2
+            result_line=f"🤝 بازی مساوی شد؛ هرکدوم {share:,} روب‌پوینت گرفتن."
+        else:
+            result_line="🤝 بازی مساوی شد."
+        text=f"🕹 {name}\n\n"+"\n".join(lines)+f"\n\n{result_line}"
+        kb=xo_keyboard(tid_,state_snapshot['board'])
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+        except Exception:
+            pass
+    else:
+        text,kb=render_xo_panel(tid_,name,pot_line,ids,names_by_id,state_snapshot)
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+        except Exception:
+            pass
 
 def _parse_ruby_scores(raw):
     scores={}
@@ -1841,6 +2088,8 @@ def main():
     app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_rps_choice,pattern=r"^rrps:\d+:(rock|paper|scissors)$"))
+    app.add_handler(CallbackQueryHandler(ruby_xo_move,pattern=r"^rxo:\d+:[0-8]$"))
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
