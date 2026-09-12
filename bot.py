@@ -259,21 +259,20 @@ GUIDE_TOPICS = [
 
 def welcome_text():
     return (
-        "🦊 ربات سرگرمی روباهیو 🦊\n\n"
-        "🦊 یه روباه بامزه برای گروهت...\n"
-        "کافیه توی گروه روب روب کنی تا روب‌پوینت بگیری\n"
-        "🌸\n\n"
-        "روب‌پوینت جمع کن و با بقیه رقابت کن ⭐\n"
-        "لیدربرد روباهیو رو فتح کن و سلطان روباه‌ها شو 🦊🏆\n\n"
-        "⭐ چرا روباهیو؟\n\n"
-        "⚡ پاسخگویی فوق‌العاده سریع\n"
-        "🛠 عملکرد پایدار و بدون باگ\n"
-        "🔔 آپدیت‌های هفتگی\n"
-        "👥 کامیونیتی فعال و پرانرژی\n"
-        "🚨 پشتیبانی ۲۴ ساعته\n"
-        "🟡 کاملاً رایگان برای همه\n\n"
-        "🦊 فقط کافیه ربات رو به گروهت اضافه کنی...\n"
-        f"┘─ گروه باید بالای {MIN_GROUP_MEMBERS} عضو داشته باشه، بعدش شروع کن به روب روب کردن! 🌸"
+        "به دنیای روباهیو خوش اومدی 🦊\n\n"
+        "من یه روباه بازیگوشم که میام توی گروهت زندگی می‌کنم؛ "
+        "بچه‌های گروه با نوشتن «روب روب» بهم غذا می‌دن، روب‌پوینت جمع می‌کنن، "
+        "می‌رن شکار، بازی‌های گروهی راه می‌ندازن و برای رتبه‌ی اول توی لیدربرد رقابت می‌کنن.\n\n"
+        "🐾 چیزهایی که می‌تونی توی گروهت باهام تجربه کنی:\n"
+        "• جمع کردن روب‌پوینت و بالا رفتن لول\n"
+        "• داشتن روباه شخصی خودت، تغذیه و ارتقاش\n"
+        "• رفتن به شکار و نجات روباه‌های زخمی\n"
+        "• بازی‌های گروهی (دوز، سنگ‌کاغذقیچی، دارت، بسکتبال، بولینگ)\n"
+        "• بانک روبی برای پس‌انداز و انتقال پوینت\n"
+        "• گردونه‌ی شانس روزانه و جدول امتیازات\n\n"
+        f"⚠️ نکته: من فقط توی گروه‌های بالای {MIN_GROUP_MEMBERS} نفر مستقر می‌شم؛ "
+        "اگه گروهت کوچیک‌تر باشه خودم به‌آرومی از گروه خارج می‌شم.\n\n"
+        "برای شروع، منو به گروهت اضافه کن یا از راهنمای کامل استفاده کن 👇"
     )
 
 
@@ -2261,7 +2260,7 @@ async def roobam_command(update,context):
     try:
         user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0)
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
-        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_display_name(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🐈 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_display_name(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
     finally:session.close()
     await update.message.reply_text(text,**reply_kwargs(update.message))
 async def leaderboard_command(update,context):
