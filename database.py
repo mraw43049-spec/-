@@ -58,6 +58,7 @@ class User(Base):
     fox_claim_count = Column(Integer, nullable=False, default=0)
     hunt_count = Column(Integer, nullable=False, default=0)
     fox_rescued_count = Column(Integer, nullable=False, default=0)
+    fox_prestige_count = Column(Integer, nullable=False, default=0)
     fox_last_hunger_at = Column(DateTime(timezone=True), nullable=True)
     wheel_last_spin_at = Column(DateTime(timezone=True), nullable=True)
     wheel_last_reward = Column(Integer, nullable=True)
@@ -166,6 +167,7 @@ def init_db():
         'fox_claim_count': 'INTEGER NOT NULL DEFAULT 0',
         'hunt_count': 'INTEGER NOT NULL DEFAULT 0',
         'fox_rescued_count': 'INTEGER NOT NULL DEFAULT 0',
+        'fox_prestige_count': 'INTEGER NOT NULL DEFAULT 0',
         'fox_last_hunger_at': 'DATETIME',
         'wheel_last_spin_at': 'DATETIME',
         'wheel_last_reward': 'INTEGER',
@@ -199,6 +201,7 @@ def init_db():
         conn.execute(text("UPDATE users SET fox_claim_count = 0 WHERE fox_claim_count IS NULL OR fox_claim_count < 0"))
         conn.execute(text("UPDATE users SET hunt_count = 0 WHERE hunt_count IS NULL OR hunt_count < 0"))
         conn.execute(text("UPDATE users SET fox_rescued_count = 0 WHERE fox_rescued_count IS NULL OR fox_rescued_count < 0"))
+        conn.execute(text("UPDATE users SET fox_prestige_count = 0 WHERE fox_prestige_count IS NULL OR fox_prestige_count < 0"))
         if 'total_earned' not in cols:
             conn.execute(text('UPDATE users SET total_earned = points WHERE total_earned = 0'))
 
