@@ -81,6 +81,9 @@ class RubyTable(Base):
     max_players = Column(Integer, nullable=False, default=2)
     players = Column(String, nullable=False, default='')
     status = Column(String, nullable=False, default='open')
+    entry_amount = Column(Integer, nullable=False, default=0)
+    pot = Column(Integer, nullable=False, default=0)
+    scores = Column(String, nullable=True, default='')
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class InjuredFox(Base):
@@ -158,6 +161,16 @@ def init_db():
                 conn.execute(text(f'ALTER TABLE users ADD COLUMN {name} {definition}'))
         if 'attempt_log' not in injured_cols:
             conn.execute(text("ALTER TABLE injured_foxes ADD COLUMN attempt_log VARCHAR"))
+        if 'ruby_tables' in inspector.get_table_names():
+            ruby_cols = {c['name'] for c in inspector.get_columns('ruby_tables')}
+            ruby_additions = {
+                'entry_amount': 'INTEGER NOT NULL DEFAULT 0',
+                'pot': 'INTEGER NOT NULL DEFAULT 0',
+                'scores': "VARCHAR DEFAULT ''",
+            }
+            for name, definition in ruby_additions.items():
+                if name not in ruby_cols:
+                    conn.execute(text(f'ALTER TABLE ruby_tables ADD COLUMN {name} {definition}'))
         # دیتای قدیمی را حفظ می‌کنیم و فقط مقدارهای روباه را برای کاربران قدیمی آماده می‌کنیم.
         conn.execute(text("UPDATE users SET fox_name = 'مکار' WHERE fox_name IS NULL OR fox_name = ''"))
         conn.execute(text("UPDATE users SET fox_level = 1 WHERE fox_level IS NULL OR fox_level < 1"))

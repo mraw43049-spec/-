@@ -41,7 +41,7 @@ TRANSFER_MAX = 500_000
 WHEEL_COOLDOWN = 24 * 60 * 60
 WHEEL_REWARDS = [100, 250, 350, 450, 0, 500, 750, 1000]
 WHEEL_LABELS = ['100 روب پوینت', '250 روب پوینت', '350 روب پوینت', '450 روب پوینت', 'پوچ', '500 روب پوینت', '750 روب پوینت', '1000 روب پوینت']
-WHEEL_GIF_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wheel_gifs')
+RUBY_MAX_ENTRY = 3_000_000
 
 # ---------- ابزارهای عمومی ----------
 
@@ -315,17 +315,10 @@ async def ruby_games_command(update, context):
     ])
     await update.message.reply_text("🕹 بازی های روبی 🦊\n\n❗️ لطفا بازی مورد نظر را انتخاب کنید ⬇️\n\n🧩 بازی روبی دوز XO\n┘─ محدودیت بازیکن : 2 پیشی\n\n🔫 بازی روبی سنگ کاغذ قیچی\n┘─ محدودیت بازیکن : 2 پیشی\n\n🎯 بازی روبی دارت\n┘─ محدودیت بازیکن : 2 - 4 پیشی\n\n🏀 بازی روبی بسکتبال\n┘─ محدودیت بازیکن : 2 - 3 پیشی\n\n🎳 بازی روبی بولینگ\n┘─ محدودیت بازیکن : 2 - 4 پیشی",reply_markup=kb,**reply_kwargs(update.message))
 
-async def ruby_game_select(update,context):
-    q=update.callback_query
-    if not await require_membership(update,context): return
-    names={"xo":"🧩 روبی دوز XO","rps":"🔫 روبی سنگ کاغذ قیچی","darts":"🎯 روبی دارت","basketball":"🏀 روبی بسکتبال","bowling":"🎳 روبی بولینگ"}
-    key=q.data.split(":")[1]
-    await q.answer()
-    await q.message.reply_text(f"{names.get(key,'🎮 بازی روبی')} انتخاب شد.\n\n⚠️ این نسخه بازی‌ها را بدون شرط‌بندی و پرداخت مبلغ اجرا می‌کند. برای شروع بازی، روی پیام حریف ریپلای کن و دعوت بازی را بفرست.")
-
 RUBY_GAME_CONFIG={
-    "xo":("🧩 بازی روبی دوز XO",2),"rps":("🔫 بازی روبی سنگ کاغذ قیچی",2),
-    "darts":("🎯 بازی روبی دارت",4),"basketball":("🏀 بازی روبی بسکتبال",3),"bowling":("🎳 بازی روبی بولینگ",4)
+    # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
+    "xo":("🧩 بازی روبی دوز XO",2,2,False),"rps":("🔫 بازی روبی سنگ کاغذ قیچی",2,2,False),
+    "darts":("🎯 بازی روبی دارت",2,4,True),"basketball":("🏀 بازی روبی بسکتبال",2,3,True),"bowling":("🎳 بازی روبی بولینگ",2,4,True)
 }
 
 def ruby_table_keyboard(table_id):
@@ -334,37 +327,107 @@ def ruby_table_keyboard(table_id):
 async def ruby_game_select(update,context):
     q=update.callback_query
     if not await require_membership(update,context): return
-    key=q.data.split(":")[1]; name,maxp=RUBY_GAME_CONFIG[key]
+    key=q.data.split(":")[1]; name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     await q.answer()
-    kb=InlineKeyboardMarkup([[InlineKeyboardButton("🛠 ساخت میز بازی",callback_data=f"rcreate:{key}")]])
-    await q.message.reply_text(f"🕹 {name}\n\n❗️ لطفا میز بازی را بچینید\n\n💰 مبلغ ورودی : رایگان ✅",reply_markup=kb)
+    if minp==maxp:
+        await ask_ruby_entry_amount(q.message,context,key,minp)
+    else:
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton(f"{n} نفر",callback_data=f"rcount:{key}:{n}") for n in range(minp,maxp+1)]])
+        await q.message.reply_text(f"🕹 {name}\n\n👥 میز رو برای چند نفر بچینم؟",reply_markup=kb)
 
-async def ruby_create_table(update,context):
-    q=update.callback_query; key=q.data.split(":")[1]
+async def ruby_count_select(update,context):
+    q=update.callback_query
     if not await require_membership(update,context): return
+    _,key,count=q.data.split(":"); count=int(count)
+    await q.answer()
+    await ask_ruby_entry_amount(q.message,context,key,count)
+
+async def ask_ruby_entry_amount(message,context,key,count):
+    name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
+    if not allow_fee:
+        # این بازی هنوز منطق تعیین برنده ندارد، فعلاً فقط رایگان قابل ساخت است.
+        await finalize_ruby_setup(message,context,key,count,0)
+        return
+    context.user_data['ruby_setup']={'key':key,'count':count}
+    await message.reply_text(
+        f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n\n"
+        f"💰 مبلغ ورودی هر نفر رو بفرست (روب‌پوینت).\n"
+        f"سقف مجاز: {RUBY_MAX_ENTRY:,} روب‌پوینت.\nبرای بازی رایگان عدد 0 رو بفرست.\n"
+        "مثال: 50k / 50کا / 50م / 200000"
+    )
+
+async def finalize_ruby_setup(message,context,key,count,amount):
+    name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
+    fee_text = "رایگان ✅" if amount<=0 else f"{amount:,} روب‌پوینت 🪙"
+    kb=InlineKeyboardMarkup([[InlineKeyboardButton("🛠 ساخت میز بازی",callback_data=f"rcreate:{key}:{count}:{amount}")]])
+    await message.reply_text(f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n💰 مبلغ ورودی : {fee_text}\n\nآماده‌ای؟",reply_markup=kb)
+
+async def handle_ruby_entry_text(update,context):
+    setup=context.user_data.get('ruby_setup')
+    if not setup: return False
+    context.user_data.pop('ruby_setup',None)
+    if not await require_membership(update,context): return True
+    try:
+        amount=parse_amount(update.message.text)
+        if amount<0: raise ValueError
+    except Exception:
+        await update.message.reply_text("❌ مبلغ نامعتبره؛ یک عدد بفرست (مثلاً 0 یا 50000).",**reply_kwargs(update.message)); return True
+    if amount>RUBY_MAX_ENTRY:
+        await update.message.reply_text(f"❌ سقف مبلغ ورودی {RUBY_MAX_ENTRY:,} روب‌پوینته.",**reply_kwargs(update.message)); return True
     session=get_session()
     try:
-        user=get_or_create_user(session,q.from_user); name,maxp=RUBY_GAME_CONFIG[key]
-        table=RubyTable(chat_id=q.message.chat_id,game_type=key,creator_id=user.telegram_id,max_players=maxp,status='open',players=str(user.telegram_id),created_at=now_utc())
+        user=get_or_create_user(session,update.effective_user)
+        if amount>0 and (user.fox_points or 0)<amount:
+            await update.message.reply_text(f"❌ روب‌پوینت کافی نداری.\n💰 موجودی: {int(user.fox_points or 0):,}",**reply_kwargs(update.message)); return True
+    finally: session.close()
+    await finalize_ruby_setup(update.message,context,setup['key'],setup['count'],amount)
+    return True
+
+async def ruby_create_table(update,context):
+    q=update.callback_query
+    if not await require_membership(update,context): return
+    _,key,count,amount=q.data.split(":"); count=int(count); amount=int(amount)
+    name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
+    session=get_session()
+    try:
+        user=get_or_create_user(session,q.from_user)
+        if amount>0 and (user.fox_points or 0)<amount:
+            await q.answer("❌ روب‌پوینت کافی نداری.",show_alert=True); return
+        if amount>0:
+            user.fox_points-=amount
+        table=RubyTable(chat_id=q.message.chat_id,game_type=key,creator_id=user.telegram_id,max_players=count,entry_amount=amount,pot=amount,players=str(user.telegram_id),status='open',created_at=now_utc())
         session.add(table); session.commit(); tid=table.id
+        creator_name=user_display_name(user)
     finally: session.close()
     await q.answer("میز ساخته شد!")
-    await q.message.edit_text(f"🕹 {name}\n\n🏆 بازی رایگان روبی\n\n1️⃣ بازیکن : {user_display_name(user)}\n" + "\n".join(f"{i}️⃣ بازیکن : …" for i in range(2,maxp+1)) + "\n\n⏳ این میز بازی فقط 60 ثانیه اعتبار دارد…",reply_markup=ruby_table_keyboard(tid))
+    fee_line = "🏆 بازی رایگان روبی" if amount<=0 else f"💰 مبلغ ورودی: {amount:,} روب‌پوینت 🪙\n🏆 جایزه کل میز: {amount*count:,} روب‌پوینت"
+    await q.message.edit_text(f"🕹 {name}\n\n{fee_line}\n\n1️⃣ بازیکن : {creator_name}\n" + "\n".join(f"{i}️⃣ بازیکن : …" for i in range(2,count+1)) + "\n\n⏳ این میز بازی فقط 60 ثانیه اعتبار دارد…",reply_markup=ruby_table_keyboard(tid))
     context.job_queue.run_once(expire_ruby_table,60,data=tid) if context.job_queue else None
+
+async def _refund_ruby_table(session,t):
+    """مبلغ ورودی همه بازیکنانی که تا الان وارد میز شده‌اند را برمی‌گرداند."""
+    if not t.entry_amount: return
+    ids=[int(x) for x in (t.players or '').split(',') if x]
+    for uid in ids:
+        u=session.get(User,uid)
+        if u: u.fox_points=(u.fox_points or 0)+t.entry_amount
 
 async def expire_ruby_table(context):
     tid=int(context.job.data); session=get_session()
     try:
         t=session.get(RubyTable,tid)
-        if t and t.status=='open':
-            t.status='expired'; session.commit()
-            chat_id=t.chat_id
-        else:
+        if not t or t.status!='open':
             return
+        t.status='expired'
+        refunded=bool(t.entry_amount)
+        await _refund_ruby_table(session,t)
+        session.commit()
+        chat_id=t.chat_id
     finally:
         session.close()
     try:
-        await context.bot.send_message(chat_id=chat_id,text="⏰ مهلت ساخت میز بازی روبی تمام شد و میز بسته شد.")
+        note="\n💰 مبلغ ورودی همه بازیکنان به موجودیشون برگشت داده شد." if refunded else ""
+        await context.bot.send_message(chat_id=chat_id,text=f"⏰ مهلت ساخت میز بازی روبی تمام شد و میز بسته شد.{note}")
     except Exception:
         pass
 
@@ -373,21 +436,35 @@ async def ruby_join_table(update,context):
     try:
         t=session.get(RubyTable,tid)
         if not t or t.status!='open' or (now_utc()-aware(t.created_at)).total_seconds()>60:
-            if t: t.status='expired'; session.commit()
+            if t and t.status=='open':
+                t.status='expired'; await _refund_ruby_table(session,t); session.commit()
             await q.answer("⏰ این میز دیگر فعال نیست.",show_alert=True); return
         ids=[int(x) for x in (t.players or '').split(',') if x]
         if q.from_user.id in ids: await q.answer("قبلاً وارد شده‌ای.",show_alert=True); return
         if len(ids)>=t.max_players: await q.answer("میز پر شده است.",show_alert=True); return
-        get_or_create_user(session,q.from_user); ids.append(q.from_user.id); t.players=','.join(map(str,ids))
+        joiner=get_or_create_user(session,q.from_user)
+        if t.entry_amount>0 and (joiner.fox_points or 0)<t.entry_amount:
+            await q.answer(f"❌ برای ورود {t.entry_amount:,} روب‌پوینت لازم داری.",show_alert=True); return
+        if t.entry_amount>0:
+            joiner.fox_points-=t.entry_amount; t.pot=(t.pot or 0)+t.entry_amount
+        ids.append(q.from_user.id); t.players=','.join(map(str,ids))
         if len(ids)>=t.max_players: t.status='active'
-        session.commit(); players=[session.get(User,i) for i in ids]; name=RUBY_GAME_CONFIG[t.game_type][0]
+        session.commit(); players=[session.get(User,i) for i in ids]; name=RUBY_GAME_CONFIG[t.game_type][0]; pot=t.pot; entry=t.entry_amount
     finally: session.close()
     await q.answer("🎮 وارد بازی شدی!")
     if len(ids)>=t.max_players:
         kb=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ انجام حرکت",callback_data=f"rmove:{tid}")]])
-        await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u)}" for i,u in enumerate(players)),reply_markup=kb)
+        pot_line = f"\n🏆 جایزه میز: {pot:,} روب‌پوینت" if entry>0 else ""
+        await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!{pot_line}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u)}" for i,u in enumerate(players)),reply_markup=kb)
     else:
         await q.message.edit_text(f"🕹 {name}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u) if u else '…'}" for i,u in enumerate(players))+"\n\n⏳ منتظر بازیکن بعدی…",reply_markup=ruby_table_keyboard(tid))
+
+def _parse_ruby_scores(raw):
+    scores={}
+    for pair in (raw or '').split(','):
+        if ':' in pair:
+            uid,val=pair.split(':'); scores[int(uid)]=int(val)
+    return scores
 
 async def ruby_move(update,context):
     q=update.callback_query; tid=int(q.data.split(":")[1]); session=get_session()
@@ -396,16 +473,61 @@ async def ruby_move(update,context):
         if not t or t.status!='active': await q.answer("بازی فعال نیست.",show_alert=True); return
         ids=[int(x) for x in (t.players or '').split(',') if x]
         if q.from_user.id not in ids: await q.answer("تو بازیکن این میز نیستی.",show_alert=True); return
+        if q.from_user.id in _parse_ruby_scores(t.scores):
+            await q.answer("قبلاً حرکتتو انجام دادی.",show_alert=True); return
         if t.game_type=='darts': emoji='🎯'
         elif t.game_type=='basketball': emoji='🏀'
         elif t.game_type=='bowling': emoji='🎳'
         else: emoji=None
+        chat_id=t.chat_id
     finally: session.close()
-    if emoji:
-        await q.answer(); msg=await context.bot.send_dice(chat_id=t.chat_id,emoji=emoji); value=msg.dice.value
-        await context.bot.send_message(chat_id=t.chat_id,text=f"🎮 {user_display_name(q.from_user)} عدد {value} آورد.")
+    if not emoji:
+        await q.answer("برای این بازی، حرکت مخصوص آن در نسخه بعدی تکمیل می‌شود.",show_alert=True); return
+    await q.answer()
+    msg=await context.bot.send_dice(chat_id=chat_id,emoji=emoji); value=msg.dice.value
+    await context.bot.send_message(chat_id=chat_id,text=f"🎮 {user_display_name(q.from_user)} عدد {value} آورد.")
+
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active':
+            return
+        scores=_parse_ruby_scores(t.scores)
+        scores[q.from_user.id]=value
+        t.scores=','.join(f"{u}:{v}" for u,v in scores.items())
+        ids=[int(x) for x in (t.players or '').split(',') if x]
+        finished=all(i in scores for i in ids)
+        winners=None; pot=0
+        if finished:
+            t.status='finished'
+            best=max(scores.values())
+            winners=[u for u,v in scores.items() if v==best]
+            pot=t.pot or 0
+            if pot>0 and winners:
+                share=pot//len(winners)
+                for uid in winners:
+                    u=session.get(User,uid)
+                    if u: u.fox_points=(u.fox_points or 0)+share
+        session.commit()
+    finally:
+        session.close()
+
+    if not finished:
+        return
+    if winners and pot>0:
+        share=pot//len(winners)
+        session2=get_session()
+        try:
+            names=[user_display_name(session2.get(User,uid)) for uid in winners]
+        finally:
+            session2.close()
+        if len(winners)==1:
+            text=f"🏆 {names[0]} برنده شد و {share:,} روب‌پوینت گرفت! 🎉"
+        else:
+            text=f"🤝 مساوی شد بین {', '.join(names)}؛ هرکدوم {share:,} روب‌پوینت گرفتن."
     else:
-        await q.answer("برای این بازی، حرکت مخصوص آن در نسخه بعدی تکمیل می‌شود.",show_alert=True)
+        text="🏁 بازی تموم شد."
+    await context.bot.send_message(chat_id=chat_id,text=text)
 
 async def game_command(update, context):
     await games_command(update, context)
@@ -429,14 +551,13 @@ async def wheel_command(update, context):
                 )
                 return
 
-        selected = random.randrange(len(WHEEL_REWARDS))
-        reward = WHEEL_REWARDS[selected]
+        reward = random.choice(WHEEL_REWARDS)
         user.wheel_last_spin_at = now_utc()
         user.wheel_last_reward = reward
         if reward > 0:
             user.fox_points = int(user.fox_points or 0) + reward
         session.commit()
-        gif_path = os.path.join(WHEEL_GIF_DIR, f"wheel_{selected}.gif")
+        new_balance = int(user.fox_points or 0)
     except Exception:
         session.rollback()
         logger.exception("daily wheel failed")
@@ -445,42 +566,14 @@ async def wheel_command(update, context):
     finally:
         session.close()
 
-    if not os.path.exists(gif_path):
-        await update.message.reply_text("❌ فایل گردونه پیدا نشد.", **reply_kwargs(update.message))
-        return
-
-    spin_caption = "🎡 گردونه روبی 🦊\n\nدر حال چرخش..."
-    try:
-        with open(gif_path, 'rb') as f:
-            sent = await update.message.reply_animation(
-                animation=InputFile(f),
-                caption=spin_caption,
-                **reply_kwargs(update.message)
-            )
-        await asyncio.sleep(4.15)
-        reward_text = "پوچ 😢" if reward == 0 else f"+{reward:,} روب پوینت 🪙"
-        final_caption = (
-            "🎡 گردونه روبی 🦊\n\n"
-            "🎉 گردونه متوقف شد!\n"
-            f"🏆 برنده شدی: {reward_text}\n\n"
-            "⏱ گردونه بعدی: 24 ساعت دیگر"
-        )
-        try:
-            await context.bot.edit_message_caption(
-                chat_id=sent.chat_id,
-                message_id=sent.message_id,
-                caption=final_caption
-            )
-        except Exception:
-            # اگر تلگرام ویرایش کپشن انیمیشن را نپذیرفت، نتیجه حتماً به‌صورت پیام جداگانه ارسال شود.
-            await context.bot.send_message(
-                chat_id=sent.chat_id,
-                text=final_caption,
-                reply_to_message_id=sent.message_id
-            )
-    except Exception:
-        logger.exception("wheel animation send failed")
-        await update.message.reply_text("❌ ارسال گردونه انجام نشد.", **reply_kwargs(update.message))
+    reward_text = "پوچ 😢" if reward == 0 else f"+{reward:,} روب پوینت 🪙"
+    await update.message.reply_text(
+        "🎡 گردونه روبی 🦊\n\n"
+        f"🏆 برنده شدی: {reward_text}\n"
+        f"💰 موجودی روب‌پوینت: {new_balance:,}\n\n"
+        "⏱ گردونه بعدی: 24 ساعت دیگر",
+        **reply_kwargs(update.message)
+    )
 
 
 # ---------- روباه ----------
@@ -1628,6 +1721,7 @@ async def text_router(update, context):
     if not update.message or not update.message.text: return
     if await handle_bank_text(update, context): return
     if await handle_fox_rename_text(update, context): return
+    if await handle_ruby_entry_text(update, context): return
     text=update.message.text.strip()
     if text in FOX_CLAIM_ALIASES:
         await collect_fox_points(update,context); return
@@ -1704,7 +1798,8 @@ def main():
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling)$"))
-    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling)$"))
+    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling):\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_move,pattern=r"^rmove:\d+$"))
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
