@@ -1,7 +1,10 @@
+import logging
 from datetime import datetime, timezone
 from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, Float, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from config import DATABASE_URL
+
+logger = logging.getLogger(__name__)
 
 if DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = 'postgresql://' + DATABASE_URL[len('postgres://'):]
@@ -11,6 +14,15 @@ if DATABASE_URL.startswith('postgresql://'):
         import psycopg  # noqa: F401
         DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+psycopg://', 1)
     except ImportError:
+        # هشدار جدی: یعنی DATABASE_URL روی Postgres تنظیم شده ولی درایور psycopg
+        # نصب نیست، پس ربات مجبوره برگرده روی SQLite محلی که با هر دیپلوی پاک می‌شه.
+        # این دیگه بی‌صدا انجام نمی‌شه تا تو لاگ‌های Railway حتماً دیده بشه.
+        logger.error(
+            "psycopg نصب نیست ولی DATABASE_URL روی Postgres تنظیم شده! "
+            "در حال بازگشت اضطراری به SQLite محلی (bot.db) هستیم — "
+            "این یعنی داده‌ها با دیپلوی بعدی پاک می‌شن. "
+            "psycopg[binary] رو به requirements.txt اضافه کن و دوباره دیپلوی کن."
+        )
         DATABASE_URL = 'sqlite:///bot.db'
 
 engine = create_engine(
