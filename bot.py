@@ -19,7 +19,7 @@ from config import (
 )
 from database import Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, get_session, init_db
 from game_logic import (
-    GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, FOX_CYCLE_LENGTH, fox_capacity, fox_level_reward,
+    GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, FOX_CYCLE_LENGTH, fox_level_reward,
     fox_production_interval, fox_production_per_second, fox_rank, fox_upgrade_cost, fox_storage_capacity, get_level_for_points,
     get_unlocked_games, points_to_next_level, points_needed_for_level
 )
@@ -28,7 +28,11 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 FOX_UNLOCK_LEVEL = 3
-FOX_MAX_LEVEL = FOX_CYCLE_LENGTH  # سطح آخر هر چرخه‌ی روباه؛ رسیدن به این سطح یعنی وقت ریست شدنه.
+FOX_CYCLE_STEP = FOX_CYCLE_LENGTH  # هر چرخه‌ی بعدی 5 تا از چرخه‌ی قبلی بلندتره: 5، 10، 15، 20...
+
+def fox_cycle_max_level(prestige_count):
+    """سقف لول روباه در چرخه‌ی فعلی؛ با هر بار ریست شدن 5 تا بلندتر می‌شه."""
+    return FOX_CYCLE_STEP * (int(prestige_count or 0) + 1)
 FOX_HUNGER_INTERVAL_SECONDS = 27 * 60  # هر ۲۷ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
 INJURED_FOX_INTERVAL = 20 * 60
 INJURED_FOX_COST = 10
@@ -175,6 +179,7 @@ def get_or_create_user(session, tg_user):
             fox_name="مکار",
             fox_level=1,
             fox_belly=3,
+            fox_belly_capacity=3,
             fox_points=0,
             fox_total_earned=0,
             fox_production_remainder=0.0,
@@ -197,6 +202,8 @@ def get_or_create_user(session, tg_user):
             user.fox_level = 1; changed = True
         if user.fox_belly is None:
             user.fox_belly = 3; changed = True
+        if user.fox_belly_capacity is None or user.fox_belly_capacity < 3:
+            user.fox_belly_capacity = max(3, min(5, int(user.fox_belly or 3))); changed = True
         if user.fox_points is None:
             user.fox_points = 0; changed = True
         if user.fox_total_earned is None:
@@ -1072,9 +1079,10 @@ async def wheel_command(update, context):
 
 # ---------- روباه ----------
 
-def fox_keyboard(user_id, user_level, fox_level=None):
+def fox_keyboard(user_id, user_level, fox_level=None, fox_prestige_count=0):
     rows=[[InlineKeyboardButton("🧲 برداشت روب پوینت ها",callback_data=f"fox:collect:{user_id}")]]
-    if fox_level is None or int(fox_level)<FOX_MAX_LEVEL:
+    cycle_max = fox_cycle_max_level(fox_prestige_count)
+    if fox_level is None or int(fox_level)<cycle_max:
         rows.append([InlineKeyboardButton("⭐ ارتقا مقام",callback_data=f"fox:upgrade:{user_id}")])
     else:
         rows.append([InlineKeyboardButton("🔁 ریست و شروع چرخه جدید",callback_data=f"fox:resetask:{user_id}")])
@@ -1083,7 +1091,8 @@ def fox_keyboard(user_id, user_level, fox_level=None):
 
 
 def fox_profile_text(user):
-    lvl=max(1,min(FOX_MAX_LEVEL,user.fox_level or 1)); cap=fox_capacity(lvl); rate=fox_production_per_second(lvl)
+    cycle_max = fox_cycle_max_level(user.fox_prestige_count)
+    lvl=max(1,min(cycle_max,user.fox_level or 1)); cap=int(user.fox_belly_capacity or 3); rate=fox_production_per_second(lvl)
     interval = fox_production_interval(lvl)
     storage_cap = fox_storage_capacity(lvl)
     lines=[
@@ -1092,7 +1101,7 @@ def fox_profile_text(user):
         f"❤️ شکم روباه: {user.fox_belly}/{cap}",
         "",
         f"🏅 مقام: {fox_rank(lvl)}",
-        f"⭐ لول روباه: {lvl}/{FOX_MAX_LEVEL}",
+        f"⭐ لول روباه: {lvl}/{cycle_max}",
         f"🔁 چرخه‌های تکمیل‌شده: {int(user.fox_prestige_count or 0):,}",
         "",
         f"🪙 روب پوینت های تولید شده: {int(user.fox_points):,}",
@@ -1102,7 +1111,7 @@ def fox_profile_text(user):
     if int(user.fox_points or 0) >= storage_cap:
         lines.append("🔴 ذخیره روب‌پوینت پر شده! تا برداشت نکنی، دیگه تولید ادامه پیدا نمی‌کنه.")
     if (user.fox_belly or 0) < 2: lines.append("🦊 من دیگه کار نمی‌کنم 🦊😡 شکمم حداقل 2 غذا می‌خواد.")
-    if lvl < FOX_MAX_LEVEL:
+    if lvl < cycle_max:
         lines.append(f"💰 هزینه ارتقا: {fox_upgrade_cost(lvl):,} روب پوینت")
     else:
         lines.append("🏆 روباه به آخرین سطح این چرخه رسیده! برای شروع یک چرخه‌ی جدید و قوی‌تر باید ریستش کنی.")
@@ -1169,7 +1178,7 @@ async def restore_fox_panel(bot, chat_id, message_id, owner_id):
     try:
         user=session.get(User,owner_id)
         if not user or user.level<FOX_UNLOCK_LEVEL:return
-        settle_fox_production(user);session.commit();text=fox_profile_text(user);markup=fox_keyboard(user.telegram_id,user.level,user.fox_level)
+        settle_fox_production(user);session.commit();text=fox_profile_text(user);markup=fox_keyboard(user.telegram_id,user.level,user.fox_level,user.fox_prestige_count)
     finally:session.close()
     try:await bot.edit_message_text(text=text,chat_id=chat_id,message_id=message_id,reply_markup=markup)
     except Exception as e:logger.debug("restore fox panel: %s",e)
@@ -1190,10 +1199,10 @@ async def fox_command(update, context):
         settle_fox_production(user)
         session.commit()
         text = fox_profile_text(user) + f"\n🧺 ظرفیت نگهداری روب‌پوینت: {fox_storage_capacity(user.fox_level):,}"
-        owner_level=user.level; owner_fox_level=user.fox_level
+        owner_level=user.level; owner_fox_level=user.fox_level; owner_prestige=user.fox_prestige_count
     finally:
         session.close()
-    await update.message.reply_text(text, reply_markup=fox_keyboard(update.effective_user.id, owner_level, owner_fox_level), **reply_kwargs(update.message))
+    await update.message.reply_text(text, reply_markup=fox_keyboard(update.effective_user.id, owner_level, owner_fox_level, owner_prestige), **reply_kwargs(update.message))
 
 
 async def fox_button(update, context):
@@ -1226,7 +1235,8 @@ async def fox_button(update, context):
             return
         if action == "upgrade":
             lvl = user.fox_level
-            if lvl >= FOX_MAX_LEVEL:
+            cycle_max = fox_cycle_max_level(user.fox_prestige_count)
+            if lvl >= cycle_max:
                 await q.answer("روباه این چرخه رو تموم کرده! برای ادامه باید ریستش کنی.", show_alert=True)
             else:
                 cost = fox_upgrade_cost(lvl)
@@ -1235,8 +1245,8 @@ async def fox_button(update, context):
                 else:
                     user.fox_points -= cost
                     user.fox_level += 1
-                    # با هر ارتقا یک جای غذا به ظرفیت شکم اضافه می‌شود؛ غذای فعلی حفظ می‌شود.
-                    user.fox_belly = min(user.fox_belly, fox_capacity(user.fox_level))
+                    # با هر ارتقا یک جای غذا به ظرفیت شکم اضافه می‌شود (سقف 5)؛ این ظرفیت با ریست شدن هم از بین نمی‌ره.
+                    user.fox_belly_capacity = min(5, int(user.fox_belly_capacity or 3) + 1)
                     user.fox_last_production_at = now_utc()
                     session.commit()
                     await q.answer(f"🦊 روباه رفت لول {user.fox_level}!", show_alert=True)
@@ -1244,13 +1254,16 @@ async def fox_button(update, context):
                     asyncio.create_task(restore_fox_panel(context.bot,q.message.chat_id,q.message.message_id,user.telegram_id))
                     return
         elif action == "resetask":
-            if user.fox_level < FOX_MAX_LEVEL:
+            cycle_max = fox_cycle_max_level(user.fox_prestige_count)
+            if user.fox_level < cycle_max:
                 await q.answer()
                 return
+            next_cycle_max = fox_cycle_max_level((user.fox_prestige_count or 0) + 1)
             warn = (
-                f"⚠️ روباهت به آخرین سطح این چرخه (سطح {FOX_MAX_LEVEL}) رسیده!\n\n"
+                f"⚠️ روباهت به آخرین سطح این چرخه (سطح {cycle_max}) رسیده!\n\n"
                 "اگه ادامه بدی، روباه ریست می‌شه و از سطح ۱ باید دوباره ارتقاش بدی.\n"
-                "🪙 روب‌پوینت‌هات دست‌نخورده می‌مونه، فقط لول و شکم روباه ریست می‌شه.\n\n"
+                f"چرخه‌ی بعدی طولانی‌تره: این‌بار تا سطح {next_cycle_max} می‌تونی ارتقاش بدی.\n"
+                "🪙 روب‌پوینت‌هات و ظرفیت شکم روباه دست‌نخورده می‌مونه؛ فقط لولش ریست می‌شه.\n\n"
                 "مطمئنی؟ 🦊"
             )
             kb = InlineKeyboardMarkup([
@@ -1262,25 +1275,26 @@ async def fox_button(update, context):
             return
         elif action == "resetno":
             await q.answer("ریست لغو شد.")
-            await q.message.edit_text(fox_profile_text(user), reply_markup=fox_keyboard(user.telegram_id, user.level, user.fox_level))
+            await q.message.edit_text(fox_profile_text(user), reply_markup=fox_keyboard(user.telegram_id, user.level, user.fox_level, user.fox_prestige_count))
             return
         elif action == "resetyes":
-            if user.fox_level < FOX_MAX_LEVEL:
+            cycle_max = fox_cycle_max_level(user.fox_prestige_count)
+            if user.fox_level < cycle_max:
                 await q.answer()
-                await q.message.edit_text(fox_profile_text(user), reply_markup=fox_keyboard(user.telegram_id, user.level, user.fox_level))
+                await q.message.edit_text(fox_profile_text(user), reply_markup=fox_keyboard(user.telegram_id, user.level, user.fox_level, user.fox_prestige_count))
                 return
             user.fox_prestige_count = (user.fox_prestige_count or 0) + 1
             user.fox_level = 1
-            user.fox_belly = fox_capacity(1)
+            # شکم و ظرفیتش دست‌نخورده می‌مونن؛ فقط لول به ۱ برمی‌گرده.
             user.fox_last_production_at = now_utc()
-            user.fox_last_hunger_at = now_utc()
             user.fox_production_remainder = 0.0
             session.commit()
+            new_cycle_max = fox_cycle_max_level(user.fox_prestige_count)
             await q.answer("🔁 روباه ریست شد!")
             await q.message.edit_text(
                 fox_profile_text(user)
                 + f"\n\n🦊 روباه از نو شروع کرد! این {user.fox_prestige_count:,}اُمین چرخه‌شه.\n"
-                "شکمش پره و از سطح ۱، قوی‌تر و آماده‌تر ادامه می‌ده 💪"
+                f"شکمش دست‌نخورده مونده و از سطح ۱، این‌بار تا سطح {new_cycle_max} ادامه می‌ده 💪"
             )
             asyncio.create_task(restore_fox_panel(context.bot, q.message.chat_id, q.message.message_id, user.telegram_id))
             return
@@ -1397,13 +1411,14 @@ async def hunt_button(update, context):
         settle_fox_production(user)
         if action == "feed":
             old = user.fox_belly
-            user.fox_belly = min(fox_capacity(user.fox_level), user.fox_belly + hunt.nutrition)
+            cap = int(user.fox_belly_capacity or 3)
+            user.fox_belly = min(cap, user.fox_belly + hunt.nutrition)
             hunt.status = "fed"
             session.commit()
             await q.answer("🦊 شکار به روباه داده شد!")
             await q.message.edit_text(
                 f"🦊 {hunt.emoji} {hunt.item_name} به روباه داده شد.\n"
-                f"🍖 شکم روباه: {old}/{fox_capacity(user.fox_level)} → {user.fox_belly}/{fox_capacity(user.fox_level)}\n\n"
+                f"🍖 شکم روباه: {old}/{cap} → {user.fox_belly}/{cap}\n\n"
                 f"⚡ تولید روب‌پوینت فقط وقتی شکم کاملاً پر باشد فعال است."
             )
         elif action == "sell":

@@ -48,6 +48,7 @@ class User(Base):
     fox_name = Column(String, nullable=False, default='مکار')
     fox_level = Column(Integer, nullable=False, default=1)
     fox_belly = Column(Integer, nullable=False, default=3)
+    fox_belly_capacity = Column(Integer, nullable=False, default=3)
     fox_points = Column(Integer, nullable=False, default=0)
     fox_total_earned = Column(Integer, nullable=False, default=0)
     fox_production_remainder = Column(Float, nullable=False, default=0.0)
@@ -157,6 +158,7 @@ def init_db():
         'fox_name': "VARCHAR DEFAULT 'مکار'",
         'fox_level': 'INTEGER NOT NULL DEFAULT 1',
         'fox_belly': 'INTEGER NOT NULL DEFAULT 3',
+        'fox_belly_capacity': 'INTEGER NOT NULL DEFAULT 3',
         'fox_points': 'INTEGER NOT NULL DEFAULT 0',
         'fox_total_earned': 'INTEGER NOT NULL DEFAULT 0',
         'fox_production_remainder': 'FLOAT NOT NULL DEFAULT 0',
@@ -195,6 +197,10 @@ def init_db():
         conn.execute(text("UPDATE users SET fox_name = 'مکار' WHERE fox_name IS NULL OR fox_name = ''"))
         conn.execute(text("UPDATE users SET fox_level = 1 WHERE fox_level IS NULL OR fox_level < 1"))
         conn.execute(text("UPDATE users SET fox_belly = 3 WHERE fox_belly IS NULL OR fox_belly < 0"))
+        conn.execute(text(
+            "UPDATE users SET fox_belly_capacity = CASE WHEN fox_level >= 3 THEN 5 WHEN fox_level = 2 THEN 4 ELSE 3 END "
+            "WHERE fox_belly_capacity IS NULL OR fox_belly_capacity < 3"
+        ))
         conn.execute(text("UPDATE users SET fox_points = 0 WHERE fox_points IS NULL OR fox_points < 0"))
         conn.execute(text("UPDATE users SET fox_total_earned = 0 WHERE fox_total_earned IS NULL OR fox_total_earned < 0"))
         conn.execute(text("UPDATE users SET fox_production_remainder = 0 WHERE fox_production_remainder IS NULL OR fox_production_remainder < 0"))
