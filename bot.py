@@ -262,6 +262,7 @@ GUIDE_TOPICS = [
     ("🦊 روباه / روبی / روباهیو", "از لول ۳ فعال است؛ پنل روباه، تولید روب‌پوینت، ارتقا و تغییر نام."),
     ("🎮 بازی روبی", "از لول ۳ فعال است؛ منوی بازی‌های روبی و ساخت میز بازی."),
     ("🏦 بانک / بانک روبی", "از لول ۴ فعال است؛ افتتاح حساب و مدیریت بانک."),
+    ("🃏 کازینو روبی", "از لول ۵ فعال است؛ منوی قمارهای روبی و ساخت میز."),
     ("👤 روبام / روباش", "پروفایل روبی خودت یا کاربری که روی پیامش ریپلای کرده‌ای."),
     ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار و روب روب."),
     ("🎡 گردونه / چرخ شانس", "روزی یک‌بار؛ جایزه به‌صورت تصادفی انتخاب می‌شود."),
@@ -412,11 +413,35 @@ async def ruby_games_command(update, context):
     ])
     await update.message.reply_text("🕹 بازی های روبی 🦊\n\n❗️ لطفا بازی مورد نظر را انتخاب کنید ⬇️\n\n🧩 بازی روبی دوز XO\n┘─ محدودیت بازیکن : 2 روباه🦊\n\n🔫 بازی روبی سنگ کاغذ قیچی\n┘─ محدودیت بازیکن : 2 روباه🦊\n\n🎯 بازی روبی دارت\n┘─ محدودیت بازیکن : 2 - 4 روباه🦊\n\n🏀 بازی روبی بسکتبال\n┘─ محدودیت بازیکن : 2 - 3 روباه🦊\n\n🎳 بازی روبی بولینگ\n┘─ محدودیت بازیکن : 2 - 4 روباه🦊\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
+
+async def casino_command(update, context):
+    if not await require_membership(update, context): return
+    session=get_session()
+    try:
+        user=get_or_create_user(session,update.effective_user)
+        if user.level<CASINO_UNLOCK_LEVEL:
+            await update.message.reply_text(f"🔒 کازینو روبی از سطح {CASINO_UNLOCK_LEVEL} باز می‌شود.\n⭐ سطح فعلی تو: {user.level}",**reply_kwargs(update.message)); return
+    finally: session.close()
+    owner_id=update.effective_user.id
+    kb=InlineKeyboardMarkup([
+        [InlineKeyboardButton("🍷 قمار روبی",callback_data=f"rg:cz_gamble:{owner_id}")],
+        [InlineKeyboardButton("🎰 گردونه شانس",callback_data=f"rg:cz_wheel:{owner_id}")],
+        [InlineKeyboardButton("🎲 تاس",callback_data=f"rg:cz_dice:{owner_id}")],
+        [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
+    ])
+    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🍷 قمار روبی\n┘─ محدودیت قمار باز : 2 - 5 روباه🦊\n\n🎰 گردونه شانس\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
     "xo":("🧩 بازی روبی دوز XO",2,2,True),"rps":("🔫 بازی روبی سنگ کاغذ قیچی",2,2,True),
-    "darts":("🎯 بازی روبی دارت",2,4,True),"basketball":("🏀 بازی روبی بسکتبال",2,3,True),"bowling":("🎳 بازی روبی بولینگ",2,4,True)
+    "darts":("🎯 بازی روبی دارت",2,4,True),"basketball":("🏀 بازی روبی بسکتبال",2,3,True),"bowling":("🎳 بازی روبی بولینگ",2,4,True),
+    "cz_gamble":("🍷 قمار روبی",2,5,True),"cz_wheel":("🎰 گردونه شانس",1,3,True),
+    "cz_dice":("🎲 تاس",1,2,True),"cz_rabbit":("🐇 خرگوش خور",2,2,True),
 }
+# این بازی‌های کازینو هنوز قانون برد/باخت مشخصی ندارن؛ فعلاً فقط توی منو نشون داده می‌شن
+# تا پول کسی بی‌دلیل توی میز گیر نکنه.
+CASINO_COMING_SOON = {"cz_gamble", "cz_wheel", "cz_dice"}
+CASINO_UNLOCK_LEVEL = 5
 
 # ایموجی مخصوص هر بازی روبی که کاربر باید خودش با ریپلای روی پنل بفرستد.
 RUBY_GAME_EMOJI={"darts":"🎯","basketball":"🏀","bowling":"🎳"}
@@ -489,6 +514,39 @@ def xo_winner_symbol(board):
             return board[a]
     return None
 
+RABBIT_CELLS = 20  # تعداد خونه‌های بازی خرگوش خور
+
+def rabbit_keyboard(tid, state):
+    revealed = set(state.get('revealed') or [])
+    rows=[]
+    for r in range(4):
+        row=[]
+        for c in range(5):
+            i = r*5+c
+            label = "🐇" if i in revealed else "❓"
+            row.append(InlineKeyboardButton(label, callback_data=f"rrabbit:{tid}:{i}"))
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+def render_rabbit_panel(tid,name,pot_line,ids,names_by_id,state):
+    phase = state.get('phase','plant')
+    if phase=='plant':
+        planted = list(state.get('paws',{}).keys())
+        waiting = [names_by_id.get(uid,str(uid)) for uid in ids if str(uid) not in planted]
+        text = (
+            f"🕹 {name}\n\n🐾 هر بازیکن باید مخفیانه یکی از خونه‌ها رو به‌عنوان پنجه‌ش انتخاب کنه.{pot_line}\n\n"
+            "روی یکی از خونه‌ها بزن؛ فقط خودت می‌فهمی کجا گذاشتی 🤫\n\n"
+            f"⏳ در انتظار: {'، '.join(waiting) if waiting else '...'}"
+        )
+    else:
+        turn_id = state.get('turn')
+        text = (
+            f"🕹 {name}\n\n🎮 مرحله‌ی شکار شروع شد!{pot_line}\n\n"
+            "روی خونه‌ها بزن تا خرگوش پیدا کنی؛ هرکی پنجه🐾 رو پیدا کنه می‌بازه!\n\n"
+            f"▶️ نوبت: {names_by_id.get(turn_id,str(turn_id))}"
+        )
+    return text, rabbit_keyboard(tid, state)
+
 async def ruby_game_select(update,context):
     q=update.callback_query
     parts=q.data.split(":")
@@ -497,6 +555,8 @@ async def ruby_game_select(update,context):
     if q.from_user.id!=owner_id:
         await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True); return
     if not await require_membership(update,context): return
+    if key in CASINO_COMING_SOON:
+        await q.answer("🛠 این بازی کازینو هنوز آماده نیست، به‌زودی فعال می‌شه!",show_alert=True); return
     name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     session=get_session()
     try:
@@ -665,6 +725,8 @@ async def ruby_join_table(update,context):
                 t.state=json.dumps({"round":1,"wins":{str(i):0 for i in ids},"choices":{},"starter":ids[0]})
             elif game_type=='xo':
                 t.state=json.dumps({"board":[""]*9,"turn":ids[0],"symbols":{str(ids[0]):"X",str(ids[1]):"O"}})
+            elif game_type=='cz_rabbit':
+                t.state=json.dumps({"phase":"plant","paws":{},"revealed":[]})
         session.commit(); players=[session.get(User,i) for i in ids]; name=RUBY_GAME_CONFIG[t.game_type][0]; pot=t.pot; entry=t.entry_amount; state_raw=t.state; tid_=t.id
     finally: session.close()
     await q.answer("🎮 وارد بازی شدی!")
@@ -687,6 +749,10 @@ async def ruby_join_table(update,context):
         elif game_type=='xo':
             state=json.loads(state_raw or '{}')
             text,kb=render_xo_panel(tid_,name,pot_line,ids,names_by_id,state)
+            await q.message.edit_text(text,reply_markup=kb)
+        elif game_type=='cz_rabbit':
+            state=json.loads(state_raw or '{}')
+            text,kb=render_rabbit_panel(tid_,name,pot_line,ids,names_by_id,state)
             await q.message.edit_text(text,reply_markup=kb)
     else:
         await q.message.edit_text(f"🕹 {name}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u) if u else '…'}" for i,u in enumerate(players))+"\n\n⏳ منتظر بازیکن بعدی…",reply_markup=ruby_table_keyboard(tid))
@@ -940,6 +1006,91 @@ async def ruby_xo_move(update,context):
             pass
     else:
         text,kb=render_xo_panel(tid_,name,pot_line,ids,names_by_id,state_snapshot)
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+        except Exception:
+            pass
+
+async def ruby_rabbit_choice(update,context):
+    q=update.callback_query; _,tid_s,cell_s=q.data.split(":"); tid=int(tid_s); cell=int(cell_s)
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active' or t.game_type!='cz_rabbit':
+            await q.answer("بازی فعال نیست.",show_alert=True); return
+        ids=[int(x) for x in (t.players or '').split(',') if x]
+        uid=q.from_user.id
+        if uid not in ids:
+            await q.answer("تو بازیکن این میز نیستی.",show_alert=True); return
+        state=json.loads(t.state or '{}')
+        name=RUBY_GAME_CONFIG['cz_rabbit'][0]; entry=t.entry_amount; chat_id=t.chat_id; message_id=t.message_id
+
+        if state.get('phase')=='plant':
+            if str(uid) in state.get('paws',{}):
+                await q.answer("قبلاً پنجه‌تو گذاشتی؛ صبر کن حریفت هم بذاره.",show_alert=True); return
+            state.setdefault('paws',{})[str(uid)]=cell
+            if len(state['paws'])>=len(ids):
+                state['phase']='hunt'; state['turn']=ids[0]; state['revealed']=[]
+            t.state=json.dumps(state)
+            players=[session.get(User,i) for i in ids]
+            names_by_id={u.telegram_id:user_display_name(u) for u in players if u}
+            pot_total=t.pot; state_snapshot=dict(state); tid_=t.id
+            session.commit()
+            await q.answer(f"🐾 پنجه‌ات رو مخفیانه تو خونه {cell+1} گذاشتی!",show_alert=True)
+            pot_line=f"\n🏆 جایزه میز: {pot_total:,} روب‌پوینت" if entry>0 else ""
+            text,kb=render_rabbit_panel(tid_,name,pot_line,ids,names_by_id,state_snapshot)
+            try:
+                await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+            except Exception:
+                pass
+            return
+
+        # مرحله شکار
+        if state.get('turn')!=uid:
+            await q.answer("نوبت تو نیست؛ صبر کن.",show_alert=True); return
+        revealed=set(state.get('revealed') or [])
+        if cell in revealed:
+            await q.answer("این خونه قبلاً باز شده.",show_alert=True); return
+        paws=state.get('paws',{})
+        hit_paw = cell in paws.values()
+        match_finished=False; loser_id=None; winner_id=None; pot=0
+        if hit_paw:
+            match_finished=True; t.status='finished'
+            pot=t.pot or 0
+            loser_id=uid
+            winner_id=[i for i in ids if i!=uid][0]
+            if pot>0:
+                w=session.get(User,winner_id)
+                if w: w.fox_points=(w.fox_points or 0)+pot
+        else:
+            revealed.add(cell)
+            state['revealed']=list(revealed)
+            other_id=[i for i in ids if i!=uid][0]
+            state['turn']=other_id
+        t.state=json.dumps(state)
+        players=[session.get(User,i) for i in ids]
+        names_by_id={u.telegram_id:user_display_name(u) for u in players if u}
+        pot_total=t.pot; state_snapshot=dict(state); tid_=t.id
+        session.commit()
+    finally:
+        session.close()
+
+    await q.answer()
+    pot_line=f"\n🏆 جایزه میز: {pot_total:,} روب‌پوینت" if entry>0 else ""
+    if match_finished:
+        paw_lines=[f"🐾 خونه {c+1} — پنجه {names_by_id.get(int(uidk),uidk)}" for uidk,c in paws.items()]
+        result_line = (
+            f"😵 {names_by_id.get(loser_id)} پنجه رو پیدا کرد و باخت!\n"
+            f"🏆 {names_by_id.get(winner_id)} برنده شد" + (f" و {pot_total:,} روب‌پوینت گرفت! 🎉" if pot_total>0 else "!")
+        )
+        text=f"🕹 {name}\n\n"+"\n".join(paw_lines)+f"\n\n{result_line}"
+        kb=rabbit_keyboard(tid_, {"revealed": list(range(RABBIT_CELLS))})
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+        except Exception:
+            pass
+    else:
+        text,kb=render_rabbit_panel(tid_,name,pot_line,ids,names_by_id,state_snapshot)
         try:
             await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
         except Exception:
@@ -2404,6 +2555,8 @@ async def text_router(update, context):
         await bank_command(update, context); return
     if text in {"بازی روبی", "بازی های روبی", "بازی‌های روبی", "🕹 بازی های روبی"}:
         await ruby_games_command(update, context); return
+    if text in {"کازینو روبی", "کازینو", "🃏 کازینو روبی"}:
+        await casino_command(update, context); return
     # انتقال روب پوینت 50 — فقط با ریپلای به گیرنده
     m = re.fullmatch(r"انتقال\s+روب\s+پوینت\s+([0-9۰-۹.,]+(?:k|کی|کا|m|م|میل)?)", text, re.I)
     if m:
@@ -2421,11 +2574,12 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
         elif cmd in {"بازی روبی","بازی"}: await ruby_games_command(update,context)
+        elif cmd in {"کازینو روبی","کازینو"}: await casino_command(update,context)
         elif cmd in {"گردونه","چرخ"}: await wheel_command(update,context)
         elif cmd=="شکار": await hunt_command(update,context)
         elif cmd=="یخچال": await fridge_command(update,context)
@@ -2464,12 +2618,13 @@ def main():
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|resetask|resetyes|resetno):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling):\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling):\d+:\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_gamble|cz_wheel|cz_dice|cz_rabbit):\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_gamble|cz_wheel|cz_dice|cz_rabbit):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_gamble|cz_wheel|cz_dice|cz_rabbit):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_rps_choice,pattern=r"^rrps:\d+:(rock|paper|scissors)$"))
     app.add_handler(CallbackQueryHandler(ruby_xo_move,pattern=r"^rxo:\d+:[0-8]$"))
+    app.add_handler(CallbackQueryHandler(ruby_rabbit_choice,pattern=r"^rrabbit:\d+:(?:[0-9]|1[0-9])$"))
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
@@ -2477,7 +2632,7 @@ def main():
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
-    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
     app.add_handler(ChatMemberHandler(bot_joined_group, ChatMemberHandler.MY_CHAT_MEMBER), group=-2)
