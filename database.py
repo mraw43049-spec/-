@@ -50,6 +50,7 @@ class User(Base):
     fox_belly = Column(Integer, nullable=False, default=3)
     fox_belly_capacity = Column(Integer, nullable=False, default=3)
     fox_points = Column(Integer, nullable=False, default=0)
+    fox_storage = Column(Integer, nullable=False, default=0)
     fox_total_earned = Column(Integer, nullable=False, default=0)
     fox_production_remainder = Column(Float, nullable=False, default=0.0)
     fox_last_production_at = Column(DateTime(timezone=True), nullable=True)
@@ -160,6 +161,7 @@ def init_db():
         'fox_belly': 'INTEGER NOT NULL DEFAULT 3',
         'fox_belly_capacity': 'INTEGER NOT NULL DEFAULT 3',
         'fox_points': 'INTEGER NOT NULL DEFAULT 0',
+        'fox_storage': 'INTEGER NOT NULL DEFAULT 0',
         'fox_total_earned': 'INTEGER NOT NULL DEFAULT 0',
         'fox_production_remainder': 'FLOAT NOT NULL DEFAULT 0',
         'fox_last_production_at': 'DATETIME',
@@ -198,10 +200,11 @@ def init_db():
         conn.execute(text("UPDATE users SET fox_level = 1 WHERE fox_level IS NULL OR fox_level < 1"))
         conn.execute(text("UPDATE users SET fox_belly = 3 WHERE fox_belly IS NULL OR fox_belly < 0"))
         conn.execute(text(
-            "UPDATE users SET fox_belly_capacity = CASE WHEN fox_level >= 3 THEN 5 WHEN fox_level = 2 THEN 4 ELSE 3 END "
+            "UPDATE users SET fox_belly_capacity = 3 + MAX(0, fox_level - 1) "
             "WHERE fox_belly_capacity IS NULL OR fox_belly_capacity < 3"
         ))
         conn.execute(text("UPDATE users SET fox_points = 0 WHERE fox_points IS NULL OR fox_points < 0"))
+        conn.execute(text("UPDATE users SET fox_storage = 0 WHERE fox_storage IS NULL OR fox_storage < 0"))
         conn.execute(text("UPDATE users SET fox_total_earned = 0 WHERE fox_total_earned IS NULL OR fox_total_earned < 0"))
         conn.execute(text("UPDATE users SET fox_production_remainder = 0 WHERE fox_production_remainder IS NULL OR fox_production_remainder < 0"))
         conn.execute(text("UPDATE users SET fox_claim_count = 0 WHERE fox_claim_count IS NULL OR fox_claim_count < 0"))
