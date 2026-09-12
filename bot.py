@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 FOX_UNLOCK_LEVEL = 3
 FOX_MAX_LEVEL = 35
+FOX_HUNGER_INTERVAL_SECONDS = 27 * 60  # هر ۲۷ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
 INJURED_FOX_INTERVAL = 20 * 60
 INJURED_FOX_COST = 10
 INJURED_FOX_REWARD_MIN = 200
@@ -390,14 +391,15 @@ async def ruby_games_command(update, context):
         if user.level<3:
             await update.message.reply_text("🔒 پیوستن و ساخت بازی روبی از لول 3 باز می‌شود.",**reply_kwargs(update.message)); return
     finally: session.close()
+    owner_id=update.effective_user.id
     kb=InlineKeyboardMarkup([
-        [InlineKeyboardButton("🧩 بازی روبی دوز XO",callback_data="rg:xo" )],
-        [InlineKeyboardButton("🔫 بازی روبی سنگ کاغذ قیچی",callback_data="rg:rps")],
-        [InlineKeyboardButton("🎯 بازی روبی دارت",callback_data="rg:darts")],
-        [InlineKeyboardButton("🏀 بازی روبی بسکتبال",callback_data="rg:basketball")],
-        [InlineKeyboardButton("🎳 بازی روبی بولینگ",callback_data="rg:bowling")],
+        [InlineKeyboardButton("🧩 بازی روبی دوز XO",callback_data=f"rg:xo:{owner_id}")],
+        [InlineKeyboardButton("🔫 بازی روبی سنگ کاغذ قیچی",callback_data=f"rg:rps:{owner_id}")],
+        [InlineKeyboardButton("🎯 بازی روبی دارت",callback_data=f"rg:darts:{owner_id}")],
+        [InlineKeyboardButton("🏀 بازی روبی بسکتبال",callback_data=f"rg:basketball:{owner_id}")],
+        [InlineKeyboardButton("🎳 بازی روبی بولینگ",callback_data=f"rg:bowling:{owner_id}")],
     ])
-    await update.message.reply_text("🕹 بازی های روبی 🦊\n\n❗️ لطفا بازی مورد نظر را انتخاب کنید ⬇️\n\n🧩 بازی روبی دوز XO\n┘─ محدودیت بازیکن : 2 پیشی\n\n🔫 بازی روبی سنگ کاغذ قیچی\n┘─ محدودیت بازیکن : 2 پیشی\n\n🎯 بازی روبی دارت\n┘─ محدودیت بازیکن : 2 - 4 پیشی\n\n🏀 بازی روبی بسکتبال\n┘─ محدودیت بازیکن : 2 - 3 پیشی\n\n🎳 بازی روبی بولینگ\n┘─ محدودیت بازیکن : 2 - 4 پیشی",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🕹 بازی های روبی 🦊\n\n❗️ لطفا بازی مورد نظر را انتخاب کنید ⬇️\n\n🧩 بازی روبی دوز XO\n┘─ محدودیت بازیکن : 2 پیشی\n\n🔫 بازی روبی سنگ کاغذ قیچی\n┘─ محدودیت بازیکن : 2 پیشی\n\n🎯 بازی روبی دارت\n┘─ محدودیت بازیکن : 2 - 4 پیشی\n\n🏀 بازی روبی بسکتبال\n┘─ محدودیت بازیکن : 2 - 3 پیشی\n\n🎳 بازی روبی بولینگ\n┘─ محدودیت بازیکن : 2 - 4 پیشی\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
@@ -478,8 +480,13 @@ def xo_winner_symbol(board):
 
 async def ruby_game_select(update,context):
     q=update.callback_query
+    parts=q.data.split(":")
+    if len(parts)!=3: return
+    _,key,owner_s=parts; owner_id=int(owner_s)
+    if q.from_user.id!=owner_id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True); return
     if not await require_membership(update,context): return
-    key=q.data.split(":")[1]; name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
+    name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     session=get_session()
     try:
         user=get_or_create_user(session,q.from_user)
@@ -490,25 +497,29 @@ async def ruby_game_select(update,context):
     await q.answer()
     chat_id=q.message.chat_id; message_id=q.message.message_id
     if minp==maxp:
-        await ask_ruby_entry_amount(chat_id,message_id,context,key,minp)
+        await ask_ruby_entry_amount(chat_id,message_id,context,key,minp,owner_id)
     else:
-        kb=InlineKeyboardMarkup([[InlineKeyboardButton(f"{n} نفر",callback_data=f"rcount:{key}:{n}") for n in range(minp,maxp+1)]])
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton(f"{n} نفر",callback_data=f"rcount:{key}:{n}:{owner_id}") for n in range(minp,maxp+1)]])
         await q.message.edit_text(f"🕹 {name}\n\n👥 میز رو برای چند نفر بچینم؟",reply_markup=kb)
 
 async def ruby_count_select(update,context):
     q=update.callback_query
+    parts=q.data.split(":")
+    if len(parts)!=4: return
+    _,key,count,owner_s=parts; count=int(count); owner_id=int(owner_s)
+    if q.from_user.id!=owner_id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True); return
     if not await require_membership(update,context): return
-    _,key,count=q.data.split(":"); count=int(count)
     await q.answer()
-    await ask_ruby_entry_amount(q.message.chat_id,q.message.message_id,context,key,count)
+    await ask_ruby_entry_amount(q.message.chat_id,q.message.message_id,context,key,count,owner_id)
 
-async def ask_ruby_entry_amount(chat_id,message_id,context,key,count):
+async def ask_ruby_entry_amount(chat_id,message_id,context,key,count,owner_id):
     name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     if not allow_fee:
         # این بازی هنوز منطق تعیین برنده ندارد، فعلاً فقط رایگان قابل ساخت است.
-        await finalize_ruby_setup(chat_id,message_id,context,key,count,0)
+        await finalize_ruby_setup(chat_id,message_id,context,key,count,0,owner_id)
         return
-    context.user_data['ruby_setup']={'key':key,'count':count,'chat_id':chat_id,'message_id':message_id}
+    context.user_data['ruby_setup']={'key':key,'count':count,'chat_id':chat_id,'message_id':message_id,'owner_id':owner_id}
     await context.bot.edit_message_text(
         chat_id=chat_id,message_id=message_id,
         text=(
@@ -520,10 +531,10 @@ async def ask_ruby_entry_amount(chat_id,message_id,context,key,count):
         )
     )
 
-async def finalize_ruby_setup(chat_id,message_id,context,key,count,amount):
+async def finalize_ruby_setup(chat_id,message_id,context,key,count,amount,owner_id):
     name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     fee_text = "رایگان ✅" if amount<=0 else f"{amount:,} روب‌پوینت 🪙"
-    kb=InlineKeyboardMarkup([[InlineKeyboardButton("🛠 ساخت میز بازی",callback_data=f"rcreate:{key}:{count}:{amount}")]])
+    kb=InlineKeyboardMarkup([[InlineKeyboardButton("🛠 ساخت میز بازی",callback_data=f"rcreate:{key}:{count}:{amount}:{owner_id}")]])
     await context.bot.edit_message_text(
         chat_id=chat_id,message_id=message_id,
         text=f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n💰 مبلغ ورودی : {fee_text}\n\nآماده‌ای؟",
@@ -533,9 +544,11 @@ async def finalize_ruby_setup(chat_id,message_id,context,key,count,amount):
 async def handle_ruby_entry_text(update,context):
     setup=context.user_data.get('ruby_setup')
     if not setup: return False
+    if update.effective_user.id!=setup.get('owner_id'):
+        return False
     context.user_data.pop('ruby_setup',None)
     if not await require_membership(update,context): return True
-    chat_id=setup['chat_id']; message_id=setup['message_id']
+    chat_id=setup['chat_id']; message_id=setup['message_id']; owner_id=setup['owner_id']
     try:
         amount=parse_amount(update.message.text)
         if amount<0: raise ValueError
@@ -549,13 +562,17 @@ async def handle_ruby_entry_text(update,context):
         if amount>0 and (user.fox_points or 0)<amount:
             await update.message.reply_text(f"❌ روب‌پوینت کافی نداری.\n💰 موجودی: {int(user.fox_points or 0):,}",**reply_kwargs(update.message)); return True
     finally: session.close()
-    await finalize_ruby_setup(chat_id,message_id,context,setup['key'],setup['count'],amount)
+    await finalize_ruby_setup(chat_id,message_id,context,setup['key'],setup['count'],amount,owner_id)
     return True
 
 async def ruby_create_table(update,context):
     q=update.callback_query
+    parts=q.data.split(":")
+    if len(parts)!=5: return
+    _,key,count,amount,owner_s=parts; count=int(count); amount=int(amount); owner_id=int(owner_s)
+    if q.from_user.id!=owner_id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True); return
     if not await require_membership(update,context): return
-    _,key,count,amount=q.data.split(":"); count=int(count); amount=int(amount)
     name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     session=get_session()
     try:
@@ -1065,6 +1082,7 @@ def fox_keyboard(user_id, user_level, fox_level=None):
 def fox_profile_text(user):
     lvl=max(1,min(FOX_MAX_LEVEL,user.fox_level or 1)); cap=fox_capacity(lvl); rate=fox_production_per_second(lvl)
     interval = fox_production_interval(lvl)
+    storage_cap = fox_storage_capacity(lvl)
     lines=[
         f"🦊 {user.fox_name or 'مکار'}",
         "",
@@ -1075,25 +1093,35 @@ def fox_profile_text(user):
         "",
         f"🪙 روب پوینت های تولید شده: {int(user.fox_points):,}",
         f"⚡ تولید: هر {interval:g} ثانیه 1 روب‌پوینت",
-        f"📦 ظرفیت ذخیره روب‌پوینت: {fox_storage_capacity(lvl):,}",
+        f"📦 ظرفیت ذخیره روب‌پوینت: {storage_cap:,}",
     ]
+    if int(user.fox_points or 0) >= storage_cap:
+        lines.append("🔴 ذخیره روب‌پوینت پر شده! تا برداشت نکنی، دیگه تولید ادامه پیدا نمی‌کنه.")
     if (user.fox_belly or 0) < 2: lines.append("🦊 من دیگه کار نمی‌کنم 🦊😡 شکمم حداقل 2 غذا می‌خواد.")
     lines.append(f"💰 هزینه ارتقا: {fox_upgrade_cost(lvl):,} روب پوینت" if lvl<FOX_MAX_LEVEL else "🏆 روباه به آخرین سطح رسیده است.")
     return "\n".join(lines)
 
 
 def update_fox_production(user):
-    """تولید تجمعی؛ روباه با حداقل 2 غذا کار می‌کند و هر 10 دقیقه یک غذا مصرف می‌کند."""
+    """تولید تجمعی؛ روباه با حداقل 2 غذا کار می‌کند و هر 27 دقیقه یک غذا مصرف می‌کند.
+    وقتی ذخیره روب‌پوینت به سقفش برسد، تولید و شمارش زمان کاملاً متوقف می‌ماند
+    تا کاربر برداشت کند؛ همان لحظه که برداشت شد، تولید از نو شروع می‌شود."""
     now = now_utc()
     if user.fox_last_production_at is None:
         user.fox_last_production_at = now
     if user.fox_last_hunger_at is None:
         user.fox_last_hunger_at = now
     hunger_elapsed = max(0.0, (now - aware(user.fox_last_hunger_at)).total_seconds())
-    if hunger_elapsed >= 600:
-        meals = int(hunger_elapsed // 600)
+    if hunger_elapsed >= FOX_HUNGER_INTERVAL_SECONDS:
+        meals = int(hunger_elapsed // FOX_HUNGER_INTERVAL_SECONDS)
         user.fox_belly = max(0, (user.fox_belly or 0) - meals)
-        user.fox_last_hunger_at = now - timedelta(seconds=hunger_elapsed % 600)
+        user.fox_last_hunger_at = now - timedelta(seconds=hunger_elapsed % FOX_HUNGER_INTERVAL_SECONDS)
+    # اگه ذخیره از قبل پر شده، تا وقتی کاربر برداشت نکنه ساعت تولید هم جلو نمی‌ره
+    # (نه زمان هدر می‌ره و نه چیزی محاسبه می‌شه) تا همون لحظه‌ی برداشت از نو شروع بشه.
+    if int(user.fox_points or 0) >= fox_storage_capacity(user.fox_level):
+        user.fox_last_production_at = now
+        user.fox_production_remainder = 0.0
+        return 0.0
     elapsed = max(0.0, (now - aware(user.fox_last_production_at)).total_seconds())
     user.fox_last_production_at = now
     if (user.fox_belly or 0) < 2:
@@ -2355,9 +2383,9 @@ def main():
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling)$"))
-    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling):\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling):\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_rps_choice,pattern=r"^rrps:\d+:(rock|paper|scissors)$"))
     app.add_handler(CallbackQueryHandler(ruby_xo_move,pattern=r"^rxo:\d+:[0-8]$"))
