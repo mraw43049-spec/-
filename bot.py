@@ -321,6 +321,10 @@ RUBY_GAME_CONFIG={
     "darts":("🎯 بازی روبی دارت",2,4,True),"basketball":("🏀 بازی روبی بسکتبال",2,3,True),"bowling":("🎳 بازی روبی بولینگ",2,4,True)
 }
 
+# ایموجی مخصوص هر بازی روبی که کاربر باید خودش با ریپلای روی پنل بفرستد.
+RUBY_GAME_EMOJI={"darts":"🎯","basketball":"🏀","bowling":"🎳"}
+RUBY_EMOJI_TO_GAME={v:k for k,v in RUBY_GAME_EMOJI.items()}
+
 def ruby_table_keyboard(table_id):
     return InlineKeyboardMarkup([[InlineKeyboardButton("🎮 شرکت کردن در بازی",callback_data=f"rjoin:{table_id}")]])
 
@@ -329,44 +333,54 @@ async def ruby_game_select(update,context):
     if not await require_membership(update,context): return
     key=q.data.split(":")[1]; name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     await q.answer()
+    chat_id=q.message.chat_id; message_id=q.message.message_id
     if minp==maxp:
-        await ask_ruby_entry_amount(q.message,context,key,minp)
+        await ask_ruby_entry_amount(chat_id,message_id,context,key,minp)
     else:
         kb=InlineKeyboardMarkup([[InlineKeyboardButton(f"{n} نفر",callback_data=f"rcount:{key}:{n}") for n in range(minp,maxp+1)]])
-        await q.message.reply_text(f"🕹 {name}\n\n👥 میز رو برای چند نفر بچینم؟",reply_markup=kb)
+        await q.message.edit_text(f"🕹 {name}\n\n👥 میز رو برای چند نفر بچینم؟",reply_markup=kb)
 
 async def ruby_count_select(update,context):
     q=update.callback_query
     if not await require_membership(update,context): return
     _,key,count=q.data.split(":"); count=int(count)
     await q.answer()
-    await ask_ruby_entry_amount(q.message,context,key,count)
+    await ask_ruby_entry_amount(q.message.chat_id,q.message.message_id,context,key,count)
 
-async def ask_ruby_entry_amount(message,context,key,count):
+async def ask_ruby_entry_amount(chat_id,message_id,context,key,count):
     name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     if not allow_fee:
         # این بازی هنوز منطق تعیین برنده ندارد، فعلاً فقط رایگان قابل ساخت است.
-        await finalize_ruby_setup(message,context,key,count,0)
+        await finalize_ruby_setup(chat_id,message_id,context,key,count,0)
         return
-    context.user_data['ruby_setup']={'key':key,'count':count}
-    await message.reply_text(
-        f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n\n"
-        f"💰 مبلغ ورودی هر نفر رو بفرست (روب‌پوینت).\n"
-        f"سقف مجاز: {RUBY_MAX_ENTRY:,} روب‌پوینت.\nبرای بازی رایگان عدد 0 رو بفرست.\n"
-        "مثال: 50k / 50کا / 50م / 200000"
+    context.user_data['ruby_setup']={'key':key,'count':count,'chat_id':chat_id,'message_id':message_id}
+    await context.bot.edit_message_text(
+        chat_id=chat_id,message_id=message_id,
+        text=(
+            f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n\n"
+            f"💰 مبلغ ورودی هر نفر رو بفرست (روب‌پوینت).\n"
+            f"سقف مجاز: {RUBY_MAX_ENTRY:,} روب‌پوینت.\nبرای بازی رایگان عدد 0 رو بفرست.\n"
+            "مثال: 50k / 50کا / 50م / 200000\n\n"
+            "👇 جواب این پیام رو (یا فقط عدد رو) در همین چت بفرست."
+        )
     )
 
-async def finalize_ruby_setup(message,context,key,count,amount):
+async def finalize_ruby_setup(chat_id,message_id,context,key,count,amount):
     name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     fee_text = "رایگان ✅" if amount<=0 else f"{amount:,} روب‌پوینت 🪙"
     kb=InlineKeyboardMarkup([[InlineKeyboardButton("🛠 ساخت میز بازی",callback_data=f"rcreate:{key}:{count}:{amount}")]])
-    await message.reply_text(f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n💰 مبلغ ورودی : {fee_text}\n\nآماده‌ای؟",reply_markup=kb)
+    await context.bot.edit_message_text(
+        chat_id=chat_id,message_id=message_id,
+        text=f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n💰 مبلغ ورودی : {fee_text}\n\nآماده‌ای؟",
+        reply_markup=kb
+    )
 
 async def handle_ruby_entry_text(update,context):
     setup=context.user_data.get('ruby_setup')
     if not setup: return False
     context.user_data.pop('ruby_setup',None)
     if not await require_membership(update,context): return True
+    chat_id=setup['chat_id']; message_id=setup['message_id']
     try:
         amount=parse_amount(update.message.text)
         if amount<0: raise ValueError
@@ -380,7 +394,7 @@ async def handle_ruby_entry_text(update,context):
         if amount>0 and (user.fox_points or 0)<amount:
             await update.message.reply_text(f"❌ روب‌پوینت کافی نداری.\n💰 موجودی: {int(user.fox_points or 0):,}",**reply_kwargs(update.message)); return True
     finally: session.close()
-    await finalize_ruby_setup(update.message,context,setup['key'],setup['count'],amount)
+    await finalize_ruby_setup(chat_id,message_id,context,setup['key'],setup['count'],amount)
     return True
 
 async def ruby_create_table(update,context):
@@ -395,7 +409,7 @@ async def ruby_create_table(update,context):
             await q.answer("❌ روب‌پوینت کافی نداری.",show_alert=True); return
         if amount>0:
             user.fox_points-=amount
-        table=RubyTable(chat_id=q.message.chat_id,game_type=key,creator_id=user.telegram_id,max_players=count,entry_amount=amount,pot=amount,players=str(user.telegram_id),status='open',created_at=now_utc())
+        table=RubyTable(chat_id=q.message.chat_id,game_type=key,creator_id=user.telegram_id,max_players=count,entry_amount=amount,pot=amount,players=str(user.telegram_id),status='open',message_id=q.message.message_id,created_at=now_utc())
         session.add(table); session.commit(); tid=table.id
         creator_name=user_display_name(user)
     finally: session.close()
@@ -422,12 +436,16 @@ async def expire_ruby_table(context):
         refunded=bool(t.entry_amount)
         await _refund_ruby_table(session,t)
         session.commit()
-        chat_id=t.chat_id
+        chat_id=t.chat_id; message_id=t.message_id; name=RUBY_GAME_CONFIG[t.game_type][0]
     finally:
         session.close()
+    note="\n💰 مبلغ ورودی همه بازیکنان به موجودیشون برگشت داده شد." if refunded else ""
+    text=f"🕹 {name}\n\n⏰ مهلت این میز تمام شد و بسته شد.{note}"
     try:
-        note="\n💰 مبلغ ورودی همه بازیکنان به موجودیشون برگشت داده شد." if refunded else ""
-        await context.bot.send_message(chat_id=chat_id,text=f"⏰ مهلت ساخت میز بازی روبی تمام شد و میز بسته شد.{note}")
+        if message_id:
+            await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text)
+        else:
+            await context.bot.send_message(chat_id=chat_id,text=text)
     except Exception:
         pass
 
@@ -453,9 +471,13 @@ async def ruby_join_table(update,context):
     finally: session.close()
     await q.answer("🎮 وارد بازی شدی!")
     if len(ids)>=t.max_players:
-        kb=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ انجام حرکت",callback_data=f"rmove:{tid}")]])
         pot_line = f"\n🏆 جایزه میز: {pot:,} روب‌پوینت" if entry>0 else ""
-        await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!{pot_line}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u)}" for i,u in enumerate(players)),reply_markup=kb)
+        emoji=RUBY_GAME_EMOJI.get(t.game_type)
+        move_line = f"\n\n🎯 نوبت پرتابه! روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا خودت پرتاب کنی." if emoji else ""
+        await q.message.edit_text(
+            f"🕹 {name}\n\n🎮 بازی شروع شد!{pot_line}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u)} — ⏳ در انتظار پرتاب" for i,u in enumerate(players))+move_line,
+            reply_markup=None
+        )
     else:
         await q.message.edit_text(f"🕹 {name}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u) if u else '…'}" for i,u in enumerate(players))+"\n\n⏳ منتظر بازیکن بعدی…",reply_markup=ruby_table_keyboard(tid))
 
@@ -466,68 +488,86 @@ def _parse_ruby_scores(raw):
             uid,val=pair.split(':'); scores[int(uid)]=int(val)
     return scores
 
-async def ruby_move(update,context):
-    q=update.callback_query; tid=int(q.data.split(":")[1]); session=get_session()
+async def ruby_dice_reply(update, context):
+    """
+    کاربر خودش با ریپلای روی پنل بازی روبی، ایموجی بازی (🎯/🏀/🎳) رو می‌فرسته و
+    تلگرام خودش انیمیشن پرتاب رو برای همون کاربر نشون می‌ده. ما فقط نتیجه رو
+    می‌خونیم و همون یک پیام پنل بازی رو ویرایش می‌کنیم؛ پیام جدیدی ارسال نمی‌شود.
+    """
+    msg = update.message
+    if not msg or not msg.reply_to_message or not msg.dice:
+        return
+    game_type = RUBY_EMOJI_TO_GAME.get(msg.dice.emoji)
+    if not game_type:
+        return
+    reply_id = msg.reply_to_message.message_id
+    value = msg.dice.value
+    session = get_session()
     try:
-        t=session.get(RubyTable,tid)
-        if not t or t.status!='active': await q.answer("بازی فعال نیست.",show_alert=True); return
-        ids=[int(x) for x in (t.players or '').split(',') if x]
-        if q.from_user.id not in ids: await q.answer("تو بازیکن این میز نیستی.",show_alert=True); return
-        if q.from_user.id in _parse_ruby_scores(t.scores):
-            await q.answer("قبلاً حرکتتو انجام دادی.",show_alert=True); return
-        if t.game_type=='darts': emoji='🎯'
-        elif t.game_type=='basketball': emoji='🏀'
-        elif t.game_type=='bowling': emoji='🎳'
-        else: emoji=None
-        chat_id=t.chat_id
-    finally: session.close()
-    if not emoji:
-        await q.answer("برای این بازی، حرکت مخصوص آن در نسخه بعدی تکمیل می‌شود.",show_alert=True); return
-    await q.answer()
-    msg=await context.bot.send_dice(chat_id=chat_id,emoji=emoji); value=msg.dice.value
-    await context.bot.send_message(chat_id=chat_id,text=f"🎮 {user_display_name(q.from_user)} عدد {value} آورد.")
-
-    session=get_session()
-    try:
-        t=session.get(RubyTable,tid)
-        if not t or t.status!='active':
+        t = session.query(RubyTable).filter_by(
+            chat_id=msg.chat_id, message_id=reply_id, status='active', game_type=game_type
+        ).first()
+        if not t:
             return
-        scores=_parse_ruby_scores(t.scores)
-        scores[q.from_user.id]=value
-        t.scores=','.join(f"{u}:{v}" for u,v in scores.items())
-        ids=[int(x) for x in (t.players or '').split(',') if x]
-        finished=all(i in scores for i in ids)
-        winners=None; pot=0
+        ids = [int(x) for x in (t.players or '').split(',') if x]
+        if msg.from_user.id not in ids:
+            return
+        scores = _parse_ruby_scores(t.scores)
+        if msg.from_user.id in scores:
+            return
+        scores[msg.from_user.id] = value
+        t.scores = ','.join(f"{u}:{v}" for u, v in scores.items())
+        finished = all(i in scores for i in ids)
+        winners = None; pot = 0
         if finished:
-            t.status='finished'
-            best=max(scores.values())
-            winners=[u for u,v in scores.items() if v==best]
-            pot=t.pot or 0
-            if pot>0 and winners:
-                share=pot//len(winners)
+            t.status = 'finished'
+            best = max(scores.values())
+            winners = [u for u, v in scores.items() if v == best]
+            pot = t.pot or 0
+            if pot > 0 and winners:
+                share = pot // len(winners)
                 for uid in winners:
-                    u=session.get(User,uid)
-                    if u: u.fox_points=(u.fox_points or 0)+share
+                    u = session.get(User, uid)
+                    if u: u.fox_points = (u.fox_points or 0) + share
+        players = [session.get(User, i) for i in ids]
+        name = RUBY_GAME_CONFIG[t.game_type][0]
+        entry = t.entry_amount; chat_id = t.chat_id; message_id = t.message_id
+        names_by_id = {u.telegram_id: user_display_name(u) for u in players if u}
         session.commit()
     finally:
         session.close()
 
-    if not finished:
-        return
-    if winners and pot>0:
-        share=pot//len(winners)
-        session2=get_session()
-        try:
-            names=[user_display_name(session2.get(User,uid)) for uid in winners]
-        finally:
-            session2.close()
-        if len(winners)==1:
-            text=f"🏆 {names[0]} برنده شد و {share:,} روب‌پوینت گرفت! 🎉"
+    pot_line = f"\n🏆 جایزه میز: {pot:,} روب‌پوینت" if entry > 0 else ""
+    lines = []
+    for i, uid in enumerate(ids):
+        uname = names_by_id.get(uid, str(uid))
+        if uid in scores:
+            lines.append(f"{i+1}️⃣ {uname} — عدد {scores[uid]} 🎯")
         else:
-            text=f"🤝 مساوی شد بین {', '.join(names)}؛ هرکدوم {share:,} روب‌پوینت گرفتن."
+            lines.append(f"{i+1}️⃣ {uname} — ⏳ در انتظار پرتاب")
+
+    if not finished:
+        emoji = RUBY_GAME_EMOJI.get(game_type)
+        text = (
+            f"🕹 {name}\n\n🎮 بازی در جریانه!{pot_line}\n\n" + "\n".join(lines) +
+            f"\n\n🎯 نفرات بعدی: روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست."
+        )
     else:
-        text="🏁 بازی تموم شد."
-    await context.bot.send_message(chat_id=chat_id,text=text)
+        if winners and pot > 0:
+            share = pot // len(winners)
+            wnames = [names_by_id.get(uid, str(uid)) for uid in winners]
+            if len(winners) == 1:
+                result_line = f"🏆 {wnames[0]} برنده شد و {share:,} روب‌پوینت گرفت! 🎉"
+            else:
+                result_line = f"🤝 مساوی شد بین {', '.join(wnames)}؛ هرکدوم {share:,} روب‌پوینت گرفتن."
+        else:
+            result_line = "🏁 بازی تموم شد."
+        text = f"🕹 {name}\n\n" + "\n".join(lines) + f"\n\n{result_line}"
+
+    try:
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
+    except Exception:
+        pass
 
 async def game_command(update, context):
     await games_command(update, context)
@@ -1801,7 +1841,7 @@ def main():
     app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_move,pattern=r"^rmove:\d+$"))
+    app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
     app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change):\d+$"))

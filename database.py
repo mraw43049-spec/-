@@ -84,6 +84,7 @@ class RubyTable(Base):
     entry_amount = Column(Integer, nullable=False, default=0)
     pot = Column(Integer, nullable=False, default=0)
     scores = Column(String, nullable=True, default='')
+    message_id = Column(BigInteger, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class InjuredFox(Base):
@@ -167,6 +168,7 @@ def init_db():
                 'entry_amount': 'INTEGER NOT NULL DEFAULT 0',
                 'pot': 'INTEGER NOT NULL DEFAULT 0',
                 'scores': "VARCHAR DEFAULT ''",
+                'message_id': 'BIGINT',
             }
             for name, definition in ruby_additions.items():
                 if name not in ruby_cols:
