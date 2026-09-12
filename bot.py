@@ -399,7 +399,7 @@ async def ruby_games_command(update, context):
         [InlineKeyboardButton("🏀 بازی روبی بسکتبال",callback_data=f"rg:basketball:{owner_id}")],
         [InlineKeyboardButton("🎳 بازی روبی بولینگ",callback_data=f"rg:bowling:{owner_id}")],
     ])
-    await update.message.reply_text("🕹 بازی های روبی 🦊\n\n❗️ لطفا بازی مورد نظر را انتخاب کنید ⬇️\n\n🧩 بازی روبی دوز XO\n┘─ محدودیت بازیکن : 2 پیشی\n\n🔫 بازی روبی سنگ کاغذ قیچی\n┘─ محدودیت بازیکن : 2 پیشی\n\n🎯 بازی روبی دارت\n┘─ محدودیت بازیکن : 2 - 4 پیشی\n\n🏀 بازی روبی بسکتبال\n┘─ محدودیت بازیکن : 2 - 3 پیشی\n\n🎳 بازی روبی بولینگ\n┘─ محدودیت بازیکن : 2 - 4 پیشی\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🕹 بازی های روبی 🦊\n\n❗️ لطفا بازی مورد نظر را انتخاب کنید ⬇️\n\n🧩 بازی روبی دوز XO\n┘─ محدودیت بازیکن : 2 روباه🦊\n\n🔫 بازی روبی سنگ کاغذ قیچی\n┘─ محدودیت بازیکن : 2 روباه🦊\n\n🎯 بازی روبی دارت\n┘─ محدودیت بازیکن : 2 - 4 روباه🦊\n\n🏀 بازی روبی بسکتبال\n┘─ محدودیت بازیکن : 2 - 3 روباه🦊\n\n🎳 بازی روبی بولینگ\n┘─ محدودیت بازیکن : 2 - 4 روباه🦊\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
@@ -1210,12 +1210,11 @@ async def fox_button(update, context):
         settle_fox_production(user)
         if action == "collect":
             amount = int(user.fox_points or 0)
-            user.fox_points = 0
             session.commit()
             nxt = next_fox_point_seconds(user)
             next_text = f"⏱ روب‌پوینت بعدی حدود {format_duration(nxt)} دیگر تولید می‌شود." if nxt else "⏸ تولید متوقف است تا شکم حداقل 2 غذا داشته باشد."
             await q.answer("برداشت انجام شد! 💰")
-            await q.message.edit_text(fox_profile_text(user) + f"\n\n💰 {amount:,} روب پوینت برداشت شد.\n{next_text}")
+            await q.message.edit_text(fox_profile_text(user) + f"\n\n💰 {amount:,} روب پوینت موجودی توئه، همه‌اش مال خودته.\n{next_text}")
             asyncio.create_task(restore_fox_panel(context.bot,q.message.chat_id,q.message.message_id,user.telegram_id))
             return
         if action == "upgrade":
