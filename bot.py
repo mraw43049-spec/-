@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import logging
 import os
@@ -14,7 +15,7 @@ from telegram.ext import (
 
 from config import (
     ADMIN_IDS, BOT_TOKEN, CLAIM_COOLDOWN_SECONDS, CLAIM_KEYWORD,
-    CLAIM_POINTS_MAX, CLAIM_POINTS_MIN, REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL
+    CLAIM_POINTS_MAX, CLAIM_POINTS_MIN, REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL, DATABASE_URL
 )
 from database import Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, get_session, init_db
 from game_logic import (
@@ -43,6 +44,7 @@ WHEEL_COOLDOWN = 24 * 60 * 60
 WHEEL_REWARDS = [100, 250, 350, 450, 0, 500, 750, 1000]
 WHEEL_LABELS = ['100 روب پوینت', '250 روب پوینت', '350 روب پوینت', '450 روب پوینت', 'پوچ', '500 روب پوینت', '750 روب پوینت', '1000 روب پوینت']
 RUBY_MAX_ENTRY = 3_000_000
+BACKUP_INTERVAL_SECONDS = 24 * 60 * 60  # هر ۲۴ ساعت یک بکاپ خودکار برای ادمین‌ها فرستاده می‌شود
 
 # ---------- ابزارهای عمومی ----------
 
@@ -351,15 +353,22 @@ def rps_keyboard(tid):
         InlineKeyboardButton(RPS_CHOICES['scissors'],callback_data=f"rrps:{tid}:scissors"),
     ]])
 
+RPS_ROUND_TIMEOUT_SECONDS = 60
+
 def render_rps_panel(tid,name,pot_line,ids,names_by_id,state,extra=""):
     wins=state.get('wins',{})
-    lines=[f"👤 {names_by_id.get(uid,str(uid))} — {wins.get(str(uid),0)} برد" for uid in ids]
+    starter=state.get('starter')
+    lines=[]
+    for uid in ids:
+        tag=" 🎬 (شروع‌کننده این راند)" if uid==starter else ""
+        lines.append(f"👤 {names_by_id.get(uid,str(uid))} — {wins.get(str(uid),0)} برد{tag}")
     pending=[uid for uid in ids if str(uid) not in state.get('choices',{})]
     wait_line=("\n\n⏳ در انتظار انتخاب: "+"، ".join(names_by_id.get(uid,str(uid)) for uid in pending)) if pending else ""
     extra_block=f"{extra}\n\n" if extra else ""
     text=(f"🕹 {name}\n\n🎮 بازی در جریانه!{pot_line}\n\n"
           f"{extra_block}"
-          f"🔁 راند {state.get('round',1)} از {RPS_TOTAL_ROUNDS}\n\n"+"\n".join(lines)+wait_line)
+          f"🔁 راند {state.get('round',1)} از {RPS_TOTAL_ROUNDS}\n\n"+"\n".join(lines)+wait_line+
+          f"\n\n⏱ هر بازیکن {RPS_ROUND_TIMEOUT_SECONDS} ثانیه وقت داره انتخاب کنه؛ اگه ننداخت بازنده‌ی راند می‌شه.")
     return text,rps_keyboard(tid)
 
 def xo_keyboard(tid,board):
@@ -543,7 +552,8 @@ async def ruby_join_table(update,context):
         if len(ids)>=t.max_players:
             t.status='active'
             if game_type=='rps':
-                t.state=json.dumps({"round":1,"wins":{str(i):0 for i in ids},"choices":{}})
+                # شروع‌کننده اولین راند، همیشه سازنده میز است (اولین نفر در لیست بازیکنان).
+                t.state=json.dumps({"round":1,"wins":{str(i):0 for i in ids},"choices":{},"starter":ids[0]})
             elif game_type=='xo':
                 t.state=json.dumps({"board":[""]*9,"turn":ids[0],"symbols":{str(ids[0]):"X",str(ids[1]):"O"}})
         session.commit(); players=[session.get(User,i) for i in ids]; name=RUBY_GAME_CONFIG[t.game_type][0]; pot=t.pot; entry=t.entry_amount; state_raw=t.state; tid_=t.id
@@ -563,6 +573,8 @@ async def ruby_join_table(update,context):
             state=json.loads(state_raw or '{}')
             text,kb=render_rps_panel(tid_,name,pot_line,ids,names_by_id,state)
             await q.message.edit_text(text,reply_markup=kb)
+            if context.job_queue:
+                context.job_queue.run_once(rps_round_timeout,RPS_ROUND_TIMEOUT_SECONDS,data={'tid':tid_,'round':1})
         elif game_type=='xo':
             state=json.loads(state_raw or '{}')
             text,kb=render_xo_panel(tid_,name,pot_line,ids,names_by_id,state)
@@ -596,6 +608,8 @@ async def ruby_rps_choice(update,context):
             else: round_winner=ids[1]
             if round_winner:
                 state['wins'][str(round_winner)]=state['wins'].get(str(round_winner),0)+1
+                # راند بعدی رو کسی شروع می‌کنه که راند قبل رو برده
+                state['starter']=round_winner
             state['round']+=1; state['choices']={}
             if state['round']>RPS_TOTAL_ROUNDS:
                 match_finished=True; t.status='finished'
@@ -653,6 +667,100 @@ async def ruby_rps_choice(update,context):
             await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
         except Exception:
             pass
+        if round_complete and context.job_queue:
+            context.job_queue.run_once(rps_round_timeout,RPS_ROUND_TIMEOUT_SECONDS,data={'tid':tid_,'round':state_snapshot['round']})
+
+async def rps_round_timeout(context):
+    """
+    اگه یکی از بازیکن‌ها تو مهلت 60 ثانیه‌ای انتخابشو نزنه، بازنده‌ی همون راند میشه
+    و طرف مقابل برنده‌ی راند و شروع‌کننده‌ی راند بعدی می‌شه. اگه هیچ‌کدوم انتخاب
+    نکنن، میز لغو و مبلغ ورودی (در صورت وجود) برگردانده می‌شود.
+    """
+    data=context.job.data; tid=data['tid']; round_no=data['round']
+    session=get_session()
+    cancelled=False; match_finished=False; winners=None; loser=None; winner=None; round_completed_no=None
+    wins_snapshot=None; state_snapshot=None
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active' or t.game_type!='rps':
+            return
+        state=json.loads(t.state or '{}')
+        if state.get('round')!=round_no:
+            return  # راند قبلاً به‌صورت عادی جلو رفته؛ این تایمر دیگه معتبر نیست
+        ids=[int(x) for x in (t.players or '').split(',') if x]
+        state.setdefault('choices',{}); state.setdefault('wins',{})
+        missing=[uid for uid in ids if str(uid) not in state['choices']]
+        if not missing:
+            return
+        players=[session.get(User,i) for i in ids]
+        names_by_id={u.telegram_id:user_display_name(u) for u in players if u}
+        name=RUBY_GAME_CONFIG['rps'][0]; entry=t.entry_amount; chat_id=t.chat_id; message_id=t.message_id
+        pot_total=t.pot
+
+        if len(missing)==len(ids):
+            cancelled=True
+            t.status='finished'
+            await _refund_ruby_table(session,t)
+        else:
+            loser=missing[0]; winner=[i for i in ids if i!=loser][0]
+            state['wins'][str(winner)]=state['wins'].get(str(winner),0)+1
+            state['starter']=winner
+            round_completed_no=state['round']
+            state['round']+=1; state['choices']={}
+            if state['round']>RPS_TOTAL_ROUNDS:
+                match_finished=True; t.status='finished'
+                wins=state['wins']; best=max(wins.values()) if wins else 0
+                winners=[int(u) for u,v in wins.items() if v==best] if wins else []
+                pot_total=t.pot or 0
+                if pot_total>0 and winners:
+                    share=pot_total//len(winners)
+                    for uid in winners:
+                        u=session.get(User,uid)
+                        if u: u.fox_points=(u.fox_points or 0)+share
+            wins_snapshot=dict(state.get('wins',{}))
+            t.state=json.dumps(state)
+            state_snapshot=dict(state)
+        session.commit()
+    finally:
+        session.close()
+
+    if cancelled:
+        refund_note="\n💰 مبلغ ورودی به موجودی هر دو نفر برگشت داده شد." if entry>0 else ""
+        text=f"🕹 {name}\n\n⏰ هیچ‌کدوم از بازیکن‌ها تو {RPS_ROUND_TIMEOUT_SECONDS} ثانیه انتخابی نکردن؛ بازی لغو شد.{refund_note}"
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=None)
+        except Exception:
+            pass
+        return
+
+    pot_line=f"\n🏆 جایزه میز: {pot_total:,} روب‌پوینت" if entry>0 else ""
+    reveal=(f"⏱ {names_by_id.get(loser,str(loser))} تو {RPS_ROUND_TIMEOUT_SECONDS} ثانیه انتخاب نکرد و بازنده‌ی راند {round_completed_no} شد.\n"
+            f"🏅 برنده راند: {names_by_id.get(winner,str(winner))}")
+
+    if match_finished:
+        score_lines=[f"👤 {names_by_id.get(uid,str(uid))} — {wins_snapshot.get(str(uid),0)} برد" for uid in ids]
+        if winners and pot_total>0:
+            share=pot_total//len(winners)
+            wnames=[names_by_id.get(uid,str(uid)) for uid in winners]
+            if len(winners)==1:
+                result_line=f"🏆 {wnames[0]} برنده شد و {share:,} روب‌پوینت گرفت! 🎉"
+            else:
+                result_line=f"🤝 مساوی شد بین {', '.join(wnames)}؛ هرکدوم {share:,} روب‌پوینت گرفتن."
+        else:
+            result_line="🏁 بازی تموم شد."
+        text=(f"🕹 {name}\n\n{reveal}\n\n"+"\n".join(score_lines)+f"\n\n{result_line}")
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=None)
+        except Exception:
+            pass
+    else:
+        text,kb=render_rps_panel(tid,name,pot_line,ids,names_by_id,state_snapshot,extra=reveal)
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+        except Exception:
+            pass
+        if context.job_queue:
+            context.job_queue.run_once(rps_round_timeout,RPS_ROUND_TIMEOUT_SECONDS,data={'tid':tid,'round':state_snapshot['round']})
 
 async def ruby_xo_move(update,context):
     q=update.callback_query; _,tid_s,cell_s=q.data.split(":"); tid=int(tid_s); cell=int(cell_s)
@@ -1872,6 +1980,62 @@ async def notify_user_private(bot, user_id, text):
 
 def admin_only(user_id): return user_id in ADMIN_IDS
 
+def build_backup_file():
+    """
+    یک فایل JSON از همه‌ی کاربران (روب‌پوینت، لول، امتیاز و ...) و حساب‌های
+    بانکی می‌سازه. این فقط یک نسخه‌ی پشتیبان برای بازیابی دستیه؛ جای دیتابیس
+    اصلی رو نمی‌گیره، ولی اگه یه جا دیتابیس زنده اشتباهی خالی/ریست بشه، با این
+    فایل می‌شه اطلاعات روب‌پوینت و لول کاربرا رو دستی برگردوند.
+    """
+    session = get_session()
+    try:
+        users = session.query(User).all()
+        data = {
+            "generated_at": now_utc().isoformat(),
+            "users_count": len(users),
+            "users": [{
+                "telegram_id": u.telegram_id,
+                "username": u.username,
+                "first_name": u.first_name,
+                "points": u.points,
+                "total_earned": u.total_earned,
+                "level": u.level,
+                "fox_name": u.fox_name,
+                "fox_level": u.fox_level,
+                "fox_belly": u.fox_belly,
+                "fox_points": u.fox_points,
+                "fox_total_earned": u.fox_total_earned,
+                "fox_claim_count": u.fox_claim_count,
+                "hunt_count": u.hunt_count,
+                "fox_rescued_count": u.fox_rescued_count,
+            } for u in users],
+            "bank_accounts": [{
+                "account_number": a.account_number,
+                "user_id": a.user_id,
+                "balance": a.balance,
+            } for a in session.query(BankAccount).all()],
+        }
+    finally:
+        session.close()
+    raw = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    filename = f"backup_{now_utc().strftime('%Y%m%d_%H%M%S')}.json"
+    return raw, filename
+
+async def send_backup_to_admins(context, caption="📦 بکاپ خودکار روزانه"):
+    try:
+        raw, filename = build_backup_file()
+    except Exception:
+        logger.exception("backup build failed")
+        return
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_document(chat_id=admin_id, document=io.BytesIO(raw), filename=filename, caption=caption)
+        except Exception:
+            pass  # یعنی اون ادمین هنوز پی‌وی ربات رو استارت نزده
+
+async def daily_backup_job(context):
+    await send_backup_to_admins(context)
+
 async def admin_command(update, context):
     if not await require_membership(update, context): return
     if not admin_only(update.effective_user.id): await update.message.reply_text("⛔ دسترسی نداری.", **reply_kwargs(update.message)); return
@@ -1882,6 +2046,7 @@ async def admin_command(update, context):
         [InlineKeyboardButton("🦊 افزودن/کسر روب‌پوینت", callback_data="admin:addpoints")],
         [InlineKeyboardButton("⭐ تنظیم سطح", callback_data="admin:setlevel")],
         [InlineKeyboardButton("🦊 تنظیم روب‌پوینت", callback_data="admin:setfoxpoints")],
+        [InlineKeyboardButton("📦 دریافت بکاپ اطلاعات", callback_data="admin:backup")],
     ])
     await update.message.reply_text("🛠 پنل مدیریت\n\nبرای عملیات متنی، بعد از زدن گزینه مربوطه مقدار را بفرست.", reply_markup=kb, **reply_kwargs(update.message))
 
@@ -1905,6 +2070,9 @@ async def admin_callback(update, context):
     elif action == "addpoints": context.user_data["admin_action"]="addpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی کاربر + مقدار روب‌پوینت")
     elif action == "setlevel": context.user_data["admin_action"]="setlevel"; await q.message.reply_text("⭐ فرمت: آیدی عددی کاربر + سطح")
     elif action == "setfoxpoints": context.user_data["admin_action"]="setfoxpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی کاربر + مقدار روب‌پوینت")
+    elif action == "backup":
+        raw, filename = build_backup_file()
+        await q.message.reply_document(document=io.BytesIO(raw), filename=filename, caption="📦 بکاپ اطلاعات کاربران (دستی)")
 
 
 async def admin_text(update, context):
@@ -2079,7 +2247,7 @@ def main():
     app.add_handler(CommandHandler("roobam",roobam_command))
     app.add_handler(CommandHandler("leaderboard",leaderboard_command))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|setlevel|setfoxpoints)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|setlevel|setfoxpoints|backup)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename):\d+$"))
@@ -2105,6 +2273,10 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text_router),group=2)
     if app.job_queue:
         app.job_queue.run_repeating(post_injured_fox_job, interval=INJURED_FOX_INTERVAL, first=5, name="injured-fox")
+        if ADMIN_IDS:
+            app.job_queue.run_repeating(daily_backup_job, interval=BACKUP_INTERVAL_SECONDS, first=60, name="daily-backup")
+    db_kind = "PostgreSQL (پایدار ✅)" if DATABASE_URL.startswith("postgres") else "SQLite محلی (⚠️ روی Railway بدون Volume با هر دیپلوی پاک می‌شود)"
+    logger.info(f"Database in use: {db_kind}")
     logger.info("Bot started polling...")
     app.run_polling()
 
