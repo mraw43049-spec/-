@@ -444,9 +444,25 @@ RUBY_EMOJI_TO_GAME={v:k for k,v in RUBY_GAME_EMOJI.items()}
 
 # گردونه شانس: بر اساس اسلات‌ماشین تلگرام (dice.value از 1 تا 64).
 # value=43 یعنی سه‌تا لیمو 🍋 و value=64 یعنی سه‌تا هفت 7️⃣ (جکپات).
-WHEEL_WIN_VALUES = {43, 64}
 WHEEL_JACKPOT_MULTIPLIER = 2.7
-SLOT_SYMBOLS = {43: "🍋🍋🍋", 64: "7️⃣7️⃣7️⃣"}
+WHEEL_JACKPOT_THRESHOLD = 57
+# دیکد مقدار اسلات‌ماشین تلگرام (1 تا 64) به سه مهره‌ی هر ردیف.
+# فرمول استاندارد: v=value-1 در مبنای 4 نوشته می‌شه؛ رقم‌ها: 0=BAR ، 1=🍇 ، 2=🍋 ، 3=7️⃣
+WHEEL_REEL_SYMBOL = {0: "🅱️BAR", 1: "🍇", 2: "🍋", 3: "7️⃣"}
+WHEEL_REEL_POINTS = {0: 10, 1: 15, 2: 18, 3: 20}
+
+def wheel_decode(value):
+    v = value - 1
+    d1 = v % 4; v //= 4
+    d2 = v % 4; v //= 4
+    d3 = v % 4
+    return [d1, d2, d3]
+
+def wheel_score(value):
+    digits = wheel_decode(value)
+    points = sum(WHEEL_REEL_POINTS[d] for d in digits)
+    combo = " ".join(WHEEL_REEL_SYMBOL[d] for d in digits)
+    return points, combo
 
 RUBY_COOLDOWN_SECONDS = 90  # هر کاربر هر 1 دقیقه و 30 ثانیه فقط یک‌بار می‌تواند بازی روبی جدید بسازد/وارد شود
 
@@ -661,6 +677,23 @@ async def ruby_create_table(update,context):
     finally: session.close()
     await q.answer("میز ساخته شد!")
     fee_line = "🏆 بازی رایگان روبی" if amount<=0 else f"💰 مبلغ ورودی: {amount:,} روب‌پوینت 🪙\n🏆 جایزه کل میز: {amount*count:,} روب‌پوینت"
+    if count<=1:
+        # بازی تکی: نیازی به پیوستن کسی نیست، همون لحظه شروع می‌شه.
+        session=get_session()
+        try:
+            t=session.get(RubyTable,tid)
+            t.status='active'
+            if key=='cz_rabbit':
+                t.state=json.dumps({"phase":"plant","paws":{},"revealed":[]})
+            session.commit()
+        finally: session.close()
+        if key in RUBY_GAME_EMOJI:
+            emoji=RUBY_GAME_EMOJI.get(key)
+            move_line=f"\n\n🎯 روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا بچرخونی/بندازی."
+            await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!\n{fee_line}{move_line}",reply_markup=None)
+        else:
+            await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!\n{fee_line}",reply_markup=None)
+        return
     await q.message.edit_text(f"🕹 {name}\n\n{fee_line}\n\n1️⃣ بازیکن : {creator_name}\n" + "\n".join(f"{i}️⃣ بازیکن : …" for i in range(2,count+1)) + "\n\n⏳ این میز بازی فقط 60 ثانیه اعتبار دارد…",reply_markup=ruby_table_keyboard(tid))
     context.job_queue.run_once(expire_ruby_table,60,data=tid) if context.job_queue else None
 
@@ -1134,13 +1167,14 @@ async def ruby_dice_reply(update, context):
         finished = all(i in scores for i in ids)
 
         if game_type == 'cz_wheel':
-            # هر بازیکن مستقل از بقیه با «خونه» شرط می‌بنده؛ رقابتی بین بازیکنا نیست.
+            # هر بازیکن مستقل از بقیه می‌چرخونه؛ رقابتی بین بازیکنا نیست.
             wheel_wins = {}
             if finished:
                 t.status = 'finished'
                 for uid, v in scores.items():
-                    if v in WHEEL_WIN_VALUES:
-                        win_amount = int(t.entry_amount * WHEEL_JACKPOT_MULTIPLIER)
+                    pts, _combo = wheel_score(v)
+                    if pts >= WHEEL_JACKPOT_THRESHOLD:
+                        win_amount = int(round(t.entry_amount * WHEEL_JACKPOT_MULTIPLIER))
                         wheel_wins[uid] = win_amount
                         u = session.get(User, uid)
                         if u and win_amount > 0: u.fox_points = (u.fox_points or 0) + win_amount
@@ -1173,16 +1207,17 @@ async def ruby_dice_reply(update, context):
         for i, uid in enumerate(ids):
             uname = names_by_id.get(uid, str(uid))
             if uid in scores:
-                combo = SLOT_SYMBOLS.get(scores[uid], "❓")
+                pts, combo = wheel_score(scores[uid])
                 if uid in wheel_wins:
-                    lines.append(f"{i+1}️⃣ {uname} — {combo} 🎉 برد {wheel_wins[uid]:,} روب‌پوینت")
+                    lines.append(f"{i+1}️⃣ {uname} — {combo} ({pts} امتیاز) 🎉 برد {wheel_wins[uid]:,} روب‌پوینت")
                 else:
-                    lines.append(f"{i+1}️⃣ {uname} — {combo} ❌ باخت")
+                    lines.append(f"{i+1}️⃣ {uname} — {combo} ({pts} امتیاز) ❌ باخت")
             else:
                 lines.append(f"{i+1}️⃣ {uname} — ⏳ در انتظار چرخوندن")
         if not finished:
             text = (
-                f"🕹 {name}\n\n🎰 هرکس مستقل از بقیه می‌چرخونه! اگه 🍋🍋🍋 یا 7️⃣7️⃣7️⃣ بیاد {WHEEL_JACKPOT_MULTIPLIER}× مبلغ ورودی می‌گیره.\n\n"
+                f"🕹 {name}\n\n🎰 هرکس مستقل از بقیه می‌چرخونه!\n"
+                f"7️⃣=20 🍋=18 🍇=15 BAR=10 امتیاز؛ اگه مجموع 3 تا رقم ≥ {WHEEL_JACKPOT_THRESHOLD} بشه، {WHEEL_JACKPOT_MULTIPLIER}× مبلغ ورودی می‌گیری.\n\n"
                 + "\n".join(lines) +
                 "\n\n🎰 نفرات بعدی: روی همین پیام ریپلای کن و ایموجی 🎰 رو بفرست."
             )
