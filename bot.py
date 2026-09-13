@@ -740,7 +740,7 @@ def rabbit_keyboard(tid, state):
         row=[]
         for c in range(5):
             i = r*5+c
-            label = "🐇" if i in revealed else "❓"
+            label = "🐇" if i in revealed else str(i+1)
             row.append(InlineKeyboardButton(label, callback_data=f"rrabbit:{tid}:{i}"))
         rows.append(row)
     return InlineKeyboardMarkup(rows)
@@ -1080,6 +1080,11 @@ async def ruby_rps_choice(update,context):
         uid_str=str(q.from_user.id)
         if uid_str in state['choices']:
             await q.answer("قبلاً انتخابتو کردی؛ منتظر حریف باش.",show_alert=True); return
+        starter=state.get('starter')
+        if starter and uid_str!=str(starter) and str(starter) not in state['choices']:
+            starter_user=session.get(User,int(starter))
+            starter_name=user_display_name(starter_user) if starter_user else "حریفت"
+            await q.answer(f"⏳ چون راند قبل رو برده، اول باید {starter_name} انتخابشو بزنه؛ صبر کن.",show_alert=True); return
         state['choices'][uid_str]=choice
         round_complete = all(str(i) in state['choices'] for i in ids)
         round_no=state['round']; ca=cb=None; round_winner=None; match_finished=False; winners=None; pot=0
@@ -1359,6 +1364,8 @@ async def ruby_rabbit_choice(update,context):
         if cell in revealed:
             await q.answer("این خونه قبلاً باز شده.",show_alert=True); return
         paws=state.get('paws',{})
+        if paws.get(str(uid))==cell:
+            await q.answer("این خونه پنجه‌ی خودته؛ نمی‌تونی همونجا رو بزنی.",show_alert=True); return
         hit_paw = cell in paws.values()
         match_finished=False; loser_id=None; winner_id=None; pot=0
         if hit_paw:
