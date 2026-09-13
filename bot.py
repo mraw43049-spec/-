@@ -410,8 +410,9 @@ async def ruby_games_command(update, context):
         [InlineKeyboardButton("🎯 بازی روبی دارت",callback_data=f"rg:darts:{owner_id}")],
         [InlineKeyboardButton("🏀 بازی روبی بسکتبال",callback_data=f"rg:basketball:{owner_id}")],
         [InlineKeyboardButton("🎳 بازی روبی بولینگ",callback_data=f"rg:bowling:{owner_id}")],
+        [InlineKeyboardButton("🔢 بازی عدد مخفی",callback_data=f"rg:hidden:{owner_id}")],
     ])
-    await update.message.reply_text("🕹 بازی های روبی 🦊\n\n❗️ لطفا بازی مورد نظر را انتخاب کنید ⬇️\n\n🧩 بازی روبی دوز XO\n┘─ محدودیت بازیکن : 2 روباه🦊\n\n🔫 بازی روبی سنگ کاغذ قیچی\n┘─ محدودیت بازیکن : 2 روباه🦊\n\n🎯 بازی روبی دارت\n┘─ محدودیت بازیکن : 2 - 4 روباه🦊\n\n🏀 بازی روبی بسکتبال\n┘─ محدودیت بازیکن : 2 - 3 روباه🦊\n\n🎳 بازی روبی بولینگ\n┘─ محدودیت بازیکن : 2 - 4 روباه🦊\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🕹 بازی های روبی 🦊\n\n❗️ لطفا بازی مورد نظر را انتخاب کنید ⬇️\n\n🧩 بازی روبی دوز XO\n┘─ محدودیت بازیکن : 2 روباه🦊\n\n🔫 بازی روبی سنگ کاغذ قیچی\n┘─ محدودیت بازیکن : 2 روباه🦊\n\n🎯 بازی روبی دارت\n┘─ محدودیت بازیکن : 2 - 4 روباه🦊\n\n🏀 بازی روبی بسکتبال\n┘─ محدودیت بازیکن : 2 - 3 روباه🦊\n\n🎳 بازی روبی بولینگ\n┘─ محدودیت بازیکن : 2 - 4 روباه🦊\n\n🔢 بازی عدد مخفی\n┘─ تک‌نفره؛ عدد بین 1 تا 100 رو پیدا کن\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 
 async def casino_command(update, context):
@@ -427,14 +428,16 @@ async def casino_command(update, context):
         [InlineKeyboardButton("🎰 گردونه شانس",callback_data=f"rg:cz_wheel:{owner_id}")],
         [InlineKeyboardButton("🎲 تاس",callback_data=f"rg:cz_dice:{owner_id}")],
         [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
+        [InlineKeyboardButton("🃏 دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
     ])
-    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 گردونه شانس\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 گردونه شانس\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 دوتایی‌ها\n┘─ 12 کارت؛ پیدا کردن 6 جفت در 30 ثانیه\n┘─ جایزه: 1,000 روب‌پوینت\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
     "xo":("🧩 بازی روبی دوز XO",2,2,True),"rps":("🔫 بازی روبی سنگ کاغذ قیچی",2,2,True),
     "darts":("🎯 بازی روبی دارت",2,4,True),"basketball":("🏀 بازی روبی بسکتبال",2,3,True),"bowling":("🎳 بازی روبی بولینگ",2,4,True),
     "cz_wheel":("🎰 گردونه شانس",1,3,True),"cz_dice":("🎲 تاس",1,2,True),"cz_rabbit":("🐇 خرگوش خور",2,2,True),
+    "hidden":("🔢 بازی عدد مخفی",1,1,False),"cz_pairs":("🃏 دوتایی‌ها",1,1,False),
 }
 CASINO_UNLOCK_LEVEL = 5
 
@@ -583,6 +586,192 @@ def render_rabbit_panel(tid,name,pot_line,ids,names_by_id,state):
         )
     return text, rabbit_keyboard(tid, state)
 
+
+# ---------- بازی عدد مخفی (بازی روبی) ----------
+
+def hidden_number_keyboard(owner_id):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("❌ پایان بازی", callback_data=f"hidden:cancel:{owner_id}")]])
+
+async def start_hidden_number(update, context):
+    q=update.callback_query
+    _, action, owner_s=q.data.split(":")
+    owner_id=int(owner_s)
+    if q.from_user.id!=owner_id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.", show_alert=True); return
+    if action!="hidden": return
+    if not await require_membership(update,context): return
+    if context.user_data.get("hidden_number_game"):
+        await q.answer("🔢 یک بازی عدد مخفی از قبل برات فعاله.", show_alert=True); return
+    context.user_data["hidden_number_game"]={"number":random.randint(1,100),"attempts":0}
+    await q.answer("🎮 بازی شروع شد!")
+    await q.message.edit_text(
+        "🔢 بازی عدد مخفی 🦊\n\n"
+        "من یک عدد بین 1 تا 100 انتخاب کردم.\n"
+        "حدست رو به‌صورت عدد بفرست تا راهنماییت کنم. 👀\n\n"
+        "🎯 عدد رو پیدا کن!",
+        reply_markup=hidden_number_keyboard(owner_id)
+    )
+
+async def hidden_number_cancel(update, context):
+    q=update.callback_query
+    owner_id=int(q.data.split(":")[2])
+    if q.from_user.id!=owner_id:
+        await q.answer("⛔ این بازی برای تو نیست.",show_alert=True); return
+    context.user_data.pop("hidden_number_game",None)
+    await q.answer("بازی پایان یافت.")
+    try:
+        await q.message.edit_text("🔢 بازی عدد مخفی\n\n⛔️ بازی لغو شد.")
+    except Exception:
+        pass
+
+async def handle_hidden_number_text(update, context):
+    game=context.user_data.get("hidden_number_game")
+    if not game or not update.message or not update.message.text:
+        return False
+    trans=str.maketrans("۰۱۲۳۴۵۶۷۸۹","0123456789")
+    text=update.message.text.strip().translate(trans)
+    if not re.fullmatch(r"\d{1,3}",text):
+        return False
+    guess=int(text)
+    if not 1<=guess<=100:
+        await update.message.reply_text("❌ فقط یک عدد بین 1 تا 100 بفرست.",**reply_kwargs(update.message)); return True
+    game["attempts"]=int(game.get("attempts",0))+1
+    target=int(game["number"])
+    if guess==target:
+        attempts=game["attempts"]
+        context.user_data.pop("hidden_number_game",None)
+        await update.message.reply_text(
+            f"🎉 آفرین! عدد مخفی رو پیدا کردی.\n\n🔢 عدد: {target}\n"
+            f"🎯 تعداد حدس: {attempts}",
+            **reply_kwargs(update.message)
+        )
+    else:
+        hint="🔼 عدد مخفی بزرگ‌تره." if guess<target else "🔽 عدد مخفی کوچک‌تره."
+        await update.message.reply_text(
+            f"{hint}\n\n🎯 حدس فعلی: {guess}\n🔢 یک عدد دیگه بین 1 تا 100 بفرست.",
+            **reply_kwargs(update.message)
+        )
+    return True
+
+# ---------- بازی دوتایی‌ها (کازینو روبی) ----------
+
+PAIR_SYMBOLS=["🍎","🍋","🍇","🍉","🥝","🍒"]
+
+def pairs_keyboard(tid,state):
+    cards=state["cards"]; flipped=set(state.get("flipped",[])); matched=set(state.get("matched",[]))
+    rows=[]
+    for r in range(3):
+        row=[]
+        for c in range(4):
+            i=r*4+c
+            row.append(InlineKeyboardButton(cards[i] if i in flipped or i in matched else "❓",callback_data=f"rpairs:{tid}:{i}"))
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+def pairs_text(state):
+    return (
+        "🃏 بازی دوتایی‌ها 🦊\n\n"
+        "12 کارت داری؛ 6 جفت رو پیدا کن.\n"
+        f"✅ جفت‌های پیدا شده: {len(state.get('matched',[]))//2}/6\n"
+        f"🎯 حرکت‌ها: {state.get('moves',0)}\n"
+        "⏱ زمان: 30 ثانیه"
+    )
+
+async def start_pairs_game(update,context):
+    q=update.callback_query
+    _, action, owner_s=q.data.split(":")
+    owner_id=int(owner_s)
+    if q.from_user.id!=owner_id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True); return
+    if action!="cz_pairs": return
+    if not await require_membership(update,context): return
+    session=get_session()
+    try:
+        user=get_or_create_user(session,q.from_user)
+        remaining=ruby_cooldown_remaining(user)
+        if remaining>0:
+            await q.answer(f"⏳ {remaining} ثانیه دیگه صبر کن.",show_alert=True); return
+        user.last_ruby_game_at=now_utc()
+        session.commit()
+        cards=PAIR_SYMBOLS*2
+        random.shuffle(cards)
+        state={"cards":cards,"flipped":[],"matched":[],"moves":0,"busy":False,"owner":owner_id}
+        table=RubyTable(chat_id=q.message.chat_id,game_type="cz_pairs",creator_id=owner_id,max_players=1,
+                        entry_amount=0,pot=0,players=str(owner_id),status="active",
+                        message_id=q.message.message_id,state=json.dumps(state,ensure_ascii=False),created_at=now_utc())
+        session.add(table); session.commit(); tid=table.id
+    finally:
+        session.close()
+    await q.answer("🎮 بازی شروع شد!")
+    await q.message.edit_text(pairs_text(state),reply_markup=pairs_keyboard(tid,state))
+    if context.job_queue:
+        context.job_queue.run_once(pairs_timeout,30,data=tid,name=f"pairs-timeout-{tid}")
+
+async def pairs_timeout(context):
+    tid=int(context.job.data); session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!="active" or t.game_type!="cz_pairs": return
+        t.status="expired"; session.commit()
+        chat_id=t.chat_id; message_id=t.message_id
+    finally: session.close()
+    try:
+        await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,
+            text="🃏 بازی دوتایی‌ها\n\n⏰ وقتت تموم شد!\n❌ هر 6 جفت پیدا نشد.")
+    except Exception: pass
+
+async def ruby_pairs_choice(update,context):
+    q=update.callback_query
+    try:
+        _,tid_s,idx_s=q.data.split(":"); tid=int(tid_s); idx=int(idx_s)
+    except Exception: return
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!="active" or t.game_type!="cz_pairs":
+            await q.answer("⏰ بازی فعال نیست.",show_alert=True); return
+        if q.from_user.id!=t.creator_id:
+            await q.answer("⛔ این بازی برای تو نیست.",show_alert=True); return
+        state=json.loads(t.state or "{}"); cards=state.get("cards",[])
+        flipped=list(state.get("flipped",[])); matched=list(state.get("matched",[]))
+        if state.get("busy") or idx in matched or idx in flipped or not 0<=idx<12:
+            await q.answer("این کارت رو نمی‌تونی انتخاب کنی.",show_alert=True); return
+        flipped.append(idx)
+        state["flipped"]=flipped
+        if len(flipped)==2:
+            state["moves"]=int(state.get("moves",0))+1; state["busy"]=True
+        t.state=json.dumps(state,ensure_ascii=False); session.commit()
+    finally: session.close()
+    await q.answer()
+    await q.edit_message_text(pairs_text(state),reply_markup=pairs_keyboard(tid,state))
+    if len(flipped)<2: return
+    await asyncio.sleep(0.8)
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!="active": return
+        state=json.loads(t.state or "{}"); flipped=list(state.get("flipped",[]))
+        if len(flipped)!=2: return
+        a,b=flipped
+        if state["cards"][a]==state["cards"][b]:
+            state["matched"]=sorted(set(state.get("matched",[])+[a,b]))
+        state["flipped"]=[]; state["busy"]=False
+        won=len(state["matched"])==12
+        if won:
+            t.status="finished"
+            user=session.get(User,q.from_user.id)
+            if user:
+                user.fox_points=(user.fox_points or 0)+1000
+                user.fox_total_earned=(user.fox_total_earned or 0)+1000
+        t.state=json.dumps(state,ensure_ascii=False); session.commit()
+        moves=state.get("moves",0)
+    finally: session.close()
+    if won:
+        await q.edit_message_text("🎉 تبریک! هر 6 جفت رو پیدا کردی!\n\n"
+                                  f"🎯 تعداد حرکت: {moves}\n🎁 جایزه: 1,000 روب‌پوینت 🪙")
+    else:
+        await q.edit_message_text(pairs_text(state),reply_markup=pairs_keyboard(tid,state))
+
 async def ruby_game_select(update,context):
     q=update.callback_query
     parts=q.data.split(":")
@@ -591,6 +780,12 @@ async def ruby_game_select(update,context):
     if q.from_user.id!=owner_id:
         await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True); return
     if not await require_membership(update,context): return
+    if key=="hidden":
+        await start_hidden_number(update,context)
+        return
+    if key=="cz_pairs":
+        await start_pairs_game(update,context)
+        return
     name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     session=get_session()
     try:
@@ -2863,7 +3058,7 @@ def main():
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|resetask|resetyes|resetno):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|hidden|cz_wheel|cz_dice|cz_rabbit|cz_pairs):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_dice_bet_select,pattern=r"^rdicebet:\d+:\d+:\d+:(odd|even|high|low)$"))
@@ -2871,6 +3066,8 @@ def main():
     app.add_handler(CallbackQueryHandler(ruby_rps_choice,pattern=r"^rrps:\d+:(rock|paper|scissors)$"))
     app.add_handler(CallbackQueryHandler(ruby_xo_move,pattern=r"^rxo:\d+:[0-8]$"))
     app.add_handler(CallbackQueryHandler(ruby_rabbit_choice,pattern=r"^rrabbit:\d+:(?:[0-9]|1[0-9])$"))
+    app.add_handler(CallbackQueryHandler(hidden_number_cancel,pattern=r"^hidden:cancel:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_pairs_choice,pattern=r"^rpairs:\d+:(?:[0-9]|1[0-1])$"))
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
