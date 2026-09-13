@@ -442,10 +442,25 @@ CASINO_UNLOCK_LEVEL = 5
 RUBY_GAME_EMOJI={"darts":"🎯","basketball":"🏀","bowling":"🎳","cz_dice":"🎲","cz_wheel":"🎰"}
 RUBY_EMOJI_TO_GAME={v:k for k,v in RUBY_GAME_EMOJI.items()}
 
+# شرط‌بندی تاس کازینو: در حالت دو نفره از بین 4 گزینه یکی رو سازنده انتخاب می‌کنه؛
+# نقطه‌مقابلش خودکار برای حریف می‌شه (فرد↔زوج ، بالاترین تاس↔پایین‌ترین تاس).
+# در حالت تکی فقط فرد/زوج معنا داره.
+DICE_BET_LABELS = {"odd": "🔢 فرد", "even": "🔢 زوج", "high": "⬆️ بالاترین تاس", "low": "⬇️ پایین‌ترین تاس"}
+DICE_BET_COMPLEMENT = {"odd": "even", "even": "odd", "high": "low", "low": "high"}
+DICE_SOLO_WIN_MULTIPLIER = 1.9  # ضریب برد بازی تکی تاس (فرد/زوج)
+
+def dice_bet_wins(bet, my_value, other_value):
+    if bet == 'odd': return (my_value + other_value) % 2 == 1
+    if bet == 'even': return (my_value + other_value) % 2 == 0
+    if bet == 'high': return my_value > other_value
+    if bet == 'low': return my_value < other_value
+    return False
+
 # گردونه شانس: بر اساس اسلات‌ماشین تلگرام (dice.value از 1 تا 64).
 # value=43 یعنی سه‌تا لیمو 🍋 و value=64 یعنی سه‌تا هفت 7️⃣ (جکپات).
-WHEEL_JACKPOT_MULTIPLIER = 2.7
-WHEEL_JACKPOT_THRESHOLD = 57
+WHEEL_WIN_THRESHOLD = 50  # بالای این امتیاز، جایزه‌ی عادی تعلق می‌گیره.
+WHEEL_WIN_MULTIPLIER = 1.5  # ضریب جایزه‌ی عادی (امتیاز بالای 50).
+WHEEL_JACKPOT_MULTIPLIER = 2.7  # ضریب جایزه وقتی دقیقاً 7️⃣7️⃣7️⃣ (جکپات) بیاد.
 # دیکد مقدار اسلات‌ماشین تلگرام (1 تا 64) به سه مهره‌ی هر ردیف.
 # فرمول استاندارد: v=value-1 در مبنای 4 نوشته می‌شه؛ رقم‌ها: 0=BAR ، 1=🍇 ، 2=🍋 ، 3=7️⃣
 WHEEL_REEL_SYMBOL = {0: "🅱️BAR", 1: "🍇", 2: "🍋", 3: "7️⃣"}
@@ -463,6 +478,10 @@ def wheel_score(value):
     points = sum(WHEEL_REEL_POINTS[d] for d in digits)
     combo = " ".join(WHEEL_REEL_SYMBOL[d] for d in digits)
     return points, combo
+
+def wheel_is_jackpot(value):
+    """دقیقاً سه‌تا 7️⃣ (بیشترین مقدار اسلات‌ماشین یعنی 64)."""
+    return value == 64
 
 RUBY_COOLDOWN_SECONDS = 90  # هر کاربر هر 1 دقیقه و 30 ثانیه فقط یک‌بار می‌تواند بازی روبی جدید بسازد/وارد شود
 
@@ -620,6 +639,16 @@ async def ask_ruby_entry_amount(chat_id,message_id,context,key,count,owner_id):
 async def finalize_ruby_setup(chat_id,message_id,context,key,count,amount,owner_id):
     name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     fee_text = "رایگان ✅" if amount<=0 else f"{amount:,} روب‌پوینت 🪙"
+    if key == 'cz_dice':
+        bet_keys = ['odd', 'even'] if count <= 1 else ['odd', 'even', 'high', 'low']
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(DICE_BET_LABELS[b], callback_data=f"rdicebet:{count}:{amount}:{owner_id}:{b}")] for b in bet_keys])
+        bet_hint = "روی تک تاست شرط ببند:" if count <= 1 else "شرطت رو انتخاب کن؛ نقطه‌مقابلش خودکار برای حریفت می‌شه:"
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text=f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n💰 مبلغ ورودی : {fee_text}\n\n🎲 {bet_hint}",
+            reply_markup=kb
+        )
+        return
     kb=InlineKeyboardMarkup([[InlineKeyboardButton("🛠 ساخت میز بازی",callback_data=f"rcreate:{key}:{count}:{amount}:{owner_id}")]])
     await context.bot.edit_message_text(
         chat_id=chat_id,message_id=message_id,
@@ -689,13 +718,68 @@ async def ruby_create_table(update,context):
         finally: session.close()
         if key in RUBY_GAME_EMOJI:
             emoji=RUBY_GAME_EMOJI.get(key)
-            move_line=f"\n\n🎯 روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا بچرخونی/بندازی."
+            move_line=f"\n\nروی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا بچرخونی/بندازی."
             await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!\n{fee_line}{move_line}",reply_markup=None)
         else:
             await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!\n{fee_line}",reply_markup=None)
         return
     await q.message.edit_text(f"🕹 {name}\n\n{fee_line}\n\n1️⃣ بازیکن : {creator_name}\n" + "\n".join(f"{i}️⃣ بازیکن : …" for i in range(2,count+1)) + "\n\n⏳ این میز بازی فقط 60 ثانیه اعتبار دارد…",reply_markup=ruby_table_keyboard(tid))
     context.job_queue.run_once(expire_ruby_table,60,data=tid) if context.job_queue else None
+
+async def ruby_dice_bet_select(update, context):
+    q = update.callback_query
+    parts = q.data.split(":")
+    if len(parts) != 5: return
+    _, count, amount, owner_s, bet = parts
+    count = int(count); amount = int(amount); owner_id = int(owner_s)
+    if bet not in DICE_BET_COMPLEMENT: return
+    if q.from_user.id != owner_id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.", show_alert=True); return
+    if not await require_membership(update, context): return
+    key = 'cz_dice'
+    name, minp, maxp, allow_fee = RUBY_GAME_CONFIG[key]
+    session = get_session()
+    try:
+        user = get_or_create_user(session, q.from_user)
+        remaining = ruby_cooldown_remaining(user)
+        if remaining > 0:
+            await q.answer(f"⏳ {remaining} ثانیه دیگه صبر کن تا بتونی دوباره بازی روبی بسازی.", show_alert=True); return
+        if amount > 0 and (user.fox_points or 0) < amount:
+            await q.answer("❌ روب‌پوینت کافی نداری.", show_alert=True); return
+        if amount > 0:
+            user.fox_points -= amount
+        user.last_ruby_game_at = now_utc()
+        table = RubyTable(chat_id=q.message.chat_id, game_type=key, creator_id=user.telegram_id, max_players=count,
+                           entry_amount=amount, pot=amount, players=str(user.telegram_id), status='open',
+                           message_id=q.message.message_id, created_at=now_utc(),
+                           state=json.dumps({"bets": {str(user.telegram_id): bet}}))
+        session.add(table); session.commit(); tid = table.id
+        creator_name = user_display_name(user)
+    finally:
+        session.close()
+    await q.answer("میز ساخته شد!")
+    fee_line = "🏆 بازی رایگان روبی" if amount <= 0 else f"💰 مبلغ ورودی: {amount:,} روب‌پوینت 🪙\n🏆 جایزه کل میز: {amount*count:,} روب‌پوینت"
+    bet_line = f"\n🎲 شرط تو: {DICE_BET_LABELS[bet]}"
+    if count <= 1:
+        session = get_session()
+        try:
+            t = session.get(RubyTable, tid)
+            t.status = 'active'
+            session.commit()
+        finally:
+            session.close()
+        emoji = RUBY_GAME_EMOJI.get(key)
+        move_line = f"\n\nروی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا بندازی."
+        await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!\n{fee_line}{bet_line}{move_line}", reply_markup=None)
+        return
+    await q.message.edit_text(
+        f"🕹 {name}\n\n{fee_line}{bet_line}\n\n1️⃣ بازیکن : {creator_name}\n" +
+        "\n".join(f"{i}️⃣ بازیکن : …" for i in range(2, count+1)) +
+        "\n\n⏳ این میز بازی فقط 60 ثانیه اعتبار دارد…",
+        reply_markup=ruby_table_keyboard(tid)
+    )
+    context.job_queue.run_once(expire_ruby_table, 60, data=tid) if context.job_queue else None
+
 
 async def _refund_ruby_table(session,t):
     """مبلغ ورودی همه بازیکنانی که تا الان وارد میز شده‌اند را برمی‌گرداند."""
@@ -759,6 +843,11 @@ async def ruby_join_table(update,context):
                 t.state=json.dumps({"board":[""]*9,"turn":ids[0],"symbols":{str(ids[0]):"X",str(ids[1]):"O"}})
             elif game_type=='cz_rabbit':
                 t.state=json.dumps({"phase":"plant","paws":{},"revealed":[]})
+            elif game_type=='cz_dice':
+                st=json.loads(t.state or '{}'); bets=st.get('bets',{})
+                creator_bet=bets.get(str(ids[0]))
+                if creator_bet: bets[str(q.from_user.id)]=DICE_BET_COMPLEMENT.get(creator_bet,creator_bet)
+                t.state=json.dumps({"bets":bets})
         session.commit(); players=[session.get(User,i) for i in ids]; name=RUBY_GAME_CONFIG[t.game_type][0]; pot=t.pot; entry=t.entry_amount; state_raw=t.state; tid_=t.id
     finally: session.close()
     await q.answer("🎮 وارد بازی شدی!")
@@ -767,9 +856,14 @@ async def ruby_join_table(update,context):
         names_by_id={u.telegram_id:user_display_name(u) for u in players if u}
         if game_type in RUBY_GAME_EMOJI:
             emoji=RUBY_GAME_EMOJI.get(game_type)
-            move_line = f"\n\n🎯 نوبت پرتابه! روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا خودت پرتاب کنی."
+            move_line = f"\n\nنوبت پرتابه! روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا خودت پرتاب کنی."
+            if game_type=='cz_dice':
+                bets=json.loads(state_raw or '{}').get('bets',{})
+                player_lines='\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u)} — {DICE_BET_LABELS.get(bets.get(str(u.telegram_id)),'?')} — ⏳ در انتظار پرتاب" for i,u in enumerate(players))
+            else:
+                player_lines='\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u)} — ⏳ در انتظار پرتاب" for i,u in enumerate(players))
             await q.message.edit_text(
-                f"🕹 {name}\n\n🎮 بازی شروع شد!{pot_line}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u)} — ⏳ در انتظار پرتاب" for i,u in enumerate(players))+move_line,
+                f"🕹 {name}\n\n🎮 بازی شروع شد!{pot_line}\n\n"+player_lines+move_line,
                 reply_markup=None
             )
         elif game_type=='rps':
@@ -1173,14 +1267,53 @@ async def ruby_dice_reply(update, context):
                 t.status = 'finished'
                 for uid, v in scores.items():
                     pts, _combo = wheel_score(v)
-                    if pts >= WHEEL_JACKPOT_THRESHOLD:
-                        win_amount = int(round(t.entry_amount * WHEEL_JACKPOT_MULTIPLIER))
+                    if pts > WHEEL_WIN_THRESHOLD:
+                        multiplier = WHEEL_JACKPOT_MULTIPLIER if wheel_is_jackpot(v) else WHEEL_WIN_MULTIPLIER
+                        win_amount = int(round(t.entry_amount * multiplier))
                         wheel_wins[uid] = win_amount
                         u = session.get(User, uid)
                         if u and win_amount > 0: u.fox_points = (u.fox_points or 0) + win_amount
             players = [session.get(User, i) for i in ids]
             name = RUBY_GAME_CONFIG[t.game_type][0]
             entry = t.entry_amount; chat_id = t.chat_id; message_id = t.message_id
+            names_by_id = {u.telegram_id: user_display_name(u) for u in players if u}
+        elif game_type == 'cz_dice':
+            bets = json.loads(t.state or '{}').get('bets', {})
+            dice_wins = {}; tie = False
+            if finished:
+                t.status = 'finished'
+                if len(ids) == 1:
+                    uid = ids[0]; my_val = scores[uid]
+                    won = (bets.get(str(uid)) == 'odd') == (my_val % 2 == 1)
+                    if won and t.entry_amount > 0:
+                        win_amount = int(round(t.entry_amount * DICE_SOLO_WIN_MULTIPLIER))
+                        dice_wins[uid] = win_amount
+                        u = session.get(User, uid)
+                        if u: u.fox_points = (u.fox_points or 0) + win_amount
+                    elif won:
+                        dice_wins[uid] = 0
+                else:
+                    a, b = ids[0], ids[1]
+                    win_a = dice_bet_wins(bets.get(str(a)), scores[a], scores[b])
+                    win_b = dice_bet_wins(bets.get(str(b)), scores[b], scores[a])
+                    pot = t.pot or 0
+                    if win_a and not win_b:
+                        dice_wins[a] = pot
+                        u = session.get(User, a)
+                        if u and pot > 0: u.fox_points = (u.fox_points or 0) + pot
+                    elif win_b and not win_a:
+                        dice_wins[b] = pot
+                        u = session.get(User, b)
+                        if u and pot > 0: u.fox_points = (u.fox_points or 0) + pot
+                    else:
+                        tie = True
+                        if t.entry_amount > 0:
+                            for uid in ids:
+                                u = session.get(User, uid)
+                                if u: u.fox_points = (u.fox_points or 0) + t.entry_amount
+            players = [session.get(User, i) for i in ids]
+            name = RUBY_GAME_CONFIG[t.game_type][0]
+            entry = t.entry_amount; chat_id = t.chat_id; message_id = t.message_id; dice_pot = t.pot or 0
             names_by_id = {u.telegram_id: user_display_name(u) for u in players if u}
         else:
             winners = None; pot = 0
@@ -1207,22 +1340,57 @@ async def ruby_dice_reply(update, context):
         for i, uid in enumerate(ids):
             uname = names_by_id.get(uid, str(uid))
             if uid in scores:
-                pts, combo = wheel_score(scores[uid])
+                _pts, combo = wheel_score(scores[uid])
                 if uid in wheel_wins:
-                    lines.append(f"{i+1}️⃣ {uname} — {combo} ({pts} امتیاز) 🎉 برد {wheel_wins[uid]:,} روب‌پوینت")
+                    lines.append(f"{i+1}️⃣ {uname} — {combo} 🎉 برد {wheel_wins[uid]:,} روب‌پوینت")
                 else:
-                    lines.append(f"{i+1}️⃣ {uname} — {combo} ({pts} امتیاز) ❌ باخت")
+                    lines.append(f"{i+1}️⃣ {uname} — {combo} ❌ باخت")
             else:
                 lines.append(f"{i+1}️⃣ {uname} — ⏳ در انتظار چرخوندن")
         if not finished:
             text = (
-                f"🕹 {name}\n\n🎰 هرکس مستقل از بقیه می‌چرخونه!\n"
-                f"7️⃣=20 🍋=18 🍇=15 BAR=10 امتیاز؛ اگه مجموع 3 تا رقم ≥ {WHEEL_JACKPOT_THRESHOLD} بشه، {WHEEL_JACKPOT_MULTIPLIER}× مبلغ ورودی می‌گیری.\n\n"
+                f"🕹 {name}\n\n🎰 هرکس مستقل از بقیه می‌چرخونه! اگه شانس بیاری جایزه می‌گیری؛ 7️⃣7️⃣7️⃣ یعنی جکپات کامل 🎉\n\n"
                 + "\n".join(lines) +
                 "\n\n🎰 نفرات بعدی: روی همین پیام ریپلای کن و ایموجی 🎰 رو بفرست."
             )
         else:
             text = f"🕹 {name}\n\n" + "\n".join(lines) + "\n\n🏁 بازی تموم شد."
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
+        except Exception:
+            pass
+        return
+
+    if game_type == 'cz_dice':
+        pot_line = f"\n🏆 جایزه میز: {dice_pot:,} روب‌پوینت" if entry > 0 and len(ids) > 1 else ""
+        lines = []
+        for i, uid in enumerate(ids):
+            uname = names_by_id.get(uid, str(uid))
+            bet_label = DICE_BET_LABELS.get(bets.get(str(uid)), '?')
+            if uid in scores:
+                lines.append(f"{i+1}️⃣ {uname} — {bet_label} — عدد {scores[uid]} 🎲")
+            else:
+                lines.append(f"{i+1}️⃣ {uname} — {bet_label} — ⏳ در انتظار پرتاب")
+        if not finished:
+            emoji = RUBY_GAME_EMOJI.get(game_type)
+            text = (
+                f"🕹 {name}\n\n🎮 بازی در جریانه!{pot_line}\n\n" + "\n".join(lines) +
+                f"\n\nنفرات بعدی: روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست."
+            )
+        elif len(ids) == 1:
+            uid = ids[0]
+            if uid in dice_wins and dice_wins[uid] > 0:
+                text = f"🕹 {name}\n\n" + "\n".join(lines) + f"\n\n🎉 برنده شدی و {dice_wins[uid]:,} روب‌پوینت گرفتی!"
+            elif uid in dice_wins:
+                text = f"🕹 {name}\n\n" + "\n".join(lines) + "\n\n🎉 شرطت درست بود!"
+            else:
+                text = f"🕹 {name}\n\n" + "\n".join(lines) + "\n\n❌ شرطت درست از آب درنیومد؛ باختی."
+        elif tie:
+            text = f"🕹 {name}\n\n" + "\n".join(lines) + "\n\n🤝 مساوی شد؛ مبلغ ورودی به هر دو برگشت داده شد."
+        else:
+            winner_uid = next(iter(dice_wins), None)
+            wname = names_by_id.get(winner_uid, str(winner_uid))
+            text = f"🕹 {name}\n\n" + "\n".join(lines) + f"\n\n🏆 {wname} برنده شد و {dice_wins[winner_uid]:,} روب‌پوینت گرفت! 🎉"
         try:
             await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
         except Exception:
@@ -1242,7 +1410,7 @@ async def ruby_dice_reply(update, context):
         emoji = RUBY_GAME_EMOJI.get(game_type)
         text = (
             f"🕹 {name}\n\n🎮 بازی در جریانه!{pot_line}\n\n" + "\n".join(lines) +
-            f"\n\n🎯 نفرات بعدی: روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست."
+            f"\n\nنفرات بعدی: روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست."
         )
     else:
         if winners and pot > 0:
@@ -2697,7 +2865,8 @@ def main():
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+:\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit):\d+:\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_dice_bet_select,pattern=r"^rdicebet:\d+:\d+:\d+:(odd|even|high|low)$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_rps_choice,pattern=r"^rrps:\d+:(rock|paper|scissors)$"))
     app.add_handler(CallbackQueryHandler(ruby_xo_move,pattern=r"^rxo:\d+:[0-8]$"))
