@@ -33,6 +33,10 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
+# نوع ستون تاریخ/زمان برای ALTER TABLE خام: روی Postgres باید TIMESTAMP WITH TIME ZONE باشه،
+# چون "DATETIME" روی Postgres اصلاً نوع معتبری نیست و باعث کرش init_db می‌شه.
+DT_SQL_TYPE = 'TIMESTAMP WITH TIME ZONE' if engine.dialect.name == 'postgresql' else 'DATETIME'
+
 class User(Base):
     __tablename__ = 'users'
     telegram_id = Column(BigInteger, primary_key=True)
@@ -173,25 +177,25 @@ def init_db():
         'fox_storage': 'INTEGER NOT NULL DEFAULT 0',
         'fox_total_earned': 'INTEGER NOT NULL DEFAULT 0',
         'fox_production_remainder': 'FLOAT NOT NULL DEFAULT 0',
-        'fox_last_production_at': 'DATETIME',
-        'last_hunt_at': 'DATETIME',
-        'last_transfer_at': 'DATETIME',
-        'last_fox_claim_at': 'DATETIME',
+        'fox_last_production_at': DT_SQL_TYPE,
+        'last_hunt_at': DT_SQL_TYPE,
+        'last_transfer_at': DT_SQL_TYPE,
+        'last_fox_claim_at': DT_SQL_TYPE,
         'fox_claim_count': 'INTEGER NOT NULL DEFAULT 0',
         'hunt_count': 'INTEGER NOT NULL DEFAULT 0',
         'fox_rescued_count': 'INTEGER NOT NULL DEFAULT 0',
         'fox_prestige_count': 'INTEGER NOT NULL DEFAULT 0',
-        'fox_last_hunger_at': 'DATETIME',
-        'wheel_last_spin_at': 'DATETIME',
+        'fox_last_hunger_at': DT_SQL_TYPE,
+        'wheel_last_spin_at': DT_SQL_TYPE,
         'wheel_last_reward': 'INTEGER',
-        'last_ruby_game_at': 'DATETIME',
-        'fox_sick_since': 'DATETIME',
+        'last_ruby_game_at': DT_SQL_TYPE,
+        'fox_sick_since': DT_SQL_TYPE,
         'fox_sick_reason': 'VARCHAR',
         'fox_sick_treatment': 'VARCHAR',
         'fox_sick_doses_given': 'INTEGER NOT NULL DEFAULT 0',
-        'fox_sick_next_dose_at': 'DATETIME',
-        'fox_sick_rest_until': 'DATETIME',
-        'fox_last_sick_at': 'DATETIME',
+        'fox_sick_next_dose_at': DT_SQL_TYPE,
+        'fox_sick_rest_until': DT_SQL_TYPE,
+        'fox_last_sick_at': DT_SQL_TYPE,
     }
     with engine.begin() as conn:
         for name, definition in additions.items():
