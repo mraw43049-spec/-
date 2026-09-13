@@ -424,28 +424,29 @@ async def casino_command(update, context):
     finally: session.close()
     owner_id=update.effective_user.id
     kb=InlineKeyboardMarkup([
-        [InlineKeyboardButton("🍷 قمار روبی",callback_data=f"rg:cz_gamble:{owner_id}")],
         [InlineKeyboardButton("🎰 گردونه شانس",callback_data=f"rg:cz_wheel:{owner_id}")],
         [InlineKeyboardButton("🎲 تاس",callback_data=f"rg:cz_dice:{owner_id}")],
         [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
     ])
-    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🍷 قمار روبی\n┘─ محدودیت قمار باز : 2 - 5 روباه🦊\n\n🎰 گردونه شانس\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 گردونه شانس\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
     "xo":("🧩 بازی روبی دوز XO",2,2,True),"rps":("🔫 بازی روبی سنگ کاغذ قیچی",2,2,True),
     "darts":("🎯 بازی روبی دارت",2,4,True),"basketball":("🏀 بازی روبی بسکتبال",2,3,True),"bowling":("🎳 بازی روبی بولینگ",2,4,True),
-    "cz_gamble":("🍷 قمار روبی",2,5,True),"cz_wheel":("🎰 گردونه شانس",1,3,True),
-    "cz_dice":("🎲 تاس",1,2,True),"cz_rabbit":("🐇 خرگوش خور",2,2,True),
+    "cz_wheel":("🎰 گردونه شانس",1,3,True),"cz_dice":("🎲 تاس",1,2,True),"cz_rabbit":("🐇 خرگوش خور",2,2,True),
 }
-# این بازی‌های کازینو هنوز قانون برد/باخت مشخصی ندارن؛ فعلاً فقط توی منو نشون داده می‌شن
-# تا پول کسی بی‌دلیل توی میز گیر نکنه.
-CASINO_COMING_SOON = {"cz_gamble", "cz_wheel", "cz_dice"}
 CASINO_UNLOCK_LEVEL = 5
 
 # ایموجی مخصوص هر بازی روبی که کاربر باید خودش با ریپلای روی پنل بفرستد.
-RUBY_GAME_EMOJI={"darts":"🎯","basketball":"🏀","bowling":"🎳"}
+RUBY_GAME_EMOJI={"darts":"🎯","basketball":"🏀","bowling":"🎳","cz_dice":"🎲","cz_wheel":"🎰"}
 RUBY_EMOJI_TO_GAME={v:k for k,v in RUBY_GAME_EMOJI.items()}
+
+# گردونه شانس: بر اساس اسلات‌ماشین تلگرام (dice.value از 1 تا 64).
+# value=43 یعنی سه‌تا لیمو 🍋 و value=64 یعنی سه‌تا هفت 7️⃣ (جکپات).
+WHEEL_WIN_VALUES = {43, 64}
+WHEEL_JACKPOT_MULTIPLIER = 2.7
+SLOT_SYMBOLS = {43: "🍋🍋🍋", 64: "7️⃣7️⃣7️⃣"}
 
 RUBY_COOLDOWN_SECONDS = 90  # هر کاربر هر 1 دقیقه و 30 ثانیه فقط یک‌بار می‌تواند بازی روبی جدید بسازد/وارد شود
 
@@ -555,8 +556,6 @@ async def ruby_game_select(update,context):
     if q.from_user.id!=owner_id:
         await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True); return
     if not await require_membership(update,context): return
-    if key in CASINO_COMING_SOON:
-        await q.answer("🛠 این بازی کازینو هنوز آماده نیست، به‌زودی فعال می‌شه!",show_alert=True); return
     name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     session=get_session()
     try:
@@ -1105,7 +1104,7 @@ def _parse_ruby_scores(raw):
 
 async def ruby_dice_reply(update, context):
     """
-    کاربر خودش با ریپلای روی پنل بازی روبی، ایموجی بازی (🎯/🏀/🎳) رو می‌فرسته و
+    کاربر خودش با ریپلای روی پنل بازی روبی، ایموجی بازی (🎯/🏀/🎳/🎲/🎰) رو می‌فرسته و
     تلگرام خودش انیمیشن پرتاب رو برای همون کاربر نشون می‌ده. ما فقط نتیجه رو
     می‌خونیم و همون یک پیام پنل بازی رو ویرایش می‌کنیم؛ پیام جدیدی ارسال نمی‌شود.
     """
@@ -1133,24 +1132,67 @@ async def ruby_dice_reply(update, context):
         scores[msg.from_user.id] = value
         t.scores = ','.join(f"{u}:{v}" for u, v in scores.items())
         finished = all(i in scores for i in ids)
-        winners = None; pot = 0
-        if finished:
-            t.status = 'finished'
-            best = max(scores.values())
-            winners = [u for u, v in scores.items() if v == best]
-            pot = t.pot or 0
-            if pot > 0 and winners:
-                share = pot // len(winners)
-                for uid in winners:
-                    u = session.get(User, uid)
-                    if u: u.fox_points = (u.fox_points or 0) + share
-        players = [session.get(User, i) for i in ids]
-        name = RUBY_GAME_CONFIG[t.game_type][0]
-        entry = t.entry_amount; chat_id = t.chat_id; message_id = t.message_id
-        names_by_id = {u.telegram_id: user_display_name(u) for u in players if u}
+
+        if game_type == 'cz_wheel':
+            # هر بازیکن مستقل از بقیه با «خونه» شرط می‌بنده؛ رقابتی بین بازیکنا نیست.
+            wheel_wins = {}
+            if finished:
+                t.status = 'finished'
+                for uid, v in scores.items():
+                    if v in WHEEL_WIN_VALUES:
+                        win_amount = int(t.entry_amount * WHEEL_JACKPOT_MULTIPLIER)
+                        wheel_wins[uid] = win_amount
+                        u = session.get(User, uid)
+                        if u and win_amount > 0: u.fox_points = (u.fox_points or 0) + win_amount
+            players = [session.get(User, i) for i in ids]
+            name = RUBY_GAME_CONFIG[t.game_type][0]
+            entry = t.entry_amount; chat_id = t.chat_id; message_id = t.message_id
+            names_by_id = {u.telegram_id: user_display_name(u) for u in players if u}
+        else:
+            winners = None; pot = 0
+            if finished:
+                t.status = 'finished'
+                best = max(scores.values())
+                winners = [u for u, v in scores.items() if v == best]
+                pot = t.pot or 0
+                if pot > 0 and winners:
+                    share = pot // len(winners)
+                    for uid in winners:
+                        u = session.get(User, uid)
+                        if u: u.fox_points = (u.fox_points or 0) + share
+            players = [session.get(User, i) for i in ids]
+            name = RUBY_GAME_CONFIG[t.game_type][0]
+            entry = t.entry_amount; chat_id = t.chat_id; message_id = t.message_id
+            names_by_id = {u.telegram_id: user_display_name(u) for u in players if u}
         session.commit()
     finally:
         session.close()
+
+    if game_type == 'cz_wheel':
+        lines = []
+        for i, uid in enumerate(ids):
+            uname = names_by_id.get(uid, str(uid))
+            if uid in scores:
+                combo = SLOT_SYMBOLS.get(scores[uid], "❓")
+                if uid in wheel_wins:
+                    lines.append(f"{i+1}️⃣ {uname} — {combo} 🎉 برد {wheel_wins[uid]:,} روب‌پوینت")
+                else:
+                    lines.append(f"{i+1}️⃣ {uname} — {combo} ❌ باخت")
+            else:
+                lines.append(f"{i+1}️⃣ {uname} — ⏳ در انتظار چرخوندن")
+        if not finished:
+            text = (
+                f"🕹 {name}\n\n🎰 هرکس مستقل از بقیه می‌چرخونه! اگه 🍋🍋🍋 یا 7️⃣7️⃣7️⃣ بیاد {WHEEL_JACKPOT_MULTIPLIER}× مبلغ ورودی می‌گیره.\n\n"
+                + "\n".join(lines) +
+                "\n\n🎰 نفرات بعدی: روی همین پیام ریپلای کن و ایموجی 🎰 رو بفرست."
+            )
+        else:
+            text = f"🕹 {name}\n\n" + "\n".join(lines) + "\n\n🏁 بازی تموم شد."
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
+        except Exception:
+            pass
+        return
 
     pot_line = f"\n🏆 جایزه میز: {pot:,} روب‌پوینت" if entry > 0 else ""
     lines = []
@@ -2618,9 +2660,9 @@ def main():
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|resetask|resetyes|resetno):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_gamble|cz_wheel|cz_dice|cz_rabbit):\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_gamble|cz_wheel|cz_dice|cz_rabbit):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_gamble|cz_wheel|cz_dice|cz_rabbit):\d+:\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_rps_choice,pattern=r"^rrps:\d+:(rock|paper|scissors)$"))
     app.add_handler(CallbackQueryHandler(ruby_xo_move,pattern=r"^rxo:\d+:[0-8]$"))
