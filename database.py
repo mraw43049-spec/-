@@ -66,6 +66,15 @@ class User(Base):
     wheel_last_reward = Column(Integer, nullable=True)
     last_ruby_game_at = Column(DateTime(timezone=True), nullable=True)
 
+    # مریضی روباه (از لول 6 به بعد، هر 48 ساعت یک‌بار)
+    fox_sick_since = Column(DateTime(timezone=True), nullable=True)
+    fox_sick_reason = Column(String, nullable=True)
+    fox_sick_treatment = Column(String, nullable=True)  # pill | syrup | rest
+    fox_sick_doses_given = Column(Integer, nullable=False, default=0)
+    fox_sick_next_dose_at = Column(DateTime(timezone=True), nullable=True)
+    fox_sick_rest_until = Column(DateTime(timezone=True), nullable=True)
+    fox_last_sick_at = Column(DateTime(timezone=True), nullable=True)
+
 class Challenge(Base):
     __tablename__ = 'challenges'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -176,6 +185,13 @@ def init_db():
         'wheel_last_spin_at': 'DATETIME',
         'wheel_last_reward': 'INTEGER',
         'last_ruby_game_at': 'DATETIME',
+        'fox_sick_since': 'DATETIME',
+        'fox_sick_reason': 'VARCHAR',
+        'fox_sick_treatment': 'VARCHAR',
+        'fox_sick_doses_given': 'INTEGER NOT NULL DEFAULT 0',
+        'fox_sick_next_dose_at': 'DATETIME',
+        'fox_sick_rest_until': 'DATETIME',
+        'fox_last_sick_at': 'DATETIME',
     }
     with engine.begin() as conn:
         for name, definition in additions.items():
