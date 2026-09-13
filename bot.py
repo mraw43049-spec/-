@@ -2955,16 +2955,68 @@ async def roobam_command(update,context):
         text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_display_name(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
     finally:session.close()
     await update.message.reply_text(text,**reply_kwargs(update.message))
-async def leaderboard_command(update,context):
-    if not await require_membership(update,context):return
-    session=get_session()
-    try:
-        configs=[('روب پوینت 🦊','fox_points'),('روباه های زخمی 🎃','fox_rescued_count'),('شکار ⚔️','hunt_count'),('روب روب 🐾','fox_claim_count')];blocks=[]
-        for title,field in configs:
-            users=session.query(User).order_by(getattr(User,field).desc(),User.telegram_id.asc()).limit(100).all();blocks.append('\n'.join([f'╭──「 {title} 」']+[f'{i}. {user_display_name(u)} — {int(getattr(u,field) or 0):,}' for i,u in enumerate(users,1)]))
-        text='\n\n'.join(blocks)
-    finally:session.close()
-    for i in range(0,len(text),3900):await update.message.reply_text(text[i:i+3900],**reply_kwargs(update.message))
+LEADERBOARD_CATEGORIES = [
+    ('fox_points', '💰 روب پوینت 🦊'),
+    ('fox_rescued_count', '🎃 روباه های زخمی'),
+    ('hunt_count', '⚔️ شکار'),
+    ('fox_claim_count', '🐾 روب روب'),
+]
+LEADERBOARD_CATEGORY_MAP = dict(LEADERBOARD_CATEGORIES)
+
+def leaderboard_root_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🌍 لیدر برد جهانی", callback_data="lb:global")],
+        [InlineKeyboardButton("👥 لیدر برد گروهی", callback_data="lb:group")],
+    ])
+
+def leaderboard_global_keyboard():
+    rows = [[InlineKeyboardButton(title, callback_data=f"lb:cat:{field}")] for field, title in LEADERBOARD_CATEGORIES]
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="lb:root")])
+    return InlineKeyboardMarkup(rows)
+
+def build_leaderboard_text(session, field, title):
+    users = session.query(User).order_by(getattr(User, field).desc(), User.telegram_id.asc()).limit(100).all()
+    lines = [f'╭──「 {title} 」'] + [f'{i}. {user_display_name(u)} — {int(getattr(u, field) or 0):,}' for i, u in enumerate(users, 1)]
+    text = '\n'.join(lines)
+    return text[:4000] + ("\n…" if len(text) > 4000 else "")
+
+async def leaderboard_command(update, context):
+    if not await require_membership(update, context): return
+    await update.message.reply_text(
+        "🏆 لیدر برد کدوم بخش رو می‌خوای ببینی؟",
+        reply_markup=leaderboard_root_keyboard(), **reply_kwargs(update.message)
+    )
+
+async def leaderboard_button(update, context):
+    q = update.callback_query
+    data = q.data
+    if data == "lb:root":
+        await q.answer()
+        try: await q.message.edit_text("🏆 لیدر برد کدوم بخش رو می‌خوای ببینی؟", reply_markup=leaderboard_root_keyboard())
+        except Exception: pass
+        return
+    if data == "lb:global":
+        await q.answer()
+        try: await q.message.edit_text("🌍 لیدر برد جهانی — کدوم رتبه‌بندی رو می‌خوای ببینی؟", reply_markup=leaderboard_global_keyboard())
+        except Exception: pass
+        return
+    if data == "lb:group":
+        await q.answer("👥 لیدر برد گروهی به‌زودی اضافه می‌شه.", show_alert=True)
+        return
+    if data.startswith("lb:cat:"):
+        field = data.split(":", 2)[2]
+        if field not in LEADERBOARD_CATEGORY_MAP:
+            await q.answer(); return
+        await q.answer()
+        session = get_session()
+        try:
+            text = build_leaderboard_text(session, field, LEADERBOARD_CATEGORY_MAP[field])
+        finally:
+            session.close()
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="lb:global")]])
+        try: await q.message.edit_text(text, reply_markup=kb)
+        except Exception: pass
+        return
 
 async def text_router(update, context):
     if not update.message or not update.message.text: return
@@ -3065,6 +3117,7 @@ def main():
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|rest):\d+$"))
+    app.add_handler(CallbackQueryHandler(leaderboard_button,pattern=r"^lb:"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
