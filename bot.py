@@ -273,9 +273,21 @@ def clear_fox_sickness(user):
     user.fox_sick_rest_until = None
 
 
+def _start_fox_sickness(user, now):
+    user.fox_sick_since = now
+    user.fox_sick_reason = random.choice(FOX_SICK_REASONS)
+    user.fox_sick_treatment = None
+    user.fox_sick_doses_given = 0
+    user.fox_sick_next_dose_at = None
+    user.fox_sick_rest_until = None
+    user.fox_last_sick_at = now
+
+
 def sync_fox_sickness(user):
     """وضعیت مریضی روباه رو با گذر زمان به‌روز می‌کنه: اگه استراحتش تموم شده خودش خوب می‌شه،
-    و اگه ۴۸ ساعت از آخرین مریضی گذشته دوباره مریض می‌شه. مقدار برگشتی یعنی چیزی تغییر کرده یا نه."""
+    همون لحظه‌ای که کاربر برای اولین بار لول 6 بشه روباه مریض می‌شه، و از اون به بعد هر بار
+    که خوب بشه، دقیقاً 48 ساعت بعد دوباره مریض می‌شه (این چرخه تا آخر ادامه داره).
+    مقدار برگشتی یعنی چیزی تغییر کرده یا نه."""
     if (user.level or 1) < FOX_SICK_UNLOCK_LEVEL:
         return False
     now = now_utc()
@@ -287,16 +299,11 @@ def sync_fox_sickness(user):
         return False
     last = aware(user.fox_last_sick_at)
     if last is None:
-        user.fox_last_sick_at = now
+        # اولین باری که کاربر به لول 6 می‌رسه، همون لحظه روباه مریض می‌شه.
+        _start_fox_sickness(user, now)
         return True
     if (now - last).total_seconds() >= FOX_SICK_INTERVAL_SECONDS:
-        user.fox_sick_since = now
-        user.fox_sick_reason = random.choice(FOX_SICK_REASONS)
-        user.fox_sick_treatment = None
-        user.fox_sick_doses_given = 0
-        user.fox_sick_next_dose_at = None
-        user.fox_sick_rest_until = None
-        user.fox_last_sick_at = now
+        _start_fox_sickness(user, now)
         return True
     return False
 
