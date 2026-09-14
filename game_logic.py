@@ -28,7 +28,7 @@ FOX_RANKS=["روباه تازه‌کار","روباه کوچک","روباه چا
 HUNT_ITEMS={"🐇":{"name":"خرگوش","nutrition":4,"sell":7000},"🐭":{"name":"موش","nutrition":1,"sell":1000},"🦡":{"name":"راکون","nutrition":3,"sell":5000},"🦆":{"name":"اردک","nutrition":2,"sell":3000},"🐤":{"name":"جوجه","nutrition":1,"sell":1000},"🐟":{"name":"ماهی","nutrition":1,"sell":1000},"🥕":{"name":"هویج","nutrition":1,"sell":1000},"🐿":{"name":"سنجاب","nutrition":2,"sell":3000},"🦗":{"name":"ملخ","nutrition":1,"sell":1000},"🐓":{"name":"خروس","nutrition":4,"sell":7000},"🦌":{"name":"آهو","nutrition":5,"sell":9000}}
 FOX_MAX_LEVEL = 25
 FOX_MAX_BELLY_CAPACITY = 20
-FOX_MAX_STORAGE_CAPACITY = 20
+FOX_MAX_STORAGE_CAPACITY = 5_000_000
 
 def fox_rank(level):
     # فقط 25 مقام رسمی؛ داده‌ی قدیمی کاربران کم/زیاد نمی‌شود.
@@ -39,8 +39,9 @@ def fox_capacity(level):
     return min(FOX_MAX_BELLY_CAPACITY, 3 + max(0, int(level or 1) - 1))
 
 def fox_storage_capacity(level):
-    # ظرفیت روب‌پوینت تولیدشده: حداکثر 20.
-    return min(FOX_MAX_STORAGE_CAPACITY, max(1, int(level or 1)))
+    # ظرفیت مخزن روب‌پوینت مثل سیستم اصلی: با هر ارتقا دو برابر می‌شود.
+    # سقف 5,000,000 است. این با ظرفیت شکم روباه فرق دارد؛ شکم جداگانه حداکثر 20 است.
+    return min(FOX_MAX_STORAGE_CAPACITY, 1000 * (2 ** max(0, int(level or 1) - 1)))
 
 def fox_upgrade_cost(level):
     # هزینه‌ی ارتقا بدون تغییر نسبت به سیستم قبلی حفظ می‌شود.
