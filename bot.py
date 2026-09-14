@@ -1927,6 +1927,8 @@ async def handle_hunt_request(q, session, user, context):
     user.last_hunt_at = now_utc()
     user.hunt_count=(user.hunt_count or 0)+1
     session.add(hunt)
+    chat = q.message.chat if q.message else None
+    if chat: bump_city_stat(session, chat.id, chat.title, city_hunt_total=1)
     session.commit()
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"hunt:feed:{hunt.id}:{user.telegram_id}"), InlineKeyboardButton("💰 فروختن", callback_data=f"hunt:sell:{hunt.id}:{user.telegram_id}")],
@@ -1939,6 +1941,7 @@ async def handle_hunt_request(q, session, user, context):
         f"🎯 شما {item['name']} را شکار کردید!\n🍖 ارزش غذایی: {item['nutrition']}\n\nچه کار خواهید کرد؟\n⏱ 120 ثانیه فرصت تصمیم‌گیری دارید وگرنه شکار می‌پره.",
         reply_markup=kb
     )
+    if chat: await maybe_level_up_city(context, chat.id)
 
 
 async def hunt_command(update, context):
@@ -1961,6 +1964,8 @@ async def hunt_command(update, context):
         hunt = FoxHunt(user_id=user.telegram_id, emoji=emoji, item_name=item["name"], nutrition=item["nutrition"], sell_value=item["sell"], status="pending")
         user.last_hunt_at = now_utc()
         session.add(hunt)
+        chat = update.effective_chat
+        if chat: bump_city_stat(session, chat.id, chat.title, city_hunt_total=1)
         session.commit()
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"hunt:feed:{hunt.id}:{user.telegram_id}"), InlineKeyboardButton("💰 فروختن", callback_data=f"hunt:sell:{hunt.id}:{user.telegram_id}")],
@@ -1974,6 +1979,7 @@ async def hunt_command(update, context):
         )
     finally:
         session.close()
+    if update.effective_chat: await maybe_level_up_city(context, update.effective_chat.id)
 
 
 async def hunt_button(update, context):
@@ -2037,12 +2043,16 @@ FOX_CLAIM_ALIASES={"روب روب","هور هور","عو عو","روب روب!",
 async def collect_fox_points(update,context):
     if not await require_membership(update,context):return
     session=get_session()
+    chat=update.effective_chat
     try:
         user=get_or_create_user(session,update.effective_user)
         if await guard_fox_sickness(update, context, session, user): return
         if user.level<1:
             await update.message.reply_text("🔒 دریافت روب‌پوینت از سطح 1 باز می‌شود.",**reply_kwargs(update.message));return
-        left=seconds_left(user.last_fox_claim_at,FOX_CLAIM_COOLDOWN)
+        claim_cooldown = FOX_CLAIM_COOLDOWN
+        if chat and is_group_chat_id(chat.id) and session.get(GroupChat, chat.id):
+            claim_cooldown = max(30, FOX_CLAIM_COOLDOWN - CITY_CLAIM_COOLDOWN_BONUS)  # باف شهر: روب روب سریعتر
+        left=seconds_left(user.last_fox_claim_at,claim_cooldown)
         if left:
             await update.message.reply_text(f"⏳ دریافت بعدی روب‌پوینت: {format_duration(left)} دیگر.",**reply_kwargs(update.message));return
         earned=random.randint(CLAIM_POINTS_MIN,CLAIM_POINTS_MAX)
@@ -2050,11 +2060,13 @@ async def collect_fox_points(update,context):
         user.fox_points+=earned;user.fox_total_earned+=earned;user.fox_claim_count=(user.fox_claim_count or 0)+1;user.last_fox_claim_at=now_utc()
         user.level=user_level_from_roobrub(user.fox_claim_count)
         rewards=apply_level_rewards(session,user,old_level,user.level)
+        if chat: bump_city_stat(session, chat.id, chat.title, city_claim_total=1)
         session.commit()
         text=f"🦊 +{earned:,} روب‌پوینت دریافت کردی!\n💰 موجودی روب‌پوینت: {user.fox_points:,}\n🐾 روب روب‌ها: {user.fox_claim_count:,}\n⏱ دریافت بعدی: 5 دقیقه دیگر"
         if user.level>old_level: text += "\n\n"+level_up_message(old_level,user.level,rewards)
         await update.message.reply_text(text,**reply_kwargs(update.message))
     finally:session.close()
+    if chat: await maybe_level_up_city(context, chat.id)
 
 # ---------- تغییر نام روباه ----------
 
@@ -2316,6 +2328,7 @@ async def injured_fox_button(update, context):
             claims = random.randint(1, INJURED_FOX_MAX_CLAIMS)
             user.fox_points += reward
             user.fox_claim_count = (user.fox_claim_count or 0) + claims
+            bump_city_stat(session, event.chat_id, city_rescued_total=1, city_claim_total=claims)
             session.commit()
             rescuer_name = user_display_name(user)
             text = (
@@ -2399,6 +2412,8 @@ async def injured_fox_button(update, context):
             )
     except Exception as e:
         logger.warning("update injured fox message failed: %s", e)
+    if final_status == "rescued":
+        await maybe_level_up_city(context, final_chat_id)
 
 # ---------- بانک روبی ----------
 
@@ -2962,6 +2977,241 @@ async def roobam_command(update,context):
         text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_display_name(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
     finally:session.close()
     await update.message.reply_text(text,**reply_kwargs(update.message))
+# ---------- شهر روبی ----------
+
+CITY_ROMAN = {1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI', 7: 'VII', 8: 'VIII', 9: 'IX', 10: 'X', 11: 'XI'}
+CITY_BASE_REQ = {'points': 150, 'rescued': 5, 'hunts': 10, 'treasury': 100_000}
+CITY_REQ_GROWTH = 1.5       # ضریب رشد هدف روب‌روب/روباه‌زخمی/شکار در هر ارتقا
+CITY_TREASURY_GROWTH = 4    # دارایی مورد نیاز خزانه هر ارتقا ۴ برابر می‌شه
+CITY_MAX_LEVEL = 11         # سطح شروع ۱؛ با ۱۰ بار ارتقا به ۱۱ می‌رسه
+CITY_CLAIM_COOLDOWN_BONUS = 10  # ثانیه؛ باف «روب روب سریع‌تر»
+CITY_DONATE_REWARD = 200    # پاداش هر دونیت‌کننده هنگام ارتقای شهر
+
+def city_requirements(level):
+    """هدف لازم برای رفتن از `level` فعلی به سطح بعدی."""
+    idx = max(0, (level or 1) - 1)
+    mult = CITY_REQ_GROWTH ** idx
+    return {
+        'points': int(round(CITY_BASE_REQ['points'] * mult)),
+        'rescued': int(round(CITY_BASE_REQ['rescued'] * mult)),
+        'hunts': int(round(CITY_BASE_REQ['hunts'] * mult)),
+        'treasury': int(CITY_BASE_REQ['treasury'] * (CITY_TREASURY_GROWTH ** idx)),
+    }
+
+def fa_compact_number(n):
+    n = int(n or 0)
+    if abs(n) < 1000:
+        return f"{n:,}"
+    val = n / 1000
+    s = f"{val:.2f}".rstrip('0').rstrip('.')
+    return f"{s} هزار"
+
+def is_group_chat_id(chat_id):
+    return bool(chat_id) and chat_id < 0
+
+def city_ranking_position(session, field, value):
+    return session.query(GroupChat).filter(getattr(GroupChat, field) > (value or 0)).count() + 1
+
+def bump_city_stat(session, chat_id, chat_title=None, **deltas):
+    """مقادیر شهرِ همون گپ رو با deltas افزایش می‌ده؛ فقط برای گروه/سوپرگروه (چون آیدی‌شون منفیه)."""
+    if not is_group_chat_id(chat_id):
+        return None
+    row = session.get(GroupChat, chat_id)
+    if row is None:
+        row = GroupChat(chat_id=chat_id, title=chat_title or "گپ", active=1)
+        session.add(row); session.flush()
+    if row.city_level is None:
+        row.city_level = 1
+    for field, delta in deltas.items():
+        setattr(row, field, (getattr(row, field) or 0) + delta)
+    return row
+
+def city_keyboard(chat_id):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🏦 دونیت به خزانه شهر", callback_data=f"citydonate:{chat_id}")]])
+
+def city_panel_text(session, row):
+    level = row.city_level or 1
+    claim_total = row.city_claim_total or 0
+    rescued_total = row.city_rescued_total or 0
+    hunt_total = row.city_hunt_total or 0
+    treasury = row.city_treasury or 0
+    r_claim = city_ranking_position(session, 'city_claim_total', claim_total)
+    r_rescued = city_ranking_position(session, 'city_rescued_total', rescued_total)
+    r_hunt = city_ranking_position(session, 'city_hunt_total', hunt_total)
+    r_treasury = city_ranking_position(session, 'city_treasury', treasury)
+    mayor = f"{row.city_owner_name or 'نامشخص'} (مالک)" if row.city_owner_name else "نامشخص"
+    if level >= CITY_MAX_LEVEL:
+        goals_block = "🏆 شهر به بالاترین سطح ممکن رسیده!"
+    else:
+        req = city_requirements(level)
+        goals_block = (
+            "🎯 هدف بعدی شهر برای ارتقا سطح ⬇️\n"
+            f"┘─ 🐾 روب روب های مورد نیاز : {req['points']:,}\n"
+            f"┘─ 🦊 روباه های زخمی مورد نیاز : {req['rescued']:,}\n"
+            f"┘─ 🎣 شکار های مورد نیاز : {req['hunts']:,}\n"
+            f"┘─ 🏦 دارایی مورد نیاز خزانه : {fa_compact_number(req['treasury'])} روب پوینت 🪙"
+        )
+    return (
+        f"🦊 شهر روبی {row.title or 'گپ'} 🏰\n\n"
+        f"🦁 شهردار : {mayor}\n\n"
+        f"⭐️ سطح شهر : {CITY_ROMAN.get(level, level)}\n\n"
+        f"🐾 روب روب ها : {fa_compact_number(claim_total)}\n"
+        f"┘─ 🎖️ رتبه شهر از نظر روب روب کردن (#{r_claim:,})\n\n"
+        f"🦊 جمعیت : {fa_compact_number(rescued_total)} روباه\n"
+        f"┘─ 🎖️ رتبه شهر از نظر روباه های زخمی (#{r_rescued:,})\n\n"
+        f"⚔️ شکار ها : {fa_compact_number(hunt_total)}\n"
+        f"┘─ 🎖️ رتبه شهر از نظر شکار (#{r_hunt:,})\n\n"
+        f"🏦 خزانه : {fa_compact_number(treasury)} 🪙\n"
+        f"┘─ 🎖️ رتبه شهر از نظر خزانه (#{r_treasury:,})\n\n"
+        "⏫ باف های شهر ⬇️\n"
+        f"┘─ 🐾 روب روب سریعتر : -{CITY_CLAIM_COOLDOWN_BONUS} ثانیه ⏳\n"
+        "┘─ 🦊 افزایش جمعیت شهر (روباه های زخمی)\n\n"
+        f"{goals_block}"
+    )
+
+async def city_command(update, context):
+    if not await require_membership(update, context): return
+    chat = update.effective_chat
+    if not chat or chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("🏙 شهر روبی فقط مخصوص گپ‌هاست؛ این دستور رو تو یه گروه بفرست.", **reply_kwargs(update.message))
+        return
+    session = get_session()
+    try:
+        row = session.get(GroupChat, chat.id)
+        if row is None:
+            row = GroupChat(chat_id=chat.id, title=chat.title or "گپ", active=1)
+            session.add(row); session.flush()
+        row.title = chat.title or row.title
+        if row.city_level is None:
+            row.city_level = 1
+        try:
+            admins = await context.bot.get_chat_administrators(chat.id)
+            creator = next((a for a in admins if a.status == "creator"), None)
+            if creator:
+                row.city_owner_id = creator.user.id
+                row.city_owner_name = creator.user.full_name or (f"@{creator.user.username}" if creator.user.username else str(creator.user.id))
+        except Exception:
+            pass
+        session.commit()
+        text = city_panel_text(session, row)
+    finally:
+        session.close()
+    await update.message.reply_text(text, reply_markup=city_keyboard(chat.id), **reply_kwargs(update.message))
+
+async def city_donate_button(update, context):
+    q = update.callback_query
+    try:
+        _, chat_id_s = q.data.split(":")
+        chat_id = int(chat_id_s)
+    except Exception:
+        return
+    if not await require_membership(update, context): return
+    context.user_data['city_donate_chat_id'] = chat_id
+    await q.answer()
+    await q.message.reply_text("🏦 مبلغی که می‌خوای به خزانه‌ی شهر دونیت کنی رو بفرست.\nمثال: 5000 / 5k / 5کا")
+
+async def handle_city_donate_text(update, context):
+    chat_id = context.user_data.get('city_donate_chat_id')
+    if not chat_id:
+        return False
+    context.user_data.pop('city_donate_chat_id', None)
+    if not await require_membership(update, context): return True
+    try:
+        amount = parse_amount(update.message.text)
+    except Exception:
+        await update.message.reply_text("❌ مبلغ نامعتبره؛ مثلاً بنویس: 5000 یا 5k", **reply_kwargs(update.message)); return True
+    if amount <= 0:
+        await update.message.reply_text("❌ مبلغ نامعتبره.", **reply_kwargs(update.message)); return True
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        if (user.fox_points or 0) < amount:
+            await update.message.reply_text("❌ روب‌پوینت کافی نداری.", **reply_kwargs(update.message)); return True
+        row = session.get(GroupChat, chat_id)
+        if not row:
+            await update.message.reply_text("❌ این گپ شهر نداره.", **reply_kwargs(update.message)); return True
+        user.fox_points -= amount
+        row.city_treasury = (row.city_treasury or 0) + amount
+        donors = set(x for x in (row.city_donors or '').split(',') if x)
+        donors.add(str(user.telegram_id))
+        row.city_donors = ','.join(donors)
+        session.commit()
+        chat_title = row.title
+    finally:
+        session.close()
+    await update.message.reply_text(f"🏦 {amount:,} روب‌پوینت به خزانه‌ی شهر «{chat_title}» دونیت کردی! 🙏", **reply_kwargs(update.message))
+    await maybe_level_up_city(context, chat_id)
+    return True
+
+async def maybe_level_up_city(context, chat_id):
+    """اگه شهر به همه‌ی هدف‌های سطح بعد رسیده باشه، ارتقاش می‌ده، به دونیت‌کننده‌های این چرخه
+    ۲۰۰ روب‌پوینت می‌ده و تو پیوی بهشون خبر می‌ده، و تو گپ تبریک می‌گه."""
+    if not is_group_chat_id(chat_id):
+        return
+    session = get_session()
+    new_level = None; donor_ids = []; chat_title = "گپ"
+    try:
+        row = session.get(GroupChat, chat_id)
+        if not row:
+            return
+        if row.city_level is None:
+            row.city_level = 1
+        if row.city_level >= CITY_MAX_LEVEL:
+            return
+        req = city_requirements(row.city_level)
+        if not ((row.city_claim_total or 0) >= req['points'] and (row.city_rescued_total or 0) >= req['rescued']
+                and (row.city_hunt_total or 0) >= req['hunts'] and (row.city_treasury or 0) >= req['treasury']):
+            return
+        row.city_level += 1
+        new_level = row.city_level
+        donor_ids = [int(x) for x in (row.city_donors or '').split(',') if x]
+        row.city_donors = ''
+        chat_title = row.title or "گپ"
+        for did in donor_ids:
+            u = session.get(User, did)
+            if u: u.fox_points = (u.fox_points or 0) + CITY_DONATE_REWARD
+        session.commit()
+    finally:
+        session.close()
+    if new_level is None:
+        return
+    try:
+        await context.bot.send_message(
+            chat_id,
+            f"🎉🏙 تبریک میگم! شهر روبی «{chat_title}» به سطح {CITY_ROMAN.get(new_level, new_level)} ارتقا پیدا کرد! 🥳\n"
+            "همه‌ی اهالی گپ دست‌مریزاد 👏"
+        )
+    except Exception:
+        pass
+    for did in donor_ids:
+        try:
+            await context.bot.send_message(
+                did,
+                f"🎉 ممنون بابت دونیتت به خزانه‌ی شهر «{chat_title}»!\n"
+                f"همین کمک باعث شد شهر بره سطح {CITY_ROMAN.get(new_level, new_level)} و بابتش {CITY_DONATE_REWARD:,} روب‌پوینت بهت هدیه دادیم 🎁"
+            )
+        except Exception:
+            pass
+
+CITY_LEADERBOARD_CATEGORIES = [
+    ('city_hunt_total', '⚔️ شکارها'),
+    ('city_claim_total', '🐾 روب روب ها'),
+    ('city_treasury', '💰 خزانه'),
+    ('city_rescued_total', '🦊 جمعیت شهر'),
+]
+CITY_LEADERBOARD_MAP = dict(CITY_LEADERBOARD_CATEGORIES)
+
+def leaderboard_city_keyboard():
+    rows = [[InlineKeyboardButton(title, callback_data=f"lb:gcat:{field}")] for field, title in CITY_LEADERBOARD_CATEGORIES]
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="lb:root")])
+    return InlineKeyboardMarkup(rows)
+
+def build_city_leaderboard_text(session, field, title):
+    rows = session.query(GroupChat).order_by(getattr(GroupChat, field).desc(), GroupChat.chat_id.asc()).limit(100).all()
+    lines = [f'╭──「 {title} 」'] + [f'{i}. {r.title or "گپ"} — {fa_compact_number(getattr(r, field) or 0)}' for i, r in enumerate(rows, 1)]
+    text = '\n'.join(lines)
+    return text[:4000] + ("\n…" if len(text) > 4000 else "")
+
 LEADERBOARD_CATEGORIES = [
     ('fox_points', '💰 روب پوینت 🦊'),
     ('fox_rescued_count', '🎃 روباه های زخمی'),
@@ -3008,7 +3258,23 @@ async def leaderboard_button(update, context):
         except Exception: pass
         return
     if data == "lb:group":
-        await q.answer("👥 لیدر برد گروهی به‌زودی اضافه می‌شه.", show_alert=True)
+        await q.answer()
+        try: await q.message.edit_text("👥 لیدر برد گروهی — کدوم رتبه‌بندی رو می‌خوای ببینی؟", reply_markup=leaderboard_city_keyboard())
+        except Exception: pass
+        return
+    if data.startswith("lb:gcat:"):
+        field = data.split(":", 2)[2]
+        if field not in CITY_LEADERBOARD_MAP:
+            await q.answer(); return
+        await q.answer()
+        session = get_session()
+        try:
+            text = build_city_leaderboard_text(session, field, CITY_LEADERBOARD_MAP[field])
+        finally:
+            session.close()
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="lb:group")]])
+        try: await q.message.edit_text(text, reply_markup=kb)
+        except Exception: pass
         return
     if data.startswith("lb:cat:"):
         field = data.split(":", 2)[2]
@@ -3030,12 +3296,14 @@ async def text_router(update, context):
     if await handle_bank_text(update, context): return
     if await handle_fox_rename_text(update, context): return
     if await handle_ruby_entry_text(update, context): return
+    if await handle_city_donate_text(update, context): return
     text=update.message.text.strip()
     if text in FOX_CLAIM_ALIASES:
         await collect_fox_points(update,context); return
     if text in {"روبام","روبام!","روباش","روباش!"}: await roobam_command(update,context); return
     if text in {"گردونه", "چرخ شانس", "🎡 گردونه", "🎡 چرخ شانس"}: await wheel_command(update,context); return
     if text in {"لیدر برد","لیدربرد","leaderboard","Leaderboard"}: await leaderboard_command(update,context); return
+    if text in {"شهر روبی","شهر روباهیو","شهر روباه","🦊 شهر روبی"}: await city_command(update,context); return
     if re.sub(r"\s+", " ", text) in {"روباه", "روباه روباه", "روبی", "روباهیو", "🦊 روباه", "🦊 روبی", "🦊 روباهیو"}:
         await fox_command(update, context); return
     if text in {"شکار", "شکار!", "🏹 شکار"}:
@@ -3065,7 +3333,7 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
@@ -3075,6 +3343,7 @@ async def persian_slash_router(update, context):
         elif cmd=="شکار": await hunt_command(update,context)
         elif cmd=="یخچال": await fridge_command(update,context)
         elif cmd in {"روبام","روباش"}: await roobam_command(update,context)
+        elif cmd in {"شهر روبی","شهر"}: await city_command(update,context)
         else: await leaderboard_command(update,context)
         return
 
@@ -3125,6 +3394,7 @@ def main():
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|rest):\d+$"))
     app.add_handler(CallbackQueryHandler(leaderboard_button,pattern=r"^lb:"))
+    app.add_handler(CallbackQueryHandler(city_donate_button,pattern=r"^citydonate:-?\d+$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)

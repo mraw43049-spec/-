@@ -97,6 +97,15 @@ class GroupChat(Base):
     title = Column(String, nullable=True)
     active = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    # ---------- شهر روبی ----------
+    city_owner_id = Column(BigInteger, nullable=True)
+    city_owner_name = Column(String, nullable=True)
+    city_level = Column(Integer, nullable=False, default=1)
+    city_claim_total = Column(Integer, nullable=False, default=0)    # مجموع روب روب‌های این گپ
+    city_rescued_total = Column(Integer, nullable=False, default=0)  # مجموع روباه‌های زخمی نجات‌یافته این گپ
+    city_hunt_total = Column(Integer, nullable=False, default=0)     # مجموع شکارهای این گپ
+    city_treasury = Column(Integer, nullable=False, default=0)       # خزانه شهر
+    city_donors = Column(String, nullable=True, default='')          # آیدی دونیت‌کننده‌های این چرخه (تا ارتقا بعدی)
 
 
 
@@ -233,6 +242,21 @@ def init_db():
         conn.execute(text("UPDATE users SET fox_prestige_count = 0 WHERE fox_prestige_count IS NULL OR fox_prestige_count < 0"))
         if 'total_earned' not in cols:
             conn.execute(text('UPDATE users SET total_earned = points WHERE total_earned = 0'))
+        if 'group_chats' in inspector.get_table_names():
+            gc_cols = {c['name'] for c in inspector.get_columns('group_chats')}
+            gc_additions = {
+                'city_owner_id': 'BIGINT',
+                'city_owner_name': 'VARCHAR',
+                'city_level': 'INTEGER NOT NULL DEFAULT 1',
+                'city_claim_total': 'INTEGER NOT NULL DEFAULT 0',
+                'city_rescued_total': 'INTEGER NOT NULL DEFAULT 0',
+                'city_hunt_total': 'INTEGER NOT NULL DEFAULT 0',
+                'city_treasury': 'INTEGER NOT NULL DEFAULT 0',
+                'city_donors': "VARCHAR DEFAULT ''",
+            }
+            for name, definition in gc_additions.items():
+                if name not in gc_cols:
+                    conn.execute(text(f'ALTER TABLE group_chats ADD COLUMN {name} {definition}'))
 
 
 def get_session():
