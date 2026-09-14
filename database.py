@@ -106,6 +106,15 @@ class GroupChat(Base):
     city_hunt_total = Column(Integer, nullable=False, default=0)     # مجموع شکارهای این گپ
     city_treasury = Column(Integer, nullable=False, default=0)       # خزانه شهر
     city_donors = Column(String, nullable=True, default='')          # آیدی دونیت‌کننده‌های این چرخه (تا ارتقا بعدی)
+    # ---------- انتخابات شهرداری (از سطح شهر 5 به بعد) ----------
+    city_mayor_id = Column(BigInteger, nullable=True)                 # آیدی شهردار منتخب فعلی
+    city_mayor_name = Column(String, nullable=True)                   # نام نمایشی شهردار منتخب فعلی
+    city_mayor_term_ends_at = Column(DateTime(timezone=True), nullable=True)  # پایان دوره 3 روزه شهردار فعلی
+    city_election_status = Column(String, nullable=False, default='none')     # none | candidacy | voting
+    city_election_candidates = Column(String, nullable=True, default='')      # آیدی کاندیدها با کاما جدا شده (به ترتیب ثبت‌نام)
+    city_election_votes = Column(String, nullable=True, default='')           # "رای‌دهنده:کاندید" با کاما جدا شده
+    city_election_candidacy_ends_at = Column(DateTime(timezone=True), nullable=True)  # مهلت ثبت‌نام کاندیدها
+    city_election_voting_ends_at = Column(DateTime(timezone=True), nullable=True)     # مهلت رای‌گیری (حداکثر 5 ساعت)
 
 
 
@@ -257,6 +266,23 @@ def init_db():
             for name, definition in gc_additions.items():
                 if name not in gc_cols:
                     conn.execute(text(f'ALTER TABLE group_chats ADD COLUMN {name} {definition}'))
+            mayor_additions = {
+                'city_mayor_id': 'BIGINT',
+                'city_mayor_name': 'VARCHAR',
+                'city_mayor_term_ends_at': DT_SQL_TYPE,
+                'city_election_status': "VARCHAR DEFAULT 'none'",
+                'city_election_candidates': "VARCHAR DEFAULT ''",
+                'city_election_votes': "VARCHAR DEFAULT ''",
+                'city_election_candidacy_ends_at': DT_SQL_TYPE,
+                'city_election_voting_ends_at': DT_SQL_TYPE,
+            }
+            for name, definition in mayor_additions.items():
+                if name not in gc_cols:
+                    conn.execute(text(f'ALTER TABLE group_chats ADD COLUMN {name} {definition}'))
+            conn.execute(text(
+                "UPDATE group_chats SET city_election_status = 'none' "
+                "WHERE city_election_status IS NULL OR city_election_status = ''"
+            ))
 
 
 def get_session():

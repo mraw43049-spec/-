@@ -2979,13 +2979,20 @@ async def roobam_command(update,context):
     await update.message.reply_text(text,**reply_kwargs(update.message))
 # ---------- شهر روبی ----------
 
-CITY_ROMAN = {1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI', 7: 'VII', 8: 'VIII', 9: 'IX', 10: 'X', 11: 'XI'}
 CITY_BASE_REQ = {'points': 150, 'rescued': 5, 'hunts': 10, 'treasury': 100_000}
 CITY_REQ_GROWTH = 1.5       # ضریب رشد هدف روب‌روب/روباه‌زخمی/شکار در هر ارتقا
 CITY_TREASURY_GROWTH = 4    # دارایی مورد نیاز خزانه هر ارتقا ۴ برابر می‌شه
 CITY_MAX_LEVEL = 11         # سطح شروع ۱؛ با ۱۰ بار ارتقا به ۱۱ می‌رسه
 CITY_CLAIM_COOLDOWN_BONUS = 10  # ثانیه؛ باف «روب روب سریع‌تر»
 CITY_DONATE_REWARD = 200    # پاداش هر دونیت‌کننده هنگام ارتقای شهر
+
+# ---------- انتخابات شهرداری ----------
+CITY_MAYOR_UNLOCK_LEVEL = 5            # از این سطح شهر به بعد انتخابات فعال می‌شه
+CITY_MAYOR_CANDIDACY_COST = 10_000     # هزینه‌ی کاندید شدن
+CITY_MAYOR_CANDIDATE_CAPACITY = 5      # حداکثر تعداد کاندید
+CITY_MAYOR_TERM_SECONDS = 3 * 24 * 3600        # دوره‌ی شهرداری: هر 3 روز عوض می‌شه
+CITY_MAYOR_CANDIDACY_WINDOW_SECONDS = 24 * 3600  # مهلت ثبت‌نام کاندیدها قبل از شروع خودکار رای‌گیری
+CITY_MAYOR_VOTING_SECONDS = 5 * 3600           # رای‌گیری حداکثر 5 ساعت طول می‌کشه
 
 def city_requirements(level):
     """هدف لازم برای رفتن از `level` فعلی به سطح بعدی."""
@@ -3029,6 +3036,11 @@ def bump_city_stat(session, chat_id, chat_title=None, **deltas):
 def city_keyboard(chat_id):
     return InlineKeyboardMarkup([[InlineKeyboardButton("🏦 دونیت به خزانه شهر", callback_data=f"citydonate:{chat_id}")]])
 
+def city_mayor_display_label(row):
+    if row.city_mayor_id and row.city_mayor_name:
+        return f"{row.city_mayor_name} (منتخب مردم 🗳)"
+    return f"{row.city_owner_name or 'نامشخص'} (مالک)" if row.city_owner_name else "نامشخص"
+
 def city_panel_text(session, row):
     level = row.city_level or 1
     claim_total = row.city_claim_total or 0
@@ -3039,7 +3051,8 @@ def city_panel_text(session, row):
     r_rescued = city_ranking_position(session, 'city_rescued_total', rescued_total)
     r_hunt = city_ranking_position(session, 'city_hunt_total', hunt_total)
     r_treasury = city_ranking_position(session, 'city_treasury', treasury)
-    mayor = f"{row.city_owner_name or 'نامشخص'} (مالک)" if row.city_owner_name else "نامشخص"
+    mayor = city_mayor_display_label(row)
+    mayor_hint = "\n┘─ 🗳 برای شرکت تو انتخابات شهرداری بنویس «شهردار روبی»" if level >= CITY_MAYOR_UNLOCK_LEVEL else ""
     if level >= CITY_MAX_LEVEL:
         goals_block = "🏆 شهر به بالاترین سطح ممکن رسیده!"
     else:
@@ -3053,8 +3066,8 @@ def city_panel_text(session, row):
         )
     return (
         f"🦊 شهر روبی {row.title or 'گپ'} 🏰\n\n"
-        f"🦁 شهردار : {mayor}\n\n"
-        f"⭐️ سطح شهر : {CITY_ROMAN.get(level, level)}\n\n"
+        f"🦁 شهردار : {mayor}{mayor_hint}\n\n"
+        f"⭐️ سطح شهر : {level}\n\n"
         f"🐾 روب روب ها : {fa_compact_number(claim_total)}\n"
         f"┘─ 🎖️ رتبه شهر از نظر روب روب کردن (#{r_claim:,})\n\n"
         f"🦊 جمعیت : {fa_compact_number(rescued_total)} روباه\n"
@@ -3178,7 +3191,7 @@ async def maybe_level_up_city(context, chat_id):
     try:
         await context.bot.send_message(
             chat_id,
-            f"🎉🏙 تبریک میگم! شهر روبی «{chat_title}» به سطح {CITY_ROMAN.get(new_level, new_level)} ارتقا پیدا کرد! 🥳\n"
+            f"🎉🏙 تبریک میگم! شهر روبی «{chat_title}» به سطح {new_level} ارتقا پیدا کرد! 🥳\n"
             "همه‌ی اهالی گپ دست‌مریزاد 👏"
         )
     except Exception:
@@ -3188,10 +3201,329 @@ async def maybe_level_up_city(context, chat_id):
             await context.bot.send_message(
                 did,
                 f"🎉 ممنون بابت دونیتت به خزانه‌ی شهر «{chat_title}»!\n"
-                f"همین کمک باعث شد شهر بره سطح {CITY_ROMAN.get(new_level, new_level)} و بابتش {CITY_DONATE_REWARD:,} روب‌پوینت بهت هدیه دادیم 🎁"
+                f"همین کمک باعث شد شهر بره سطح {new_level} و بابتش {CITY_DONATE_REWARD:,} روب‌پوینت بهت هدیه دادیم 🎁"
             )
         except Exception:
             pass
+
+# ---------- انتخابات شهرداری (از سطح شهر 5 به بعد) ----------
+
+def city_mayor_candidate_ids(row):
+    return [int(x) for x in (row.city_election_candidates or '').split(',') if x]
+
+def city_mayor_votes_map(row):
+    """{آیدی رای‌دهنده: آیدی کاندید}"""
+    votes = {}
+    for pair in (row.city_election_votes or '').split(','):
+        if not pair or ':' not in pair:
+            continue
+        voter_s, cand_s = pair.split(':', 1)
+        try:
+            votes[int(voter_s)] = int(cand_s)
+        except ValueError:
+            continue
+    return votes
+
+def city_mayor_vote_counts(row):
+    counts = {cid: 0 for cid in city_mayor_candidate_ids(row)}
+    for cand_id in city_mayor_votes_map(row).values():
+        counts[cand_id] = counts.get(cand_id, 0) + 1
+    return counts
+
+def city_mayor_start_candidacy(row):
+    row.city_election_status = 'candidacy'
+    row.city_election_candidates = ''
+    row.city_election_votes = ''
+    row.city_election_candidacy_ends_at = now_utc() + timedelta(seconds=CITY_MAYOR_CANDIDACY_WINDOW_SECONDS)
+    row.city_election_voting_ends_at = None
+
+def city_mayor_start_voting(row):
+    row.city_election_status = 'voting'
+    row.city_election_voting_ends_at = now_utc() + timedelta(seconds=CITY_MAYOR_VOTING_SECONDS)
+
+def city_mayor_panel_text(session, row):
+    status = row.city_election_status or 'none'
+    title = row.title or 'گپ'
+    if status == 'candidacy':
+        cands = city_mayor_candidate_ids(row)
+        end = aware(row.city_election_candidacy_ends_at)
+        left = max(0, int((end - now_utc()).total_seconds())) if end else 0
+        lines = [
+            f"🗳 ثبت‌نام کاندیدهای شهرداری «{title}» بازه!",
+            f"💰 هزینه‌ی کاندید شدن : {CITY_MAYOR_CANDIDACY_COST:,} روب‌پوینت",
+            f"👥 ظرفیت کاندید : {len(cands)} / {CITY_MAYOR_CANDIDATE_CAPACITY}",
+            f"⏳ مهلت ثبت‌نام : {format_duration(left)} دیگه (یا زودتر اگه ظرفیت پر بشه)",
+        ]
+        if cands:
+            lines.append("")
+            lines.append("👤 کاندیدهای فعلی ⬇️")
+            for cid in cands:
+                u = session.get(User, cid)
+                lines.append(f"┘─ {user_display_name(u) if u else cid}")
+        return "\n".join(lines)
+    if status == 'voting':
+        cands = city_mayor_candidate_ids(row)
+        counts = city_mayor_vote_counts(row)
+        end = aware(row.city_election_voting_ends_at)
+        left = max(0, int((end - now_utc()).total_seconds())) if end else 0
+        lines = [
+            f"🗳 رای‌گیری شهرداری «{title}» در جریانه!",
+            f"⏳ تا پایان رای‌گیری : {format_duration(left)} دیگه",
+            "",
+            "👤 کاندیدها ⬇️",
+        ]
+        for cid in cands:
+            u = session.get(User, cid)
+            lines.append(f"┘─ {user_display_name(u) if u else cid} — {counts.get(cid, 0):,} رای")
+        lines.append("")
+        lines.append("هر کاربر فقط یک بار می‌تونه رای بده.")
+        return "\n".join(lines)
+    if row.city_mayor_id:
+        end = aware(row.city_mayor_term_ends_at)
+        left = max(0, int((end - now_utc()).total_seconds())) if end else 0
+        return (
+            f"🦁 شهردار فعلی «{title}» : {row.city_mayor_name or row.city_mayor_id}\n"
+            f"⏳ تا پایان این دوره : {format_duration(left)} دیگه\n"
+            "بعد از پایان دوره، دور بعدی انتخابات خودکار باز می‌شه."
+        )
+    return f"🗳 هنوز شهرداری برای «{title}» انتخاب نشده؛ همین الان یه دور جدید انتخابات باز شد."
+
+def city_mayor_keyboard(session, row):
+    status = row.city_election_status or 'none'
+    if status == 'candidacy':
+        return InlineKeyboardMarkup([[InlineKeyboardButton(
+            f"🙋 کاندید شدن ({CITY_MAYOR_CANDIDACY_COST:,} روب‌پوینت)", callback_data=f"citymayor:cand:{row.chat_id}"
+        )]])
+    if status == 'voting':
+        rows = []
+        for cid in city_mayor_candidate_ids(row):
+            u = session.get(User, cid)
+            name = user_display_name(u) if u else str(cid)
+            rows.append([InlineKeyboardButton(f"🗳 رای به {name}", callback_data=f"citymayor:vote:{row.chat_id}:{cid}")])
+        return InlineKeyboardMarkup(rows) if rows else None
+    return None
+
+async def city_mayor_command(update, context):
+    if not await require_membership(update, context): return
+    chat = update.effective_chat
+    if not chat or chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("🗳 انتخابات شهرداری فقط مخصوص گپ‌هاست؛ این دستور رو تو یه گروه بفرست.", **reply_kwargs(update.message))
+        return
+    session = get_session()
+    started_new = False
+    try:
+        row = session.get(GroupChat, chat.id)
+        if row is None:
+            row = GroupChat(chat_id=chat.id, title=chat.title or "گپ", active=1)
+            session.add(row); session.flush()
+        row.title = chat.title or row.title
+        if row.city_level is None:
+            row.city_level = 1
+        level = row.city_level or 1
+        locked = level < CITY_MAYOR_UNLOCK_LEVEL
+        if locked:
+            text = (
+                f"🔒 انتخابات شهرداری از سطح شهر {CITY_MAYOR_UNLOCK_LEVEL} به بعد باز می‌شه.\n"
+                f"⭐️ سطح فعلی شهر : {level}"
+            )
+            markup = None
+        else:
+            status = row.city_election_status or 'none'
+            term_ends = aware(row.city_mayor_term_ends_at)
+            if not (status == 'none' and row.city_mayor_id and term_ends and now_utc() < term_ends):
+                if status == 'none':
+                    city_mayor_start_candidacy(row)
+                    status = 'candidacy'
+                    started_new = True
+            text = city_mayor_panel_text(session, row)
+            markup = city_mayor_keyboard(session, row)
+        chat_id = row.chat_id
+        session.commit()
+    finally:
+        session.close()
+    await update.message.reply_text(text, reply_markup=markup, **reply_kwargs(update.message))
+    if started_new and context.job_queue:
+        context.job_queue.run_once(
+            city_mayor_candidacy_timeout_job, CITY_MAYOR_CANDIDACY_WINDOW_SECONDS,
+            data=chat_id, name=f"citymayor-cand-{chat_id}"
+        )
+
+async def city_mayor_candidate_button(update, context):
+    q = update.callback_query
+    try:
+        _, _, chat_id_s = q.data.split(":")
+        chat_id = int(chat_id_s)
+    except Exception:
+        return
+    if not await require_membership(update, context): return
+    session = get_session()
+    capacity_full = False
+    try:
+        row = session.get(GroupChat, chat_id)
+        if not row or (row.city_level or 1) < CITY_MAYOR_UNLOCK_LEVEL:
+            await q.answer("❌ این انتخابات فعال نیست.", show_alert=True); return
+        if (row.city_election_status or 'none') != 'candidacy':
+            await q.answer("⏳ الان زمان ثبت‌نام کاندید نیست.", show_alert=True); return
+        cands = city_mayor_candidate_ids(row)
+        user = get_or_create_user(session, q.from_user)
+        if user.telegram_id in cands:
+            await q.answer("✅ قبلاً کاندید شدی.", show_alert=True); return
+        if len(cands) >= CITY_MAYOR_CANDIDATE_CAPACITY:
+            await q.answer("❌ ظرفیت کاندیدها پر شده.", show_alert=True); return
+        if (user.fox_points or 0) < CITY_MAYOR_CANDIDACY_COST:
+            await q.answer("❌ روب‌پوینت کافی نداری.", show_alert=True); return
+        user.fox_points -= CITY_MAYOR_CANDIDACY_COST
+        cands.append(user.telegram_id)
+        row.city_election_candidates = ','.join(str(c) for c in cands)
+        capacity_full = len(cands) >= CITY_MAYOR_CANDIDATE_CAPACITY
+        if capacity_full:
+            city_mayor_start_voting(row)
+        session.commit()
+        text = city_mayor_panel_text(session, row)
+        markup = city_mayor_keyboard(session, row)
+    finally:
+        session.close()
+    await q.answer("🙋 کاندید شدی!")
+    try:
+        await q.message.edit_text(text, reply_markup=markup)
+    except Exception:
+        pass
+    if capacity_full and context.job_queue:
+        context.job_queue.run_once(
+            city_mayor_voting_timeout_job, CITY_MAYOR_VOTING_SECONDS,
+            data=chat_id, name=f"citymayor-vote-{chat_id}"
+        )
+
+async def city_mayor_vote_button(update, context):
+    q = update.callback_query
+    try:
+        _, _, chat_id_s, cand_id_s = q.data.split(":")
+        chat_id = int(chat_id_s); cand_id = int(cand_id_s)
+    except Exception:
+        return
+    if not await require_membership(update, context): return
+    session = get_session()
+    try:
+        row = session.get(GroupChat, chat_id)
+        if not row or (row.city_election_status or 'none') != 'voting':
+            await q.answer("❌ الان رای‌گیری فعال نیست.", show_alert=True); return
+        if cand_id not in city_mayor_candidate_ids(row):
+            await q.answer("❌ این کاندید معتبر نیست.", show_alert=True); return
+        user = get_or_create_user(session, q.from_user)
+        votes = city_mayor_votes_map(row)
+        if user.telegram_id in votes:
+            await q.answer("✅ قبلاً رای دادی.", show_alert=True); return
+        votes[user.telegram_id] = cand_id
+        row.city_election_votes = ','.join(f"{v}:{c}" for v, c in votes.items())
+        session.commit()
+        text = city_mayor_panel_text(session, row)
+        markup = city_mayor_keyboard(session, row)
+    finally:
+        session.close()
+    await q.answer("🗳 رایت ثبت شد!")
+    try:
+        await q.message.edit_text(text, reply_markup=markup)
+    except Exception:
+        pass
+
+async def city_mayor_candidacy_timeout_job(context):
+    """اگه بعد از مهلت ثبت‌نام هنوز تو فاز candidacy بودیم: با حداقل یه کاندید رای‌گیری رو شروع می‌کنه،
+    وگرنه (صفر کاندید) انتخابات رو می‌بنده تا دفعه‌ی بعد با «شهردار روبی» دوباره باز بشه."""
+    chat_id = int(context.job.data)
+    session = get_session()
+    try:
+        row = session.get(GroupChat, chat_id)
+        if not row or (row.city_election_status or 'none') != 'candidacy':
+            return
+        cands = city_mayor_candidate_ids(row)
+        chat_title = row.title or "گپ"
+        if not cands:
+            row.city_election_status = 'none'
+            row.city_election_candidacy_ends_at = None
+            session.commit()
+            no_candidates = True
+        else:
+            city_mayor_start_voting(row)
+            session.commit()
+            no_candidates = False
+    finally:
+        session.close()
+    if no_candidates:
+        try:
+            await context.bot.send_message(
+                chat_id,
+                f"🗳 مهلت ثبت‌نام کاندیدهای شهرداری «{chat_title}» تموم شد و هیچ‌کس کاندید نشد؛ "
+                "دفعه‌ی بعد که «شهردار روبی» زده بشه، ثبت‌نام دوباره باز می‌شه."
+            )
+        except Exception:
+            pass
+        return
+    try:
+        await context.bot.send_message(
+            chat_id,
+            f"🗳 مهلت ثبت‌نام کاندیدهای شهرداری «{chat_title}» تموم شد؛ رای‌گیری شروع شد!\n"
+            "برای رای دادن بنویس «شهردار روبی»."
+        )
+    except Exception:
+        pass
+    if context.job_queue:
+        context.job_queue.run_once(
+            city_mayor_voting_timeout_job, CITY_MAYOR_VOTING_SECONDS,
+            data=chat_id, name=f"citymayor-vote-{chat_id}"
+        )
+
+async def city_mayor_voting_timeout_job(context):
+    """رای‌گیری رو می‌بنده، کاندیدی که بیشترین رای رو داره (در تساوی، اولین کاندید ثبت‌نامی) شهردار می‌کنه،
+    دوره‌ی 3 روزه‌ی شهرداریش رو شروع می‌کنه و اعلام عمومی/خصوصی می‌فرسته."""
+    chat_id = int(context.job.data)
+    session = get_session()
+    winner_id = None
+    try:
+        row = session.get(GroupChat, chat_id)
+        if not row or (row.city_election_status or 'none') != 'voting':
+            return
+        cands = city_mayor_candidate_ids(row)
+        counts = city_mayor_vote_counts(row)
+        chat_title = row.title or "گپ"
+        best = -1
+        for cid in cands:
+            c = counts.get(cid, 0)
+            if c > best:
+                best = c; winner_id = cid
+        winner_name = None
+        if winner_id:
+            u = session.get(User, winner_id)
+            winner_name = user_display_name(u) if u else str(winner_id)
+            row.city_mayor_id = winner_id
+            row.city_mayor_name = winner_name
+            row.city_mayor_term_ends_at = now_utc() + timedelta(seconds=CITY_MAYOR_TERM_SECONDS)
+        row.city_election_status = 'none'
+        row.city_election_candidates = ''
+        row.city_election_votes = ''
+        row.city_election_candidacy_ends_at = None
+        row.city_election_voting_ends_at = None
+        session.commit()
+    finally:
+        session.close()
+    if not winner_id:
+        try:
+            await context.bot.send_message(chat_id, f"🗳 رای‌گیری شهرداری «{chat_title}» بدون کاندید تموم شد.")
+        except Exception:
+            pass
+        return
+    term_days = CITY_MAYOR_TERM_SECONDS // 86400
+    try:
+        await context.bot.send_message(
+            chat_id,
+            f"🎉 «{winner_name}» با بیشترین رای، شهردار جدید «{chat_title}» شد! 🦁\n"
+            f"این دوره {term_days} روز ادامه داره."
+        )
+    except Exception:
+        pass
+    try:
+        await context.bot.send_message(winner_id, f"🎉 تبریک! تو شهردار جدید «{chat_title}» شدی 🦁🏰")
+    except Exception:
+        pass
 
 CITY_LEADERBOARD_CATEGORIES = [
     ('city_hunt_total', '⚔️ شکارها'),
@@ -3304,6 +3636,7 @@ async def text_router(update, context):
     if text in {"گردونه", "چرخ شانس", "🎡 گردونه", "🎡 چرخ شانس"}: await wheel_command(update,context); return
     if text in {"لیدر برد","لیدربرد","leaderboard","Leaderboard"}: await leaderboard_command(update,context); return
     if text in {"شهر روبی","شهر روباهیو","شهر روباه","🦊 شهر روبی"}: await city_command(update,context); return
+    if text in {"شهردار روبی","شهردار","🦁 شهردار روبی"}: await city_mayor_command(update,context); return
     if re.sub(r"\s+", " ", text) in {"روباه", "روباه روباه", "روبی", "روباهیو", "🦊 روباه", "🦊 روبی", "🦊 روباهیو"}:
         await fox_command(update, context); return
     if text in {"شکار", "شکار!", "🏹 شکار"}:
@@ -3333,7 +3666,7 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
@@ -3343,6 +3676,7 @@ async def persian_slash_router(update, context):
         elif cmd=="شکار": await hunt_command(update,context)
         elif cmd=="یخچال": await fridge_command(update,context)
         elif cmd in {"روبام","روباش"}: await roobam_command(update,context)
+        elif cmd in {"شهردار روبی","شهردار"}: await city_mayor_command(update,context)
         elif cmd in {"شهر روبی","شهر"}: await city_command(update,context)
         else: await leaderboard_command(update,context)
         return
@@ -3395,8 +3729,10 @@ def main():
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|rest):\d+$"))
     app.add_handler(CallbackQueryHandler(leaderboard_button,pattern=r"^lb:"))
     app.add_handler(CallbackQueryHandler(city_donate_button,pattern=r"^citydonate:-?\d+$"))
+    app.add_handler(CallbackQueryHandler(city_mayor_candidate_button,pattern=r"^citymayor:cand:-?\d+$"))
+    app.add_handler(CallbackQueryHandler(city_mayor_vote_button,pattern=r"^citymayor:vote:-?\d+:\d+$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
-    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
     app.add_handler(ChatMemberHandler(bot_joined_group, ChatMemberHandler.MY_CHAT_MEMBER), group=-2)
