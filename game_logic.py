@@ -26,30 +26,36 @@ def points_needed_for_level(level):
     return None
 FOX_RANKS=["روباه تازه‌کار","روباه کوچک","روباه چابک","روباه جنگلی","روباه زیرک","روباه تیزبین","روباه شکارچی","روباه ماهر","روباه زرنگ","روباه باتجربه","روباه سایه","روباه شب‌گرد","روباه رعد","روباه آذرخش","روباه سرخ","روباه نقره‌ای","روباه طلایی","روباه اشرافی","روباه سردار","روباه فرمانده","روباه بزرگ","روباه کهن","روباه افسانه‌ای","روباه سلطنتی","روباه شاهین‌دل","روباه اسطوره‌ای","روباه جاودان","روباه اعظم","روباه پادشاه","روباه شاهنشاه","روباه اژدها","روباه کیهانی","روباه بی‌رقیب","روباه افسانه‌ساز","روباه بزرگ‌مکار"]
 HUNT_ITEMS={"🐇":{"name":"خرگوش","nutrition":4,"sell":7000},"🐭":{"name":"موش","nutrition":1,"sell":1000},"🦡":{"name":"راکون","nutrition":3,"sell":5000},"🦆":{"name":"اردک","nutrition":2,"sell":3000},"🐤":{"name":"جوجه","nutrition":1,"sell":1000},"🐟":{"name":"ماهی","nutrition":1,"sell":1000},"🥕":{"name":"هویج","nutrition":1,"sell":1000},"🐿":{"name":"سنجاب","nutrition":2,"sell":3000},"🦗":{"name":"ملخ","nutrition":1,"sell":1000},"🐓":{"name":"خروس","nutrition":4,"sell":7000},"🦌":{"name":"آهو","nutrition":5,"sell":9000}}
-FOX_CYCLE_LENGTH = 5  # طول اولین چرخه‌ی روباه؛ هر چرخه بعدی ۵ تا از قبلی بلندتره.
+FOX_MAX_LEVEL = 25
+FOX_MAX_BELLY_CAPACITY = 20
+FOX_MAX_STORAGE_CAPACITY = 20
 
-def fox_rank(level):return FOX_RANKS[max(1,min(len(FOX_RANKS),int(level)))-1]
+def fox_rank(level):
+    # فقط 25 مقام رسمی؛ داده‌ی قدیمی کاربران کم/زیاد نمی‌شود.
+    return FOX_RANKS[max(1, min(FOX_MAX_LEVEL, int(level or 1))) - 1]
+
 def fox_capacity(level):
-    # شکم: سطح 1 = 3، با هر ارتقا +1، سقف 5 (سقف چرخه).
-    return min(5, 3 + max(0, int(level) - 1))
+    # ظرفیت شکم غذا: از 3 شروع می‌شود و حداکثر به 20 می‌رسد.
+    return min(FOX_MAX_BELLY_CAPACITY, 3 + max(0, int(level or 1) - 1))
 
 def fox_storage_capacity(level):
-    # ظرفیت ذخیره روب‌پوینت با هر ارتقا دو برابر می‌شود؛ سقف 5,000,000.
-    return min(5_000_000, 1000 * (2 ** max(0, int(level) - 1)))
+    # ظرفیت روب‌پوینت تولیدشده: حداکثر 20.
+    return min(FOX_MAX_STORAGE_CAPACITY, max(1, int(level or 1)))
 
 def fox_upgrade_cost(level):
-    # هزینه ارتقا = سه برابر ظرفیت فعلی.
-    return 3 * fox_storage_capacity(level)
+    # هزینه‌ی ارتقا بدون تغییر نسبت به سیستم قبلی حفظ می‌شود.
+    level = max(1, int(level or 1))
+    old_capacity = min(5_000_000, 1000 * (2 ** max(0, level - 1)))
+    return 3 * old_capacity
 
 def fox_production_interval(level):
-    # سطح 1: هر 8 ثانیه یک روب‌پوینت؛ سطح 35: هر 0.05 ثانیه.
-    level=max(1,min(35,int(level)))
-    if level == 1: return 8.0
-    if level == 35: return 0.05
-    return round(8.0 + (0.05 - 8.0) * ((level - 1) / 34), 2)
+    # لول 1 = یک روب‌پوینت در ثانیه؛ لول 25 = بیست روب‌پوینت در ثانیه.
+    # در لول‌های 20 تا 25 نرخ روی سقف 20 نگه داشته می‌شود.
+    rate = min(20, max(1, int(level or 1)))
+    return 1.0 / rate
 
 def fox_production_per_second(level):
-    interval = fox_production_interval(level)
-    return 1.0 / interval
+    # لول 1 -> 1/sec ... لول 20+ -> 20/sec.
+    return float(min(20, max(1, int(level or 1))))
 
 def fox_level_reward(level):return 50*max(1,int(level)-1)
