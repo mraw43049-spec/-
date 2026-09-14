@@ -180,6 +180,29 @@ class BankTransaction(Base):
     description = Column(String, nullable=True)
 
 
+class FootballMatch(Base):
+    __tablename__ = 'football_matches'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_home = Column(String, nullable=False)
+    team_away = Column(String, nullable=False)
+    match_time = Column(String, nullable=False)  # متن آزاد؛ همونی که پشتیبانی وارد کرده (تاریخ/ساعت)
+    status = Column(String, nullable=False, default='open')  # open | closed
+    created_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class FootballPrediction(Base):
+    __tablename__ = 'football_predictions'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    match_id = Column(Integer, ForeignKey('football_matches.id'), nullable=False)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    choice = Column(String, nullable=False)  # home | draw | away
+    status = Column(String, nullable=False, default='pending')  # pending | approved | rejected
+    reward = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+
+
 def init_db():
     Base.metadata.create_all(engine)
     inspector = inspect(engine)

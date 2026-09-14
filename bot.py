@@ -17,7 +17,10 @@ from config import (
     ADMIN_IDS, BOT_TOKEN, CLAIM_COOLDOWN_SECONDS, CLAIM_KEYWORD,
     CLAIM_POINTS_MAX, CLAIM_POINTS_MIN, REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL, DATABASE_URL
 )
-from database import Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, get_session, init_db
+from database import (
+    Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable,
+    FootballMatch, FootballPrediction, get_session, init_db
+)
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, FOX_CYCLE_LENGTH, fox_level_reward,
     fox_production_interval, fox_production_per_second, fox_rank, fox_upgrade_cost, fox_storage_capacity, get_level_for_points,
@@ -2856,19 +2859,23 @@ async def send_backup_to_admins(context, caption="📦 بکاپ خودکار ر�
 async def daily_backup_job(context):
     await send_backup_to_admins(context)
 
-async def admin_command(update, context):
-    if not await require_membership(update, context): return
-    if not admin_only(update.effective_user.id): await update.message.reply_text("⛔ دسترسی نداری.", **reply_kwargs(update.message)); return
-    kb = InlineKeyboardMarkup([
+def admin_main_keyboard():
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 آمار کلی", callback_data="admin:stats")],
         [InlineKeyboardButton("👥 تعداد کاربران", callback_data="admin:users")],
         [InlineKeyboardButton("📣 پیام همگانی", callback_data="admin:broadcast")],
         [InlineKeyboardButton("🦊 افزودن/کسر روب‌پوینت", callback_data="admin:addpoints")],
         [InlineKeyboardButton("⭐ تنظیم سطح", callback_data="admin:setlevel")],
         [InlineKeyboardButton("🦊 تنظیم روب‌پوینت", callback_data="admin:setfoxpoints")],
+        [InlineKeyboardButton("⚽ پیش‌بینی فوتبال", callback_data="admin:football")],
         [InlineKeyboardButton("📦 دریافت بکاپ اطلاعات", callback_data="admin:backup")],
     ])
-    await update.message.reply_text("🛠 پنل مدیریت\n\nبرای عملیات متنی، بعد از زدن گزینه مربوطه مقدار را بفرست.", reply_markup=kb, **reply_kwargs(update.message))
+
+
+async def admin_command(update, context):
+    if not await require_membership(update, context): return
+    if not admin_only(update.effective_user.id): await update.message.reply_text("⛔ دسترسی نداری.", **reply_kwargs(update.message)); return
+    await update.message.reply_text("🛠 پنل مدیریت\n\nبرای عملیات متنی، بعد از زدن گزینه مربوطه مقدار را بفرست.", reply_markup=admin_main_keyboard(), **reply_kwargs(update.message))
 
 
 async def admin_callback(update, context):
@@ -2909,6 +2916,8 @@ async def admin_text(update, context):
             try: await context.bot.send_message(uid,"📢 پیام مدیریت:\n\n"+text); ok+=1
             except Exception: fail+=1
         await update.message.reply_text(f"✅ ارسال شد: {ok}\n❌ ناموفق: {fail}", **reply_kwargs(update.message)); return
+    if action == "football_add_match":
+        await football_add_match_text(update, context); return
     parts=text.split()
     if len(parts)!=2 or not all(p.lstrip("-").isdigit() for p in parts): await update.message.reply_text("فرمت اشتباه است.", **reply_kwargs(update.message)); return
     uid,value=int(parts[0]),int(parts[1]); session=get_session()
@@ -2940,6 +2949,299 @@ async def admin_text(update, context):
             await update.message.reply_text(f"🦊 روب‌پوینت کاربر: {user.fox_points:,.2f}", **reply_kwargs(update.message))
             await notify_user_private(context.bot, uid, f"📢 اطلاعیه پشتیبانی\n\n🦊 روب‌پوینت‌های شما توسط پشتیبانی تنظیم شد.\n💰 مقدار قبلی: {old_points:,}\n💰 مقدار جدید: {user.fox_points:,}")
     finally: session.close()
+
+
+# ---------- پیش‌بینی فوتبال ----------
+FOOTBALL_PREDICTION_REWARD = 1500
+FOOTBALL_CHOICE_LABELS = {'home': 'برد میزبان', 'draw': 'مساوی', 'away': 'برد میهمان'}
+
+
+def football_admin_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ افزودن بازی", callback_data="admin:football:add")],
+        [InlineKeyboardButton("📋 لیست بازی‌ها", callback_data="admin:football:matches")],
+        [InlineKeyboardButton("🗳 پیش‌بینی‌های در انتظار تایید", callback_data="admin:football:pending")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="admin:back")],
+    ])
+
+
+def _football_matches_admin_view(session):
+    matches = session.query(FootballMatch).order_by(FootballMatch.id.desc()).limit(25).all()
+    rows = []
+    if not matches:
+        text = "📋 هیچ بازی‌ای ثبت نشده."
+    else:
+        lines = ["📋 لیست بازی‌ها:\n"]
+        for m in matches:
+            status_icon = "🟢 باز" if (m.status or 'open') == 'open' else "🔴 بسته"
+            lines.append(f"#{m.id} | {status_icon}\n⚽ {m.team_home} 🆚 {m.team_away}\n🕒 {m.match_time}\n")
+            rows.append([
+                InlineKeyboardButton(f"🔁 تغییر وضعیت #{m.id}", callback_data=f"admin:football:toggle:{m.id}"),
+                InlineKeyboardButton(f"🗑 حذف #{m.id}", callback_data=f"admin:football:del:{m.id}"),
+            ])
+        text = "\n".join(lines)
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="admin:football")])
+    return text, InlineKeyboardMarkup(rows)
+
+
+def _football_pending_admin_view(session):
+    preds = (session.query(FootballPrediction)
+             .filter(FootballPrediction.status == 'pending')
+             .order_by(FootballPrediction.id.asc()).limit(20).all())
+    rows = []
+    if not preds:
+        text = "🗳 هیچ پیش‌بینی در انتظار تاییدی نیست."
+    else:
+        lines = ["🗳 پیش‌بینی‌های در انتظار تایید:\n"]
+        for p in preds:
+            m = session.get(FootballMatch, p.match_id)
+            u = session.get(User, p.user_id)
+            uname = user_display_name(u) if u else str(p.user_id)
+            match_label = f"{m.team_home} 🆚 {m.team_away}" if m else f"بازی #{p.match_id}"
+            lines.append(f"#{p.id} | 👤 {uname} | ⚽ {match_label} | 🔮 {FOOTBALL_CHOICE_LABELS.get(p.choice, p.choice)}")
+            rows.append([
+                InlineKeyboardButton(f"✅ تایید #{p.id}", callback_data=f"admin:football:appr:{p.id}"),
+                InlineKeyboardButton(f"❌ رد #{p.id}", callback_data=f"admin:football:rej:{p.id}"),
+            ])
+        text = "\n".join(lines)
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="admin:football")])
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def _edit_or_send(q, text, kb):
+    try:
+        await q.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        await q.message.reply_text(text, reply_markup=kb)
+
+
+async def admin_football_callback(update, context):
+    q = update.callback_query
+    if not admin_only(q.from_user.id):
+        await q.answer("دسترسی نداری.", show_alert=True); return
+    data = q.data
+
+    if data == "admin:back":
+        await q.answer()
+        await _edit_or_send(q, "🛠 پنل مدیریت\n\nبرای عملیات متنی، بعد از زدن گزینه مربوطه مقدار را بفرست.", admin_main_keyboard())
+        return
+
+    if data == "admin:football":
+        await q.answer()
+        await _edit_or_send(q, "⚽ مدیریت پیش‌بینی فوتبال", football_admin_keyboard())
+        return
+
+    if data == "admin:football:add":
+        context.user_data["admin_action"] = "football_add_match"
+        await q.answer()
+        await q.message.reply_text(
+            "➕ افزودن بازی فوتبال\n\nسه خط بفرست (هرکدوم تو یه خط):\n"
+            "۱) نام تیم میزبان\n۲) نام تیم مهمان\n۳) تاریخ و ساعت بازی\n\n"
+            "مثال:\nپرسپولیس\nاستقلال\n1404/08/02 - ساعت 20:00"
+        )
+        return
+
+    if data == "admin:football:matches":
+        await q.answer()
+        session = get_session()
+        try:
+            text, kb = _football_matches_admin_view(session)
+        finally:
+            session.close()
+        await _edit_or_send(q, text, kb)
+        return
+
+    if data.startswith("admin:football:toggle:"):
+        match_id = int(data.split(":")[3])
+        session = get_session()
+        try:
+            m = session.get(FootballMatch, match_id)
+            if not m:
+                await q.answer("پیدا نشد.", show_alert=True); return
+            m.status = 'closed' if (m.status or 'open') == 'open' else 'open'
+            session.commit()
+            text, kb = _football_matches_admin_view(session)
+        finally:
+            session.close()
+        await q.answer("وضعیت بازی تغییر کرد.")
+        await _edit_or_send(q, text, kb)
+        return
+
+    if data.startswith("admin:football:del:"):
+        match_id = int(data.split(":")[3])
+        session = get_session()
+        try:
+            m = session.get(FootballMatch, match_id)
+            if not m:
+                await q.answer("پیدا نشد.", show_alert=True); return
+            session.query(FootballPrediction).filter_by(match_id=match_id).delete()
+            session.delete(m)
+            session.commit()
+            text, kb = _football_matches_admin_view(session)
+        finally:
+            session.close()
+        await q.answer("🗑 بازی حذف شد.")
+        await _edit_or_send(q, text, kb)
+        return
+
+    if data == "admin:football:pending":
+        await q.answer()
+        session = get_session()
+        try:
+            text, kb = _football_pending_admin_view(session)
+        finally:
+            session.close()
+        await _edit_or_send(q, text, kb)
+        return
+
+    if data.startswith("admin:football:appr:") or data.startswith("admin:football:rej:"):
+        approve = data.startswith("admin:football:appr:")
+        pred_id = int(data.split(":")[3])
+        session = get_session()
+        notify_uid = None; notify_text = None
+        try:
+            p = session.get(FootballPrediction, pred_id)
+            if not p or p.status != 'pending':
+                await q.answer("این پیش‌بینی قبلاً بررسی شده.", show_alert=True); return
+            m = session.get(FootballMatch, p.match_id)
+            match_label = f"{m.team_home} 🆚 {m.team_away}" if m else f"بازی #{p.match_id}"
+            if approve:
+                user = session.get(User, p.user_id)
+                if user:
+                    user.fox_points = int(user.fox_points or 0) + FOOTBALL_PREDICTION_REWARD
+                p.status = 'approved'
+                p.reward = FOOTBALL_PREDICTION_REWARD
+                notify_text = (
+                    f"📢 اطلاعیه پشتیبانی\n\n✅ پیش‌بینی شما برای بازی {match_label} تایید شد!\n"
+                    f"🎁 جایزه: {FOOTBALL_PREDICTION_REWARD:,} روب‌پوینت به حسابت اضافه شد."
+                )
+            else:
+                p.status = 'rejected'
+                notify_text = f"📢 اطلاعیه پشتیبانی\n\n❌ پیش‌بینی شما برای بازی {match_label} رد شد."
+            p.reviewed_at = now_utc()
+            notify_uid = p.user_id
+            session.commit()
+            text, kb = _football_pending_admin_view(session)
+        finally:
+            session.close()
+        await q.answer("✅ تایید شد." if approve else "❌ رد شد.")
+        if notify_uid and notify_text:
+            await notify_user_private(context.bot, notify_uid, notify_text)
+        await _edit_or_send(q, text, kb)
+        return
+
+
+async def football_add_match_text(update, context):
+    """پردازش متن سه‌خطی پشتیبانی برای افزودن بازی جدید."""
+    raw = update.message.text.strip()
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if len(lines) < 3:
+        await update.message.reply_text(
+            "❌ فرمت اشتباهه. سه خط بفرست:\nتیم میزبان\nتیم مهمان\nتاریخ و ساعت",
+            **reply_kwargs(update.message)
+        )
+        return
+    team_home, team_away, match_time = lines[0], lines[1], " ".join(lines[2:])
+    session = get_session()
+    try:
+        m = FootballMatch(team_home=team_home, team_away=team_away, match_time=match_time,
+                           status='open', created_by=update.effective_user.id)
+        session.add(m)
+        session.commit()
+        match_id = m.id
+    finally:
+        session.close()
+    await update.message.reply_text(
+        f"✅ بازی #{match_id} اضافه شد و برای پیش‌بینی کاربرا باز شد.\n⚽ {team_home} 🆚 {team_away}\n🕒 {match_time}",
+        **reply_kwargs(update.message)
+    )
+
+
+def football_match_text(m):
+    status_label = "🟢 باز برای پیش‌بینی" if (m.status or 'open') == 'open' else "🔴 بسته"
+    return f"⚽ {m.team_home} 🆚 {m.team_away}\n🕒 {m.match_time}\nوضعیت: {status_label}"
+
+
+async def football_predict_command(update, context):
+    if not await require_membership(update, context): return
+    session = get_session()
+    try:
+        matches = (session.query(FootballMatch).filter(FootballMatch.status == 'open')
+                   .order_by(FootballMatch.id.desc()).limit(20).all())
+        if not matches:
+            await update.message.reply_text("⚽ فعلاً هیچ بازی‌ای برای پیش‌بینی باز نیست.", **reply_kwargs(update.message))
+            return
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"⚽ {m.team_home} 🆚 {m.team_away} | {m.match_time}", callback_data=f"fbpred:match:{m.id}")]
+            for m in matches
+        ])
+    finally:
+        session.close()
+    await update.message.reply_text("⚽ پیش‌بینی فوتبال\n\nیه بازی رو انتخاب کن:", reply_markup=kb, **reply_kwargs(update.message))
+
+
+async def football_predict_match_button(update, context):
+    q = update.callback_query
+    if not await require_membership(update, context): return
+    try:
+        match_id = int(q.data.split(":")[2])
+    except Exception:
+        return
+    session = get_session()
+    try:
+        m = session.get(FootballMatch, match_id)
+        if not m or (m.status or 'open') != 'open':
+            await q.answer("❌ این بازی دیگه برای پیش‌بینی باز نیست.", show_alert=True); return
+        user = get_or_create_user(session, q.from_user)
+        existing = session.query(FootballPrediction).filter_by(match_id=match_id, user_id=user.telegram_id).first()
+        if existing:
+            await q.answer("✅ قبلاً برای این بازی پیش‌بینی کردی.", show_alert=True); return
+        text = football_match_text(m) + "\n\n🔮 پیش‌بینیت رو انتخاب کن:"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"🏠 برد {m.team_home}", callback_data=f"fbpred:pick:{m.id}:home")],
+            [InlineKeyboardButton("🤝 مساوی", callback_data=f"fbpred:pick:{m.id}:draw")],
+            [InlineKeyboardButton(f"🚩 برد {m.team_away}", callback_data=f"fbpred:pick:{m.id}:away")],
+        ])
+    finally:
+        session.close()
+    await q.answer()
+    await _edit_or_send(q, text, kb)
+
+
+async def football_predict_pick_button(update, context):
+    q = update.callback_query
+    if not await require_membership(update, context): return
+    try:
+        _, _, match_id_s, choice = q.data.split(":")
+        match_id = int(match_id_s)
+    except Exception:
+        return
+    if choice not in FOOTBALL_CHOICE_LABELS:
+        return
+    session = get_session()
+    try:
+        m = session.get(FootballMatch, match_id)
+        if not m or (m.status or 'open') != 'open':
+            await q.answer("❌ این بازی دیگه برای پیش‌بینی باز نیست.", show_alert=True); return
+        user = get_or_create_user(session, q.from_user)
+        existing = session.query(FootballPrediction).filter_by(match_id=match_id, user_id=user.telegram_id).first()
+        if existing:
+            await q.answer("✅ قبلاً برای این بازی پیش‌بینی کردی.", show_alert=True); return
+        pred = FootballPrediction(match_id=match_id, user_id=user.telegram_id, choice=choice, status='pending')
+        session.add(pred)
+        session.commit()
+        text = (
+            f"✅ پیش‌بینی شما ثبت شد!\n\n⚽ {m.team_home} 🆚 {m.team_away}\n🕒 {m.match_time}\n"
+            f"🔮 پیش‌بینی شما: {FOOTBALL_CHOICE_LABELS[choice]}\n\n"
+            f"⏳ منتظر تایید پشتیبانی باش؛ در صورت تایید {FOOTBALL_PREDICTION_REWARD:,} روب‌پوینت جایزه می‌گیری."
+        )
+    finally:
+        session.close()
+    await q.answer("🔮 پیش‌بینیت ثبت شد!")
+    try:
+        await q.message.edit_text(text)
+    except Exception:
+        pass
 
 
 async def membership_callback(update, context):
@@ -3649,6 +3951,8 @@ async def text_router(update, context):
         await ruby_games_command(update, context); return
     if text in {"کازینو روبی", "کازینو", "🃏 کازینو روبی"}:
         await casino_command(update, context); return
+    if re.sub(r"[\s‌]+", " ", text) in {"پیش بینی", "پیش بینی فوتبال", "⚽ پیش بینی", "پیشبینی"}:
+        await football_predict_command(update, context); return
     # انتقال روب پوینت 50 — فقط با ریپلای به گیرنده
     m = re.fullmatch(r"انتقال\s+روب\s+پوینت\s+([0-9۰-۹.,]+(?:k|کی|کا|m|م|میل)?)", text, re.I)
     if m:
@@ -3731,6 +4035,9 @@ def main():
     app.add_handler(CallbackQueryHandler(city_donate_button,pattern=r"^citydonate:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_mayor_candidate_button,pattern=r"^citymayor:cand:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_mayor_vote_button,pattern=r"^citymayor:vote:-?\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(admin_football_callback,pattern=r"^admin:(football(:.*)?|back)$"))
+    app.add_handler(CallbackQueryHandler(football_predict_match_button,pattern=r"^fbpred:match:\d+$"))
+    app.add_handler(CallbackQueryHandler(football_predict_pick_button,pattern=r"^fbpred:pick:\d+:(home|draw|away)$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
