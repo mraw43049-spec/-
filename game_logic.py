@@ -25,7 +25,7 @@ def points_needed_for_level(level):
     if level<=100:return 500+(level-5)*100
     return None
 FOX_RANKS=["روباه تازه‌کار","روباه کوچک","روباه چابک","روباه جنگلی","روباه زیرک","روباه تیزبین","روباه شکارچی","روباه ماهر","روباه زرنگ","روباه باتجربه","روباه سایه","روباه شب‌گرد","روباه رعد","روباه آذرخش","روباه سرخ","روباه نقره‌ای","روباه طلایی","روباه اشرافی","روباه سردار","روباه فرمانده","روباه بزرگ","روباه کهن","روباه افسانه‌ای","روباه سلطنتی","روباه شاهین‌دل","روباه اسطوره‌ای","روباه جاودان","روباه اعظم","روباه پادشاه","روباه شاهنشاه","روباه اژدها","روباه کیهانی","روباه بی‌رقیب","روباه افسانه‌ساز","روباه بزرگ‌مکار"]
-HUNT_ITEMS={"🐇":{"name":"خرگوش","nutrition":3,"sell":5000},"🐭":{"name":"موش","nutrition":1,"sell":1000},"🦡":{"name":"راکون","nutrition":3,"sell":5000},"🦆":{"name":"اردک","nutrition":2,"sell":3000},"🐤":{"name":"جوجه","nutrition":1,"sell":1000},"🐟":{"name":"ماهی","nutrition":1,"sell":1000},"🥕":{"name":"هویج","nutrition":1,"sell":1000},"🐿":{"name":"سنجاب","nutrition":2,"sell":3000},"🦗":{"name":"ملخ","nutrition":1,"sell":1000}}
+HUNT_ITEMS={"🐇":{"name":"خرگوش","nutrition":4,"sell":7000},"🐭":{"name":"موش","nutrition":1,"sell":1000},"🦡":{"name":"راکون","nutrition":3,"sell":5000},"🦆":{"name":"اردک","nutrition":2,"sell":3000},"🐤":{"name":"جوجه","nutrition":1,"sell":1000},"🐟":{"name":"ماهی","nutrition":1,"sell":1000},"🥕":{"name":"هویج","nutrition":1,"sell":1000},"🐿":{"name":"سنجاب","nutrition":2,"sell":3000},"🦗":{"name":"ملخ","nutrition":1,"sell":1000},"🐓":{"name":"خروس","nutrition":4,"sell":7000},"🦌":{"name":"آهو","nutrition":5,"sell":9000}}
 FOX_CYCLE_LENGTH = 5  # طول اولین چرخه‌ی روباه؛ هر چرخه بعدی ۵ تا از قبلی بلندتره.
 
 def fox_rank(level):return FOX_RANKS[max(1,min(len(FOX_RANKS),int(level)))-1]
@@ -34,8 +34,8 @@ def fox_capacity(level):
     return min(5, 3 + max(0, int(level) - 1))
 
 def fox_storage_capacity(level):
-    # ظرفیت ذخیره روب‌پوینت با هر ارتقا دو برابر می‌شود؛ سقف 1,950,000.
-    return min(1_950_000, 1000 * (2 ** max(0, int(level) - 1)))
+    # ظرفیت ذخیره روب‌پوینت با هر ارتقا دو برابر می‌شود؛ سقف 5,000,000.
+    return min(5_000_000, 1000 * (2 ** max(0, int(level) - 1)))
 
 def fox_upgrade_cost(level):
     # هزینه ارتقا = سه برابر ظرفیت فعلی.

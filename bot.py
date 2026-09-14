@@ -36,7 +36,7 @@ FOX_CYCLE_STEP = FOX_CYCLE_LENGTH  # هر چرخه‌ی بعدی 5 تا از چ�
 def fox_cycle_max_level(prestige_count):
     """سقف لول روباه در چرخه‌ی فعلی؛ با هر بار ریست شدن 5 تا بلندتر می‌شه."""
     return FOX_CYCLE_STEP * (int(prestige_count or 0) + 1)
-FOX_HUNGER_INTERVAL_SECONDS = 27 * 60  # هر ۲۷ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
+FOX_HUNGER_INTERVAL_SECONDS = 25 * 60  # هر ۲۵ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
 INJURED_FOX_INTERVAL = 20 * 60
 INJURED_FOX_COST = 10
 INJURED_FOX_REWARD_MIN = 200
@@ -1710,7 +1710,7 @@ def fox_profile_text(user):
 
 
 def update_fox_production(user):
-    """تولید تجمعی؛ روباه با حداقل 2 غذا کار می‌کند و هر 27 دقیقه یک غذا مصرف می‌کند.
+    """تولید تجمعی؛ روباه با حداقل 2 غذا کار می‌کند و هر 25 دقیقه یک غذا مصرف می‌کند.
     وقتی ذخیره روب‌پوینت به سقفش برسد، تولید و شمارش زمان کاملاً متوقف می‌ماند
     تا کاربر برداشت کند؛ همان لحظه که برداشت شد، تولید از نو شروع می‌شود."""
     now = now_utc()
@@ -1941,7 +1941,7 @@ async def handle_hunt_request(q, session, user, context):
     emoji_msg = await q.message.reply_text(emoji)
     await asyncio.sleep(3)
     await emoji_msg.reply_text(
-        f"🎯 شما {item['name']} را شکار کردید!\n🍖 ارزش غذایی: {item['nutrition']}\n\nچه کار خواهید کرد؟\n⏱ 120 ثانیه فرصت تصمیم‌گیری دارید وگرنه شکار می‌پره.",
+        f"🎯 شما {item['name']} را شکار کردید!\n🍖 ارزش غذایی: {item['nutrition']}\n💰 ارزش فروش: {item['sell']:,} روب‌پوینت\n\nچه کار خواهید کرد؟\n⏱ 120 ثانیه فرصت تصمیم‌گیری دارید وگرنه شکار می‌پره.",
         reply_markup=kb
     )
     if chat: await maybe_level_up_city(context, chat.id)
@@ -1977,7 +1977,7 @@ async def hunt_command(update, context):
         emoji_msg = await update.message.reply_text(emoji, **reply_kwargs(update.message))
         await asyncio.sleep(3)
         await emoji_msg.reply_text(
-            f"🎯 شما {item['name']} را شکار کردید!\n🍖 ارزش غذایی: {item['nutrition']}\n\nچه کار خواهید کرد؟\n⏱ 120 ثانیه فرصت تصمیم‌گیری دارید وگرنه شکار می‌پره.",
+            f"🎯 شما {item['name']} را شکار کردید!\n🍖 ارزش غذایی: {item['nutrition']}\n💰 ارزش فروش: {item['sell']:,} روب‌پوینت\n\nچه کار خواهید کرد؟\n⏱ 120 ثانیه فرصت تصمیم‌گیری دارید وگرنه شکار می‌پره.",
             reply_markup=kb
         )
     finally:
@@ -2020,7 +2020,7 @@ async def hunt_button(update, context):
             await q.message.edit_text(
                 f"🦊 {hunt.emoji} {hunt.item_name} به روباه داده شد.\n"
                 f"🍖 شکم روباه: {old}/{cap} → {user.fox_belly}/{cap}\n\n"
-                f"⚡ تولید روب‌پوینت فقط وقتی شکم کاملاً پر باشد فعال است."
+                f"⚡ تولید روب‌پوینت وقتی شکم حداقل ۲ واحد غذا داشته باشد فعال است."
             )
         elif action == "sell":
             user.fox_points += hunt.sell_value
