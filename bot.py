@@ -1707,34 +1707,64 @@ def fox_profile_text(user):
 
 
 def update_fox_production(user):
-    """تولید تجمعی؛ روباه با حداقل 2 غذا کار می‌کند و هر 25 دقیقه یک غذا مصرف می‌کند.
-    وقتی ذخیره روب‌پوینت به سقفش برسد، تولید و شمارش زمان کاملاً متوقف می‌ماند
-    تا کاربر برداشت کند؛ همان لحظه که برداشت شد، تولید از نو شروع می‌شود."""
+    """
+    تولید امن روباه:
+    - لول 1 تا 20: به‌ترتیب 1 تا 20 روب‌پوینت در ثانیه.
+    - لول 21 تا 25 نیز دقیقاً 20 در ثانیه.
+    - تولید هیچ‌وقت از فضای خالی مخزن بیشتر محاسبه نمی‌شود.
+    - وقتی مخزن پر است، زمان تولید فریز می‌شود.
+    - بعد از برداشت، ساعت تولید دقیقاً از همان لحظه دوباره شروع می‌شود؛
+      بنابراین زمان قدیمی نمی‌تواند باعث تولید ناگهانی هزاران روب‌پوینت شود.
+    """
     now = now_utc()
-    if user.fox_last_production_at is None:
-        user.fox_last_production_at = now
-    if user.fox_last_hunger_at is None:
-        user.fox_last_hunger_at = now
-    hunger_elapsed = max(0.0, (now - aware(user.fox_last_hunger_at)).total_seconds())
-    if hunger_elapsed >= FOX_HUNGER_INTERVAL_SECONDS:
-        meals = int(hunger_elapsed // FOX_HUNGER_INTERVAL_SECONDS)
-        user.fox_belly = max(0, (user.fox_belly or 0) - meals)
-        user.fox_last_hunger_at = now - timedelta(seconds=hunger_elapsed % FOX_HUNGER_INTERVAL_SECONDS)
-    # اگه ذخیره از قبل پر شده، تا وقتی کاربر برداشت نکنه ساعت تولید هم جلو نمی‌ره
-    # (نه زمان هدر می‌ره و نه چیزی محاسبه می‌شه) تا همون لحظه‌ی برداشت از نو شروع بشه.
-    if int(user.fox_storage or 0) >= fox_storage_capacity(max(1, min(FOX_MAX_LEVEL, int(user.fox_level or 1)))):
+    level = max(1, min(FOX_MAX_LEVEL, int(user.fox_level or 1)))
+    storage_cap = fox_storage_capacity(level)
+    storage = max(0, int(user.fox_storage or 0))
+
+    if user.fox_production_remainder is None or user.fox_production_remainder < 0:
+        user.fox_production_remainder = 0.0
+
+    # اگر ظرفیت پر است، هیچ زمان/تولید معوقی جمع نشود.
+    if storage >= storage_cap:
         user.fox_last_production_at = now
         user.fox_production_remainder = 0.0
         return 0.0
-    elapsed = max(0.0, (now - aware(user.fox_last_production_at)).total_seconds())
-    user.fox_last_production_at = now
-    if (user.fox_belly or 0) < 2:
+
+    # اولین اجرای سیستم یا داده‌ی قدیمیِ بدون timestamp: از همین لحظه شروع کن.
+    if user.fox_last_production_at is None:
+        user.fox_last_production_at = now
+        user.fox_production_remainder = 0.0
         return 0.0
-    # بخش اعشاری تولید را نگه می‌داریم تا هیچ روب‌پوینتی به‌خاطر گرد کردن از بین نرود.
-    total = float(user.fox_production_remainder or 0.0) + elapsed * fox_production_per_second(max(1, min(FOX_MAX_LEVEL, int(user.fox_level or 1))))
-    whole = int(total)
-    user.fox_production_remainder = total - whole
-    return float(whole)
+
+    # شکم کمتر از 2 باشد، تولید متوقف است و زمان معوق جمع نمی‌شود.
+    if (user.fox_belly or 0) < 2:
+        user.fox_last_production_at = now
+        user.fox_production_remainder = 0.0
+        return 0.0
+
+    elapsed = max(0.0, (now - aware(user.fox_last_production_at)).total_seconds())
+    rate = fox_production_per_second(level)
+
+    # حداکثر تعداد قابل تولید فقط به اندازه‌ی فضای خالی مخزن است.
+    room = max(0, storage_cap - storage)
+    if room <= 0:
+        user.fox_last_production_at = now
+        user.fox_production_remainder = 0.0
+        return 0.0
+
+    total = float(user.fox_production_remainder or 0.0) + elapsed * rate
+    whole = min(room, int(total))
+
+    if whole >= room:
+        # مخزن همین الان پر شد؛ باقی‌مانده‌ی زمان عمداً دور ریخته می‌شود
+        # تا بعد از برداشت، تولید از زمان برداشت شروع شود.
+        user.fox_production_remainder = 0.0
+        user.fox_last_production_at = now
+    else:
+        user.fox_production_remainder = total - whole
+        user.fox_last_production_at = now
+
+    return float(max(0, whole))
 
 def settle_fox_production(user):
     """محاسبه تولید معوق روباه و ذخیره آن در انبار روباه تا سقف ظرفیت (جدا از موجودی قابل‌خرج کاربر)."""
@@ -1817,6 +1847,9 @@ async def fox_button(update, context):
             amount = int(user.fox_storage or 0)
             user.fox_points = int(user.fox_points or 0) + amount
             user.fox_storage = 0
+            # برداشت = شروع یک چرخه‌ی کاملاً جدید؛ هیچ زمان قدیمی منتقل نمی‌شود.
+            user.fox_last_production_at = now_utc()
+            user.fox_production_remainder = 0.0
             session.commit()
             nxt = next_fox_point_seconds(user)
             next_text = f"⏱ روب‌پوینت بعدی حدود {format_duration(nxt)} دیگر تولید می‌شود." if nxt else "⏸ تولید متوقف است تا شکم حداقل 2 غذا داشته باشد."
