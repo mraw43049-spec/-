@@ -2157,12 +2157,18 @@ def fridge_keyboard(user, items):
 def fridge_item_keyboard(hunt, owner_id):
     rows = []
     if hunt.cooked:
-        rows.append([InlineKeyboardButton("💰 فروختن", callback_data=f"fridge:sell:{hunt.id}:{owner_id}")])
+        rows.append([
+            InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"fridge:feed:{hunt.id}:{owner_id}"),
+            InlineKeyboardButton("💰 فروختن", callback_data=f"fridge:sell:{hunt.id}:{owner_id}"),
+        ])
     elif hunt.cooking_started_at:
         rows.append([InlineKeyboardButton("🔄 بررسی وضعیت پخت", callback_data=f"fridge:item:{hunt.id}:{owner_id}")])
     else:
         rows.append([
             InlineKeyboardButton("🔥 پختن", callback_data=f"fridge:cook:{hunt.id}:{owner_id}"),
+        ])
+        rows.append([
+            InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"fridge:feed:{hunt.id}:{owner_id}"),
             InlineKeyboardButton("💰 فروختن", callback_data=f"fridge:sell:{hunt.id}:{owner_id}"),
         ])
     rows.append([InlineKeyboardButton("🔙 بازگشت به یخچال", callback_data=f"fridge:view:0:{owner_id}")])
@@ -2251,6 +2257,24 @@ async def fridge_button(update, context):
             await q.message.edit_text(
                 f"💰 {sold_name} فروخته شد و {sold_value:,} روب‌پوینت گرفتی.\n"
                 f"🪙 موجودی روب‌پوینت: {int(user.fox_points):,}\n\n" + fridge_text(user, items),
+                reply_markup=fridge_keyboard(user, items)
+            )
+            return
+        if action == "feed":
+            settle_fox_production(user)
+            fed_name = f"{hunt.emoji} {hunt.item_name}"
+            old = user.fox_belly
+            cap = int(user.fox_belly_capacity or 3)
+            user.fox_belly = min(cap, user.fox_belly + hunt.nutrition)
+            hunt.status = "fed"
+            hunt.cooking_started_at = None
+            session.commit()
+            items = settle_all_fridge_items(session, user.telegram_id)
+            session.commit()
+            await q.answer("🦊 شکار به روباه داده شد!")
+            await q.message.edit_text(
+                f"🦊 {fed_name} به روباه داده شد.\n"
+                f"🍖 شکم روباه: {old}/{cap} → {user.fox_belly}/{cap}\n\n" + fridge_text(user, items),
                 reply_markup=fridge_keyboard(user, items)
             )
             return
@@ -3578,7 +3602,7 @@ def city_panel_text(session, row):
             "🎯 هدف بعدی شهر برای ارتقا سطح ⬇️\n"
             f"┘─ 🐾 روب روب های مورد نیاز : {req['points']:,}\n"
             f"┘─ 🦊 روباه های زخمی مورد نیاز : {req['rescued']:,}\n"
-            f"┘─ 🎣 شکار های مورد نیاز : {req['hunts']:,}\n"
+            f"┘─ ⚔️ شکار های مورد نیاز : {req['hunts']:,}\n"
             f"┘─ 🏦 دارایی مورد نیاز خزانه : {fa_compact_number(req['treasury'])} روب پوینت 🪙"
         )
     return (
