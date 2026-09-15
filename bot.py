@@ -15,7 +15,8 @@ from telegram.ext import (
 
 from config import (
     ADMIN_IDS, BOT_TOKEN, CLAIM_COOLDOWN_SECONDS, CLAIM_KEYWORD,
-    CLAIM_POINTS_MAX, CLAIM_POINTS_MIN, REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL, DATABASE_URL
+    CLAIM_POINTS_MAX, CLAIM_POINTS_MIN, REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL,
+    REQUIRED_CHANNEL_2, REQUIRED_CHANNEL_2_URL, DATABASE_URL
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable,
@@ -156,20 +157,34 @@ def reply_kwargs(message):
 
 # ---------- عضویت اجباری ----------
 
-async def is_member(bot, user_id: int) -> bool:
+REQUIRED_CHANNELS = [
+    (REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL, "📢 عضویت در کانال اصلی"),
+    (REQUIRED_CHANNEL_2, REQUIRED_CHANNEL_2_URL, "🎁 عضویت در کانال هدایا"),
+]
+
+async def is_member(bot, user_id: int, channel=None) -> bool:
+    channel = channel or REQUIRED_CHANNEL
     try:
-        m = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
+        m = await bot.get_chat_member(channel, user_id)
         return m.status in ("member", "administrator", "creator") or bool(getattr(m, "is_member", False))
     except Exception as e:
-        logger.warning("Membership check failed: %s", e)
+        logger.warning("Membership check failed for %s: %s", channel, e)
         return False
 
 
+async def is_member_all(bot, user_id: int) -> bool:
+    for channel, _url, _label in REQUIRED_CHANNELS:
+        if not channel:
+            continue
+        if not await is_member(bot, user_id, channel):
+            return False
+    return True
+
+
 def join_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 عضویت در کانال", url=REQUIRED_CHANNEL_URL)],
-        [InlineKeyboardButton("✅ عضو شدم، بررسی کن", callback_data="check_membership")]
-    ])
+    rows = [[InlineKeyboardButton(label, url=url)] for channel, url, label in REQUIRED_CHANNELS if channel]
+    rows.append([InlineKeyboardButton("✅ عضو شدم، بررسی کن", callback_data="check_membership")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def require_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -194,9 +209,9 @@ async def require_membership(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return False
     if user.id in ADMIN_IDS:
         return True
-    if await is_member(context.bot, user.id):
+    if await is_member_all(context.bot, user.id):
         return True
-    text = "🔒 برای استفاده از ربات اول باید عضو کانال بشی.\n\nبعد از عضویت روی «عضو شدم، بررسی کن» بزن."
+    text = "🔒 برای استفاده از ربات اول باید عضو کانال‌های زیر بشی.\n\nبعد از عضویت روی «عضو شدم، بررسی کن» بزن."
     if update.callback_query:
         await update.callback_query.answer("اول باید عضو کانال بشی.", show_alert=True)
         try:
@@ -2032,6 +2047,7 @@ async def hunt_command(update, context):
         weight = round(random.uniform(item["weight_min"], item["weight_max"]), 2)
         hunt = FoxHunt(user_id=user.telegram_id, emoji=emoji, item_name=item["name"], nutrition=item["nutrition"], sell_value=item["sell"], status="pending", weight=weight)
         user.last_hunt_at = now_utc()
+        user.hunt_count = (user.hunt_count or 0) + 1
         session.add(hunt)
         chat = update.effective_chat
         if chat: bump_city_stat(session, chat.id, chat.title, city_hunt_total=1)
@@ -3977,7 +3993,7 @@ async def football_predict_pick_button(update, context):
 async def membership_callback(update, context):
     q=update.callback_query
     if q.data!="check_membership": return
-    if await is_member(context.bot,q.from_user.id):
+    if await is_member_all(context.bot,q.from_user.id):
         await q.answer("عضویت تأیید شد! 🎉")
         session = get_session()
         try:
@@ -4565,17 +4581,6 @@ CITY_LEADERBOARD_CATEGORIES = [
 ]
 CITY_LEADERBOARD_MAP = dict(CITY_LEADERBOARD_CATEGORIES)
 
-def leaderboard_city_keyboard():
-    rows = [[InlineKeyboardButton(title, callback_data=f"lb:gcat:{field}")] for field, title in CITY_LEADERBOARD_CATEGORIES]
-    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="lb:root")])
-    return InlineKeyboardMarkup(rows)
-
-def build_city_leaderboard_text(session, field, title):
-    rows = session.query(GroupChat).order_by(getattr(GroupChat, field).desc(), GroupChat.chat_id.asc()).limit(100).all()
-    lines = [f'╭──「 {title} 」'] + [f'{i}. {r.title or "گپ"} — {fa_compact_number(getattr(r, field) or 0)}' for i, r in enumerate(rows, 1)]
-    text = '\n'.join(lines)
-    return text[:4000] + ("\n…" if len(text) > 4000 else "")
-
 LEADERBOARD_CATEGORIES = [
     ('fox_points', '💰 روب پوینت 🦊'),
     ('fox_rescued_count', '🎃 روباه های زخمی'),
@@ -4584,22 +4589,77 @@ LEADERBOARD_CATEGORIES = [
 ]
 LEADERBOARD_CATEGORY_MAP = dict(LEADERBOARD_CATEGORIES)
 
+LEADERBOARD_LIMIT = 100      # حداکثر تعداد نفراتی که در رتبه‌بندی در نظر گرفته می‌شوند
+LEADERBOARD_PAGE_SIZE = 10   # تعداد نفرات در هر صفحه
+
+
+def leaderboard_city_keyboard():
+    rows = [[InlineKeyboardButton(title, callback_data=f"lb:gcat:{field}:1")] for field, title in CITY_LEADERBOARD_CATEGORIES]
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="lb:root")])
+    return InlineKeyboardMarkup(rows)
+
+
 def leaderboard_root_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🌍 لیدر برد جهانی", callback_data="lb:global")],
         [InlineKeyboardButton("👥 لیدر برد گروهی", callback_data="lb:group")],
     ])
 
+
 def leaderboard_global_keyboard():
-    rows = [[InlineKeyboardButton(title, callback_data=f"lb:cat:{field}")] for field, title in LEADERBOARD_CATEGORIES]
+    rows = [[InlineKeyboardButton(title, callback_data=f"lb:cat:{field}:1")] for field, title in LEADERBOARD_CATEGORIES]
     rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="lb:root")])
     return InlineKeyboardMarkup(rows)
 
-def build_leaderboard_text(session, field, title):
-    users = session.query(User).order_by(getattr(User, field).desc(), User.telegram_id.asc()).limit(100).all()
-    lines = [f'╭──「 {title} 」'] + [f'{i}. {user_display_name(u)} — {int(getattr(u, field) or 0):,}' for i, u in enumerate(users, 1)]
-    text = '\n'.join(lines)
-    return text[:4000] + ("\n…" if len(text) > 4000 else "")
+
+def _leaderboard_page_bounds(total_rows, page):
+    """صفحه‌بندی بدون حذف هیچ نفری: تعداد صفحات از روی کل نفرات محاسبه می‌شود."""
+    total_pages = max(1, -(-total_rows // LEADERBOARD_PAGE_SIZE))  # ceil division
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * LEADERBOARD_PAGE_SIZE
+    end = start + LEADERBOARD_PAGE_SIZE
+    return start, end, page, total_pages
+
+
+def _render_leaderboard_page(title, entries, page):
+    """entries: لیست تاپل‌های (متن_ردیف) از قبل رتبه‌بندی‌شده برای کل ۱۰۰ نفر."""
+    start, end, page, total_pages = _leaderboard_page_bounds(len(entries), page)
+    page_rows = entries[start:end]
+    lines = [f'╭──「 {title} 」', '']
+    for row_text in page_rows:
+        lines.append(row_text)
+        lines.append('')  # کمی فاصله بین هر نفر و نفر بعدی
+    if not page_rows:
+        lines.append('هنوز کسی در این بخش رتبه‌ای ندارد.')
+        lines.append('')
+    lines.append(f'📄 صفحه {page} از {total_pages}')
+    return '\n'.join(lines), page, total_pages
+
+
+def build_city_leaderboard_text(session, field, title, page=1):
+    rows = session.query(GroupChat).order_by(getattr(GroupChat, field).desc(), GroupChat.chat_id.asc()).limit(LEADERBOARD_LIMIT).all()
+    entries = [f'{i}. {r.title or "گپ"} — {fa_compact_number(getattr(r, field) or 0)}' for i, r in enumerate(rows, 1)]
+    return _render_leaderboard_page(title, entries, page)
+
+
+def build_leaderboard_text(session, field, title, page=1):
+    users = session.query(User).order_by(getattr(User, field).desc(), User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
+    entries = [f'{i}. {user_display_name(u)} — {int(getattr(u, field) or 0):,}' for i, u in enumerate(users, 1)]
+    return _render_leaderboard_page(title, entries, page)
+
+
+def leaderboard_page_keyboard(kind, field, page, total_pages, back_data):
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"lb:{kind}:{field}:{page-1}"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("بعدی ➡️", callback_data=f"lb:{kind}:{field}:{page+1}"))
+    rows = []
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=back_data)])
+    return InlineKeyboardMarkup(rows)
+
 
 async def leaderboard_command(update, context):
     if not await require_membership(update, context): return
@@ -4627,30 +4687,40 @@ async def leaderboard_button(update, context):
         except Exception: pass
         return
     if data.startswith("lb:gcat:"):
-        field = data.split(":", 2)[2]
+        parts = data.split(":")
+        field = parts[2]
+        try:
+            page = int(parts[3]) if len(parts) > 3 else 1
+        except ValueError:
+            page = 1
         if field not in CITY_LEADERBOARD_MAP:
             await q.answer(); return
         await q.answer()
         session = get_session()
         try:
-            text = build_city_leaderboard_text(session, field, CITY_LEADERBOARD_MAP[field])
+            text, page, total_pages = build_city_leaderboard_text(session, field, CITY_LEADERBOARD_MAP[field], page)
         finally:
             session.close()
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="lb:group")]])
+        kb = leaderboard_page_keyboard("gcat", field, page, total_pages, "lb:group")
         try: await q.message.edit_text(text, reply_markup=kb)
         except Exception: pass
         return
     if data.startswith("lb:cat:"):
-        field = data.split(":", 2)[2]
+        parts = data.split(":")
+        field = parts[2]
+        try:
+            page = int(parts[3]) if len(parts) > 3 else 1
+        except ValueError:
+            page = 1
         if field not in LEADERBOARD_CATEGORY_MAP:
             await q.answer(); return
         await q.answer()
         session = get_session()
         try:
-            text = build_leaderboard_text(session, field, LEADERBOARD_CATEGORY_MAP[field])
+            text, page, total_pages = build_leaderboard_text(session, field, LEADERBOARD_CATEGORY_MAP[field], page)
         finally:
             session.close()
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="lb:global")]])
+        kb = leaderboard_page_keyboard("cat", field, page, total_pages, "lb:global")
         try: await q.message.edit_text(text, reply_markup=kb)
         except Exception: pass
         return
