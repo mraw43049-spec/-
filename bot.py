@@ -2661,7 +2661,7 @@ async def injured_fox_button(update, context):
 
 BANK_OPEN_COST = 5000
 BANK_CHANGE_COST = 3000
-BANK_INTEREST_RATE = 0.03
+BANK_INTEREST_RATE = 0.07
 
 def ensure_bank(session, user):
     account = session.query(BankAccount).filter(BankAccount.user_id == user.telegram_id).first()
@@ -2680,7 +2680,7 @@ def ensure_bank(session, user):
     return account, True
 
 def apply_bank_interest(account, session):
-    # سود 3 درصد روزانه، حداکثر یک بار در هر 24 ساعت.
+    # سود 7 درصد روزانه، حداکثر یک بار در هر 24 ساعت.
     now = now_utc()
     if not account.last_interest_at:
         account.last_interest_at = now; return 0
@@ -2702,7 +2702,7 @@ def bank_keyboard(account):
     ])
 
 def bank_text(user, account):
-    return (f'🦊 بانک روبی 🏦\n\n💳 شماره حساب : {account.account_number}\n👤 به نام : {user_display_name(user)}\n\n💰 موجودی حساب : {account.balance:,} 🪙\n\n🤑 سود بانکی\n┘─ 🛍 درصد سود : 3%\n┘─ 📥 مبلغ واریزی : محاسبه روزانه بر اساس موجودی\n┘─ ⏳ زمان واریز : هر 24 ساعت\n\n❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.')
+    return (f'🦊 بانک روبی 🏦\n\n💳 شماره حساب : {account.account_number}\n👤 به نام : {user_display_name(user)}\n\n💰 موجودی حساب : {account.balance:,} 🪙\n\n🤑 سود بانکی\n┘─ 🛍 درصد سود : 7%\n┘─ 📥 مبلغ واریزی : محاسبه روزانه بر اساس موجودی\n┘─ ⏳ زمان واریز : هر 24 ساعت\n\n❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.')
 
 def parse_amount(raw):
     trans=str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
@@ -4255,7 +4255,7 @@ def main():
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|resetask|resetyes|resetno):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|upgrade):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|feed|upgrade):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit):\d+:\d+:\d+$"))
