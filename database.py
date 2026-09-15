@@ -85,6 +85,14 @@ class User(Base):
     # بن دائم (فروشگاه گیفت: تخلف در ارسال رسید) یا محرومیت موقت توسط پشتیبانی
     is_banned = Column(Integer, nullable=False, default=0)
     banned_until = Column(DateTime(timezone=True), nullable=True)
+    # زندان روبی و ضداسپم
+    jail_until = Column(DateTime(timezone=True), nullable=True)
+    jail_reason = Column(String, nullable=True)
+    jail_fine = Column(Integer, nullable=False, default=0)
+    jail_arrested_at = Column(DateTime(timezone=True), nullable=True)
+    injured_fox_stock = Column(Integer, nullable=False, default=0)
+    spam_window_at = Column(DateTime(timezone=True), nullable=True)
+    spam_count = Column(Integer, nullable=False, default=0)
 
 class Challenge(Base):
     __tablename__ = 'challenges'
@@ -141,6 +149,28 @@ class RubyTable(Base):
     message_id = Column(BigInteger, nullable=True)
     state = Column(String, nullable=True, default='')
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class RubySmuggling(Base):
+    __tablename__ = 'ruby_smuggling'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    count = Column(Integer, nullable=False)
+    risk_percent = Column(Float, nullable=False)
+    duration_seconds = Column(Integer, nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    completes_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String, nullable=False, default='pending')  # pending | success | caught
+    reward = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class JailWallMemory(Base):
+    __tablename__ = 'jail_wall_memories'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    author_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    text = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 
 class InjuredFox(Base):
     __tablename__ = 'injured_foxes'
@@ -268,11 +298,20 @@ def init_db():
         'fridge_level': 'INTEGER NOT NULL DEFAULT 1',
         'is_banned': 'INTEGER NOT NULL DEFAULT 0',
         'banned_until': DT_SQL_TYPE,
+        'jail_until': DT_SQL_TYPE,
+        'jail_reason': 'VARCHAR',
+        'jail_fine': 'INTEGER NOT NULL DEFAULT 0',
+        'jail_arrested_at': DT_SQL_TYPE,
+        'injured_fox_stock': 'INTEGER NOT NULL DEFAULT 0',
+        'spam_window_at': DT_SQL_TYPE,
+        'spam_count': 'INTEGER NOT NULL DEFAULT 0',
     }
     with engine.begin() as conn:
+        added_user_cols = set()
         for name, definition in additions.items():
             if name not in cols:
                 conn.execute(text(f'ALTER TABLE users ADD COLUMN {name} {definition}'))
+                added_user_cols.add(name)
         if 'attempt_log' not in injured_cols:
             conn.execute(text("ALTER TABLE injured_foxes ADD COLUMN attempt_log VARCHAR"))
         if 'fox_hunts' in inspector.get_table_names():
@@ -323,6 +362,14 @@ def init_db():
         conn.execute(text("UPDATE users SET fox_prestige_count = 0 WHERE fox_prestige_count IS NULL OR fox_prestige_count < 0"))
         conn.execute(text("UPDATE users SET fridge_level = 1 WHERE fridge_level IS NULL OR fridge_level < 1"))
         conn.execute(text("UPDATE users SET is_banned = 0 WHERE is_banned IS NULL"))
+        conn.execute(text("UPDATE users SET jail_fine = 0 WHERE jail_fine IS NULL OR jail_fine < 0"))
+        if 'injured_fox_stock' in added_user_cols:
+            # برای کاربران قدیمی، آمار نجات‌یافته‌ها را به موجودی اولیه قاچاق تبدیل می‌کنیم؛
+            # خود fox_rescued_count هرگز کم یا تغییر داده نمی‌شود.
+            conn.execute(text("UPDATE users SET injured_fox_stock = COALESCE(fox_rescued_count, 0)"))
+        else:
+            conn.execute(text("UPDATE users SET injured_fox_stock = 0 WHERE injured_fox_stock IS NULL OR injured_fox_stock < 0"))
+        conn.execute(text("UPDATE users SET spam_count = 0 WHERE spam_count IS NULL OR spam_count < 0"))
         if 'total_earned' not in cols:
             conn.execute(text('UPDATE users SET total_earned = points WHERE total_earned = 0'))
         if 'group_chats' in inspector.get_table_names():

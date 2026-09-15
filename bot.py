@@ -19,7 +19,7 @@ from config import (
     REQUIRED_CHANNEL_2, REQUIRED_CHANNEL_2_URL, DATABASE_URL
 )
 from database import (
-    Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable,
+    Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
     FootballMatch, FootballPrediction, GiftOrder, get_session, init_db
 )
 from game_logic import (
@@ -63,6 +63,20 @@ FOX_SYRUP_COST = 10000
 FOX_SYRUP_INTERVAL_SECONDS = 60
 FOX_SYRUP_DOSES_NEEDED = 3
 FOX_REST_DURATION_SECONDS = 60 * 60
+
+# ---------- قاچاق روباهیو ----------
+SMUGGLING_UNLOCK_LEVEL = 8
+SMUGGLING_MIN = 3
+SMUGGLING_MAX = 15
+SMUGGLING_PRICE_PER_FOX = 5000
+SMUGGLING_BASE_SECONDS = 60 * 60
+SMUGGLING_EXTRA_PER_FOX = 20 * 60
+SMUGGLING_FINE = 25000
+SMUGGLING_JAIL_SECONDS = 60 * 60
+SPAM_WINDOW_SECONDS = 10
+SPAM_MESSAGE_LIMIT = 6
+SPAM_JAIL_SECONDS = 15 * 60
+SPAM_FINE = 750
 
 # ---------- ابزارهای عمومی ----------
 
@@ -499,6 +513,239 @@ async def fox_sickness_button(update, context):
     finally:
         session.close()
 
+# ---------- زندان روبی و قاچاق روباهیو ----------
+def _jail_time_left(user):
+    if not user.jail_until:
+        return 0
+    return max(0, int((aware(user.jail_until) - now_utc()).total_seconds()))
+
+
+def jail_duration_text(seconds):
+    seconds=max(0,int(seconds))
+    m,s=divmod(seconds,60); h,m=divmod(m,60)
+    if h: return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
+def jail_keyboard(user_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ نوشتن خاطره", callback_data=f"jail:memory:{user_id}")],
+        [InlineKeyboardButton("💸 پرداخت جریمه", callback_data=f"jail:pay:{user_id}")],
+    ])
+
+
+def jail_wall_memory_text(session, user):
+    row=session.query(JailWallMemory).filter(JailWallMemory.author_id != user.telegram_id).order_by(JailWallMemory.created_at.desc()).first()
+    if row:
+        memory=row.text
+        author=f"{row.author_id}"
+    else:
+        memory="هنوز خاطره‌ای از روباه‌های دیگر روی دیوار نوشته نشده."
+        author="—"
+    arrested=jalali_datetime_str(tehran_dt(user.jail_arrested_at)) if user.jail_arrested_at else "—"
+    total=session.query(User).filter(User.jail_until != None).count()
+    left=_jail_time_left(user)
+    return (\
+        "🦊 زندان روبی ⛓️\\n\\n"
+        "🚨 شما روباه بدی بودین و زندانی شدید ❗️\\n\\n"
+        f"📝 دلیل حبس : {user.jail_reason or 'تخلف در روباهیو'}\\n"
+        f"⏳ مدت حبس : {jail_duration_text(left)}\\n"
+        f"🏦 جریمه نقدی : {int(user.jail_fine or 0):,} روب‌پوینت 🪙\\n"
+        "┘─ میتونید با پرداخت جریمه از زندان آزاد شوید\\n\\n"
+        f"👮 دستگیر شده در : {arrested}\\n\\n"
+        f"👥 تعداد کل زندانیان : {total}\\n\\n"
+        "✏️ خاطرات نوشته شده روی دیوار سلول\\n"
+        f"✍️ خاطره : {memory}\\n"
+        f"┘─ نوشته شده توسط : {author}"
+    ).replace("\\n", "\n")
+
+
+def free_jail_text():
+    return "🦊 زندان روبی ⛓️\\n\\n😇 شما روباهی ناناز و خوبی هستی!\\nآزادانه و بدون هیچ مشکلی زندانی نیستی، پس با خیال راحت روب روب کن!".replace("\\n", "\n")
+
+
+async def jail_command(update, context):
+    if not await require_membership(update, context): return
+    session=get_session()
+    try:
+        user=get_or_create_user(session,update.effective_user)
+        if not await _active_jail(session,user):
+            await update.message.reply_text(free_jail_text(), **reply_kwargs(update.message)); return
+        text=jail_wall_memory_text(session,user)
+        kb=jail_keyboard(user.telegram_id)
+    finally: session.close()
+    await update.message.reply_text(text,reply_markup=kb,**reply_kwargs(update.message))
+
+
+async def jail_button(update,context):
+    q=update.callback_query
+    parts=(q.data or '').split(':')
+    if len(parts)!=3: return
+    action=parts[1]; owner_id=int(parts[2])
+    if q.from_user.id!=owner_id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True); return
+    session=get_session()
+    try:
+        user=get_or_create_user(session,q.from_user)
+        if not await _active_jail(session,user):
+            await q.answer("😇 دیگر زندانی نیستی.",show_alert=True); return
+        if action=='memory':
+            context.user_data['jail_memory_wait']=True
+            await q.answer()
+            await q.message.reply_text("✏️ خاطره‌ای کوتاه برای دیوار زندان بنویس؛ خاطره‌ات برای یک زندانی دیگر نمایش داده می‌شود.")
+            return
+        if action=='pay':
+            fine=int(user.jail_fine or 0)
+            if int(user.fox_points or 0)<fine:
+                await q.answer(f"❌ روب‌پوینت کافی نداری. جریمه: {fine:,}",show_alert=True); return
+            user.fox_points-=fine
+            user.jail_until=None; user.jail_reason=None; user.jail_fine=0; user.jail_arrested_at=None
+            session.commit()
+            await q.answer("✅ جریمه پرداخت شد و آزاد شدی!")
+            await q.message.edit_text(free_jail_text())
+    finally: session.close()
+
+
+async def handle_jail_memory_text(update,context):
+    if not update.message or not update.message.text or not context.user_data.get('jail_memory_wait'):
+        return False
+    session=get_session()
+    try:
+        user=get_or_create_user(session,update.effective_user)
+        if not await _active_jail(session,user):
+            context.user_data.pop('jail_memory_wait',None); return False
+        text=update.message.text.strip()
+        if len(text)<2 or len(text)>300:
+            await update.message.reply_text("❌ خاطره باید بین ۲ تا ۳۰۰ کاراکتر باشد.",**reply_kwargs(update.message)); return True
+        session.add(JailWallMemory(author_id=user.telegram_id,text=text,created_at=now_utc()))
+        session.commit(); context.user_data.pop('jail_memory_wait',None)
+        await update.message.reply_text("✍️ خاطره‌ات روی دیوار سلول نوشته شد. برای یک زندانی دیگر نمایش داده می‌شود.",**reply_kwargs(update.message))
+        return True
+    finally: session.close()
+
+
+async def complete_smuggling(session, record):
+    if record.status!='pending' or now_utc() < aware(record.completes_at): return None
+    user=session.get(User,record.user_id)
+    if not user:
+        record.status='success'; record.reward=0; session.commit(); return None
+    if random.random()*100 < float(record.risk_percent):
+        record.status='caught'; record.reward=0
+        user.jail_until=now_utc()+timedelta(seconds=SMUGGLING_JAIL_SECONDS)
+        user.jail_reason='قاچاق کردن روباه های بی گناه'
+        user.jail_fine=SMUGGLING_FINE
+        user.jail_arrested_at=now_utc()
+        session.commit()
+        return ('caught',user,record)
+    reward=int(record.count)*SMUGGLING_PRICE_PER_FOX
+    record.status='success'; record.reward=reward
+    user.fox_points=int(user.fox_points or 0)+reward
+    session.commit()
+    return ('success',user,record)
+
+
+async def settle_all_smuggling(context):
+    session=get_session()
+    try:
+        rows=session.query(RubySmuggling).filter(RubySmuggling.status=='pending',RubySmuggling.completes_at<=now_utc()).all()
+        for row in rows:
+            result=await complete_smuggling(session,row)
+            if result:
+                status,user,record=result
+                try:
+                    if status=='success':
+                        await context.bot.send_message(user.telegram_id,f"🦊 قاچاق روباهیو با موفقیت انجام شد!\\n\\n🥩 {record.count} روباه به کباب تبدیل شدند.\\n💰 پاداش: +{record.reward:,} روب‌پوینت 🪙")
+                    else:
+                        await context.bot.send_message(user.telegram_id,"🚨 قاچاق روباهیو لو رفت!\\n\\n⛓️ توسط گرگ‌های پلیس دستگیر شدی و به زندان روبی افتادی. برای دیدن سلولت بنویس «زندان روبی».")
+                except Exception: pass
+    finally: session.close()
+
+
+def smuggling_status_text(user,record):
+    left=max(0,int((aware(record.completes_at)-now_utc()).total_seconds()))
+    return (f"🦊 قاچاق روباهیو 🥷\\n\\n✨ تعداد روباه های قاچاقی : {record.count} / {SMUGGLING_MAX}\\n"
+            f"🩹 تعداد کل روباه های زخمی : {int(user.injured_fox_stock or 0)}\\n\\n"
+            f"⏳ زمان باقی‌مانده : {jail_duration_text(left)}\\n\\n🚨 ریسک گیر افتادن : {record.risk_percent:.2f}%\\n"
+            "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد").replace("\\n", "\n")
+
+
+def smuggling_select_text(user,count):
+    risk=count*5
+    duration=SMUGGLING_BASE_SECONDS+(count-SMUGGLING_MIN)*SMUGGLING_EXTRA_PER_FOX
+    return (f"🦊 قاچاق روباهیو 🥷\\n\\n✨ تعداد روباه های قاچاقی : {count} / {SMUGGLING_MAX}\\n"
+            f"🩹 تعداد کل روباه های زخمی : {int(user.injured_fox_stock or 0)}\\n\\n"
+            f"⏳ زمان مورد نیاز قاچاق : {jail_duration_text(duration)}\\n\\n"
+            f"🚨 ریسک گیر افتادن : {risk:.2f}%\\n"
+            "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد\\n\\n"
+            "➕ جهت افزودن تعداد روباه های قاچاقی\\n➖ جهت کاهش تعداد روباه های قاچاقی\\n➰ جهت افزودن تمامی روباه های قاچاقی").replace("\\n", "\n")
+
+
+def smuggling_keyboard(user_id,count):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕",callback_data=f"smuggle:plus:{user_id}:{count}"),InlineKeyboardButton("➖",callback_data=f"smuggle:minus:{user_id}:{count}"),InlineKeyboardButton("➰",callback_data=f"smuggle:all:{user_id}:{count}")],
+        [InlineKeyboardButton("✅ تایید قاچاق",callback_data=f"smuggle:confirm:{user_id}:{count}")],
+    ])
+
+
+async def smuggling_command(update,context):
+    if not await require_membership(update,context): return
+    session=get_session()
+    try:
+        user=get_or_create_user(session,update.effective_user)
+        if user.level<SMUGGLING_UNLOCK_LEVEL:
+            await update.message.reply_text(f"🔒 قاچاق روبی از سطح {SMUGGLING_UNLOCK_LEVEL} باز می‌شود.\\n⭐ سطح فعلی تو: {user.level}".replace("\\n","\n"),**reply_kwargs(update.message)); return
+        pending=session.query(RubySmuggling).filter(RubySmuggling.user_id==user.telegram_id,RubySmuggling.status=='pending').order_by(RubySmuggling.id.desc()).first()
+        if pending:
+            result=await complete_smuggling(session,pending)
+            if result:
+                status,_,rec=result
+                if status=='success':
+                    await update.message.reply_text(f"🦊 قاچاق روباهیو تمام شد!\\n\\n🥩 {rec.count} روباه قاچاق شد.\\n💰 پاداش: +{rec.reward:,} روب‌پوینت 🪙".replace("\\n","\n"),**reply_kwargs(update.message))
+                else:
+                    await update.message.reply_text("🚨 گیر افتادی!\\n\\n⛓️ به زندان روبی افتادی. برای دیدن سلولت بنویس «زندان روبی».".replace("\\n","\n"),**reply_kwargs(update.message))
+                return
+            await update.message.reply_text(smuggling_status_text(user,pending),**reply_kwargs(update.message)); return
+        stock=int(user.injured_fox_stock or 0)
+        if stock<SMUGGLING_MIN:
+            await update.message.reply_text(f"🩹 فقط {stock} روباه زخمی آماده برای قاچاق داری.\\n❌ حداقل {SMUGGLING_MIN} روباه لازم است.".replace("\\n","\n"),**reply_kwargs(update.message)); return
+        count=SMUGGLING_MIN
+        await update.message.reply_text(smuggling_select_text(user,count),reply_markup=smuggling_keyboard(user.telegram_id,count),**reply_kwargs(update.message))
+    finally: session.close()
+
+
+async def smuggling_button(update,context):
+    q=update.callback_query
+    parts=(q.data or '').split(':')
+    if len(parts)!=4:return
+    _,action,owner_s,count_s=parts; owner_id=int(owner_s); count=int(count_s)
+    if q.from_user.id!=owner_id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True);return
+    session=get_session()
+    try:
+        user=get_or_create_user(session,q.from_user)
+        if user.level<SMUGGLING_UNLOCK_LEVEL:
+            await q.answer("🔒 این بخش از سطح ۸ باز می‌شود.",show_alert=True);return
+        if session.query(RubySmuggling).filter(RubySmuggling.user_id==owner_id,RubySmuggling.status=='pending').first():
+            await q.answer("⏳ یک قاچاق در حال انجام داری.",show_alert=True);return
+        stock=int(user.injured_fox_stock or 0)
+        if action in ('plus','minus','all'):
+            if action=='plus': count=min(SMUGGLING_MAX,count+1)
+            elif action=='minus': count=max(SMUGGLING_MIN,count-1)
+            else: count=min(SMUGGLING_MAX,stock)
+            await q.answer()
+            await q.message.edit_text(smuggling_select_text(user,count),reply_markup=smuggling_keyboard(owner_id,count));return
+        if action=='confirm':
+            if count<SMUGGLING_MIN or count>SMUGGLING_MAX or count>stock:
+                await q.answer("❌ تعداد روباه کافی نیست یا خارج از محدوده است.",show_alert=True);return
+            duration=SMUGGLING_BASE_SECONDS+(count-SMUGGLING_MIN)*SMUGGLING_EXTRA_PER_FOX
+            started=now_utc(); complete=started+timedelta(seconds=duration)
+            user.injured_fox_stock=stock-count
+            rec=RubySmuggling(user_id=owner_id,count=count,risk_percent=count*5,duration_seconds=duration,started_at=started,completes_at=complete,status='pending',created_at=started)
+            session.add(rec);session.commit()
+            await q.answer("🥷 قاچاق شروع شد!")
+            await q.message.edit_text(smuggling_status_text(user,rec))
+    finally: session.close()
+
 # ---------- پروفایل و منو ----------
 
 
@@ -516,6 +763,8 @@ GUIDE_TOPICS = [
     ("👤 روبام / روباش", "پروفایل روبی خودت یا کاربری که روی پیامش ریپلای کرده‌ای."),
     ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار و روب روب."),
     ("🎡 گردونه / چرخ شانس", "روزی یک‌بار؛ جایزه به‌صورت تصادفی انتخاب می‌شود."),
+    ("🥷 قاچاق روباهیو", "از لول ۸ فعال است؛ ۳ تا ۱۵ روباه زخمی را قاچاق کن. هر روباه ۵٬۰۰۰ روب‌پوینت ارزش دارد؛ ریسک و زمان با تعداد روباه‌ها بیشتر می‌شود."),
+    ("⛓️ زندان روبی", "اگر در قاچاق گیر بیفتی یا اسپم شدید کنی، موقتاً زندانی می‌شوی. در زندان فقط پنل زندان، خاطره و پرداخت جریمه فعال است."),
     ("➕ افزودن ربات به گروه", f"فقط گروه‌های بالای {MIN_GROUP_MEMBERS} عضو قابل قبولن؛ در غیر این صورت روباهیو خودش از گروه خارج می‌شه."),
 ]
 
@@ -2638,6 +2887,7 @@ async def injured_fox_button(update, context):
             event.status = "rescued"
             event.rescuer_id = user.telegram_id
             user.fox_rescued_count = (user.fox_rescued_count or 0) + 1
+            user.injured_fox_stock = (user.injured_fox_stock or 0) + 1
             reward = random.randint(INJURED_FOX_REWARD_MIN, INJURED_FOX_REWARD_MAX)
             claims = random.randint(1, INJURED_FOX_MAX_CLAIMS)
             user.fox_points += reward
@@ -3217,29 +3467,101 @@ async def gift_flow_gate(update, context):
     raise ApplicationHandlerStop
 
 
+async def _active_jail(session, user):
+    if not user:
+        return False
+    until = getattr(user, "jail_until", None)
+    if until and now_utc() < aware(until):
+        return True
+    if until:
+        user.jail_until = None
+        user.jail_reason = None
+        user.jail_fine = 0
+        user.jail_arrested_at = None
+        session.commit()
+    return False
+
+
+def jail_block_text(user):
+    return (
+        "⛓️ شما در زندان روبی هستید!\n\n"
+        "😡 شما روباه بدی بودی و توسط گرگ‌های پلیس دستگیر شدی.\n"
+        '🔒 برای دیدن سلول خودت بنویس «زندان روبی».\n'
+        "🚫 تا پایان حبس هیچ بخش دیگری از ربات برایت فعال نیست."
+    )
+
+
 async def ban_gate(update, context):
-    """کاربرهای محروم (دائم یا موقت توسط پشتیبانی) دیگه نمی‌تونن هیچ کاری با ربات انجام بدن."""
-    user = update.effective_user
-    if not user or user.id in ADMIN_IDS:
+    """محرومیت قبلی + زندان روبی را قبل از تمام بخش‌های ربات اعمال می‌کند."""
+    user_tg = update.effective_user
+    if not user_tg or user_tg.id in ADMIN_IDS:
+        return
+    text = (update.message.text or "").strip() if update.message else ""
+    jail_cmd = text in {"زندان روبی", "زندان روباهیو", "⛓️ زندان روبی"}
+    session = get_session()
+    try:
+        u = session.get(User, user_tg.id)
+        if not u:
+            return
+        # بن قبلی
+        banned = bool(getattr(u, "is_banned", 0))
+        if not banned and getattr(u, "banned_until", None):
+            if now_utc() < aware(u.banned_until):
+                banned = True
+            else:
+                u.banned_until = None
+                session.commit()
+        if banned:
+            raise ApplicationHandlerStop
+
+        # ضداسپم: ۶ پیام متنی در ۱۰ ثانیه = ۱۵ دقیقه زندان روبی.
+        if update.message and update.message.text and not jail_cmd and not context.user_data.get("jail_memory_wait"):
+            now=now_utc()
+            window=aware(getattr(u,"spam_window_at",None))
+            if not window or (now-window).total_seconds()>SPAM_WINDOW_SECONDS:
+                u.spam_window_at=now; u.spam_count=1
+            else:
+                u.spam_count=int(u.spam_count or 0)+1
+            if u.spam_count>=SPAM_MESSAGE_LIMIT:
+                u.spam_count=0; u.spam_window_at=None
+                u.jail_until=now+timedelta(seconds=SPAM_JAIL_SECONDS)
+                u.jail_reason="اسپم کردن پیام‌های ربات"
+                u.jail_fine=SPAM_FINE
+                u.jail_arrested_at=now
+                session.commit()
+                await update.message.reply_text("🚨 اسپم زیاد انجام دادی و گرگ‌های پلیس دستگیرت کردند!\n\n⛓️ مدت حبس: ۱۵ دقیقه\n🏦 جریمه: ۷۵۰ روب‌پوینت\n\nبرای ورود به سلول بنویس «زندان روبی».".replace("\\n","\n"),**reply_kwargs(update.message))
+                raise ApplicationHandlerStop
+            session.commit()
+
+        jailed = await _active_jail(session, u)
+        if jailed:
+            # دستور زندان روبی و جریان نوشتن خاطره اجازه عبور دارند.
+            if jail_cmd or context.user_data.get("jail_memory_wait"):
+                return
+            if update.message:
+                await update.message.reply_text(jail_block_text(u), **reply_kwargs(update.message))
+            raise ApplicationHandlerStop
+    finally:
+        session.close()
+
+
+async def jail_callback_gate(update, context):
+    """هیچ دکمه‌ای جز دکمه‌های خود زندان در زمان حبس قابل استفاده نیست."""
+    q = update.callback_query
+    if not q or not q.from_user or q.from_user.id in ADMIN_IDS:
         return
     session = get_session()
     try:
-        u = session.get(User, user.id)
-        banned = False
-        if u:
-            if getattr(u, "is_banned", 0):
-                banned = True
-            elif getattr(u, "banned_until", None):
-                if now_utc() < aware(u.banned_until):
-                    banned = True
-                else:
-                    # محرومیت موقت تموم شده؛ خودکار برداشته می‌شه.
-                    u.banned_until = None
-                    session.commit()
+        u = session.get(User, q.from_user.id)
+        if not u or not await _active_jail(session, u):
+            return
+        if (q.data or "").startswith("jail:"):
+            return
+        await q.answer("⛓️ اول باید از زندان روبی آزاد شوی.", show_alert=True)
+        raise ApplicationHandlerStop
     finally:
         session.close()
-    if banned:
-        raise ApplicationHandlerStop
+
 
 # ---------- انتقال روب‌پوینت ----------
 
@@ -4727,6 +5049,7 @@ async def leaderboard_button(update, context):
 
 async def text_router(update, context):
     if not update.message or not update.message.text: return
+    if await handle_jail_memory_text(update, context): return
     if await handle_gift_text(update, context): return
     if await handle_bank_text(update, context): return
     if await handle_fox_rename_text(update, context): return
@@ -4742,6 +5065,10 @@ async def text_router(update, context):
     if text in {"شهردار روبی","شهردار","🦁 شهردار روبی"}: await city_mayor_command(update,context); return
     if re.sub(r"\s+", " ", text) in {"روباه", "روباه روباه", "روبی", "روباهیو", "🦊 روباه", "🦊 روبی", "🦊 روباهیو"}:
         await fox_command(update, context); return
+    if text in {"زندان روبی", "زندان روباهیو", "⛓️ زندان روبی"}:
+        await jail_command(update, context); return
+    if text in {"قاچاق روبی", "قاچاق روباهیو", "🥷 قاچاق روبی", "🥷 قاچاق روباهیو"}:
+        await smuggling_command(update, context); return
     if text in {"شکار", "شکار!", "🏹 شکار"}:
         await hunt_command(update, context); return
     if text in {"یخچال روبی", "🧊 یخچال روبی"}:
@@ -4780,6 +5107,8 @@ async def persian_slash_router(update, context):
         elif cmd in {"بازی روبی","بازی"}: await ruby_games_command(update,context)
         elif cmd in {"کازینو روبی","کازینو"}: await casino_command(update,context)
         elif cmd in {"گردونه","چرخ"}: await wheel_command(update,context)
+        elif cmd in {"قاچاق روبی","قاچاق روباهیو","قاچاق"}: await smuggling_command(update,context)
+        elif cmd in {"زندان روبی","زندان روباهیو","زندان"}: await jail_command(update,context)
         elif cmd=="شکار": await hunt_command(update,context)
         elif cmd=="یخچال": await fridge_command(update,context)
         elif cmd in {"روبام","روباش"}: await roobam_command(update,context)
@@ -4812,6 +5141,7 @@ def main():
     app.add_handler(CommandHandler("fox",fox_command))
     app.add_handler(CommandHandler("roobam",roobam_command))
     app.add_handler(CommandHandler("leaderboard",leaderboard_command))
+    app.add_handler(CallbackQueryHandler(jail_callback_gate, group=-20))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
     app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|setlevel|setfoxpoints|banmenu|backup)$"))
@@ -4837,6 +5167,8 @@ def main():
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|rest):\d+$"))
+    app.add_handler(CallbackQueryHandler(jail_button,pattern=r"^jail:(memory|pay):\d+$"))
+    app.add_handler(CallbackQueryHandler(smuggling_button,pattern=r"^smuggle:(plus|minus|all|confirm):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(leaderboard_button,pattern=r"^lb:"))
     app.add_handler(CallbackQueryHandler(city_donate_button,pattern=r"^citydonate:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_mayor_candidate_button,pattern=r"^citymayor:cand:-?\d+$"))
@@ -4845,7 +5177,7 @@ def main():
     app.add_handler(CallbackQueryHandler(football_predict_match_button,pattern=r"^fbpred:match:\d+$"))
     app.add_handler(CallbackQueryHandler(football_predict_pick_button,pattern=r"^fbpred:pick:\d+:(home|draw|away)$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
-    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.ALL,gift_flow_gate),group=-9)
@@ -4854,6 +5186,7 @@ def main():
     app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, register_group_chat), group=-1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text_router),group=2)
     if app.job_queue:
+        app.job_queue.run_repeating(settle_all_smuggling, interval=30, first=10, name="ruby-smuggling-settler")
         app.job_queue.run_repeating(post_injured_fox_job, interval=INJURED_FOX_INTERVAL, first=5, name="injured-fox")
         if ADMIN_IDS:
             app.job_queue.run_repeating(daily_backup_job, interval=BACKUP_INTERVAL_SECONDS, first=60, name="daily-backup")
