@@ -24,7 +24,8 @@ from database import (
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
     fox_production_interval, fox_production_per_second, fox_rank, fox_upgrade_cost, fox_storage_capacity, get_level_for_points,
-    get_unlocked_games, points_to_next_level, points_needed_for_level
+    get_unlocked_games, points_to_next_level, points_needed_for_level,
+    FRIDGE_UNLOCK_LEVEL, FRIDGE_MAX_LEVEL, fridge_capacity, fridge_upgrade_cost, fridge_cook_seconds
 )
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -1884,16 +1885,13 @@ async def fox_button(update, context):
             await handle_hunt_request(q, session, user, context)
             return
         elif action == "fridge":
-            if user.level < 7:
-                await q.answer("🧊 یخچال روبی در سطح 7 باز می‌شود.", show_alert=True)
+            if user.level < FRIDGE_UNLOCK_LEVEL:
+                await q.answer(f"❄️ یخچال روبی در سطح {FRIDGE_UNLOCK_LEVEL} باز می‌شود.", show_alert=True)
                 return
-            items = session.query(FoxHunt).filter(FoxHunt.user_id == user.telegram_id, FoxHunt.status == "fridge").order_by(FoxHunt.id.desc()).limit(20).all()
-            if not items:
-                await q.answer("یخچال روبی خالی است.", show_alert=True)
-                return
-            text = "🧊 یخچال روبی\n\n" + "\n".join(f"{i.emoji} {i.item_name} — ارزش غذایی {i.nutrition} — فروش {i.sell_value:,} روب پوینت" for i in items)
+            items = settle_all_fridge_items(session, user.telegram_id)
+            session.commit()
             await q.answer()
-            await q.message.reply_text(text)
+            await q.message.reply_text(fridge_text(user, items), reply_markup=fridge_keyboard(user, items))
             return
         elif action == "rename":
             context.user_data["fox_rename"] = True
@@ -1914,7 +1912,8 @@ async def handle_hunt_request(q, session, user, context):
         return
     emoji = random.choice(list(HUNT_ITEMS.keys()))
     item = HUNT_ITEMS[emoji]
-    hunt = FoxHunt(user_id=user.telegram_id, emoji=emoji, item_name=item["name"], nutrition=item["nutrition"], sell_value=item["sell"], status="pending")
+    weight = round(random.uniform(item["weight_min"], item["weight_max"]), 2)
+    hunt = FoxHunt(user_id=user.telegram_id, emoji=emoji, item_name=item["name"], nutrition=item["nutrition"], sell_value=item["sell"], status="pending", weight=weight)
     user.last_hunt_at = now_utc()
     user.hunt_count=(user.hunt_count or 0)+1
     session.add(hunt)
@@ -1923,7 +1922,7 @@ async def handle_hunt_request(q, session, user, context):
     session.commit()
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"hunt:feed:{hunt.id}:{user.telegram_id}"), InlineKeyboardButton("💰 فروختن", callback_data=f"hunt:sell:{hunt.id}:{user.telegram_id}")],
-        [InlineKeyboardButton("🧊 انداختن در یخچال روبی", callback_data=f"hunt:fridge:{hunt.id}:{user.telegram_id}")],
+        [InlineKeyboardButton("❄️ انداختن در یخچال روبی", callback_data=f"hunt:fridge:{hunt.id}:{user.telegram_id}")],
     ])
     await q.answer()
     emoji_msg = await q.message.reply_text(emoji)
@@ -1952,7 +1951,8 @@ async def hunt_command(update, context):
         # اینجا همان منطق دکمه شکار، اما با پیام واقعیِ ریپلای‌شده اجرا می‌شود.
         emoji = random.choice(list(HUNT_ITEMS.keys()))
         item = HUNT_ITEMS[emoji]
-        hunt = FoxHunt(user_id=user.telegram_id, emoji=emoji, item_name=item["name"], nutrition=item["nutrition"], sell_value=item["sell"], status="pending")
+        weight = round(random.uniform(item["weight_min"], item["weight_max"]), 2)
+        hunt = FoxHunt(user_id=user.telegram_id, emoji=emoji, item_name=item["name"], nutrition=item["nutrition"], sell_value=item["sell"], status="pending", weight=weight)
         user.last_hunt_at = now_utc()
         session.add(hunt)
         chat = update.effective_chat
@@ -1960,7 +1960,7 @@ async def hunt_command(update, context):
         session.commit()
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"hunt:feed:{hunt.id}:{user.telegram_id}"), InlineKeyboardButton("💰 فروختن", callback_data=f"hunt:sell:{hunt.id}:{user.telegram_id}")],
-            [InlineKeyboardButton("🧊 انداختن در یخچال روبی", callback_data=f"hunt:fridge:{hunt.id}:{user.telegram_id}")],
+            [InlineKeyboardButton("❄️ انداختن در یخچال روبی", callback_data=f"hunt:fridge:{hunt.id}:{user.telegram_id}")],
         ])
         emoji_msg = await update.message.reply_text(emoji, **reply_kwargs(update.message))
         await asyncio.sleep(3)
@@ -2017,15 +2017,224 @@ async def hunt_button(update, context):
             await q.answer("💰 فروخته شد!")
             await q.message.edit_text(f"💰 {hunt.emoji} {hunt.item_name} فروخته شد و {hunt.sell_value:,} روب پوینت گرفتی.\n🪙 موجودی روب‌پوینت: {int(user.fox_points):,}")
         elif action == "fridge":
-            if user.level < 7:
-                await q.answer("🧊 یخچال روبی در سطح 7 باز می‌شود.", show_alert=True)
+            if user.level < FRIDGE_UNLOCK_LEVEL:
+                await q.answer(f"❄️ یخچال روبی در سطح {FRIDGE_UNLOCK_LEVEL} باز می‌شود.", show_alert=True)
+                return
+            cap = fridge_capacity(user.fridge_level)
+            current_count = session.query(FoxHunt).filter(FoxHunt.user_id == user.telegram_id, FoxHunt.status == "fridge").count()
+            if current_count >= cap:
+                await q.answer(f"❄️ یخچال پر است! ({current_count}/{cap}) اول یه چیزی رو بفروش یا بخور.", show_alert=True)
                 return
             hunt.status = "fridge"
+            hunt.cooked = 0
+            hunt.cooking_started_at = None
             session.commit()
-            await q.answer("🧊 داخل یخچال روبی قرار گرفت!")
-            await q.message.edit_text(f"🧊 {hunt.emoji} {hunt.item_name} داخل یخچال روبی ذخیره شد.")
+            await q.answer("❄️ داخل یخچال روبی قرار گرفت!")
+            await q.message.edit_text(f"❄️ {hunt.emoji} {hunt.item_name} داخل یخچال روبی ذخیره شد. ({current_count + 1}/{cap})")
     finally:
         session.close()
+
+# ---------- یخچال روبی ----------
+
+FRIDGE_SEPARATOR = "〰️〰️〰️〰️〰️〰️〰️"
+
+
+def settle_fridge_item(hunt):
+    """اگر آیتمی در حال پخت بوده و زمانش تموم شده، ارزش غذایی و ارزش فروشش دو برابر می‌شود."""
+    if hunt.status == "fridge" and not hunt.cooked and hunt.cooking_started_at:
+        duration = fridge_cook_seconds(hunt.nutrition)
+        if (now_utc() - aware(hunt.cooking_started_at)).total_seconds() >= duration:
+            hunt.nutrition = int(hunt.nutrition) * 2
+            hunt.sell_value = int(hunt.sell_value) * 2
+            hunt.cooked = 1
+            hunt.cooking_started_at = None
+    return hunt
+
+
+def settle_all_fridge_items(session, user_id):
+    items = session.query(FoxHunt).filter(FoxHunt.user_id == user_id, FoxHunt.status == "fridge").order_by(FoxHunt.id.desc()).all()
+    for it in items:
+        settle_fridge_item(it)
+    return items
+
+
+def fridge_cook_remaining(hunt):
+    if hunt.status == "fridge" and not hunt.cooked and hunt.cooking_started_at:
+        duration = fridge_cook_seconds(hunt.nutrition)
+        left = duration - (now_utc() - aware(hunt.cooking_started_at)).total_seconds()
+        return max(0, int(left))
+    return 0
+
+
+def fridge_item_block(hunt):
+    item = HUNT_ITEMS.get(hunt.emoji, {})
+    rarity = item.get("rarity", "معمولی")
+    rarity_emoji = item.get("rarity_emoji", "⚪️")
+    if hunt.cooked:
+        state = "پخته"
+    elif hunt.cooking_started_at:
+        state = "در حال پخت"
+    else:
+        state = "خام"
+    weight = hunt.weight if hunt.weight is not None else 0.0
+    lines = [
+        f"{hunt.emoji} {hunt.item_name} | {rarity} {rarity_emoji} | ({state})",
+        f"┘─ ⚖️ وزن : {weight:g} کیلو",
+        f"┘─ 💰 ارزش : {hunt.sell_value:,} 🪙",
+        f"┘─ 🍖 ارزش غذایی : {hunt.nutrition}",
+    ]
+    if state == "در حال پخت":
+        lines.append(f"┘─ 🔥 باقی‌مانده تا پخت : {format_duration(fridge_cook_remaining(hunt))}")
+    return "\n".join(lines)
+
+
+def fridge_text(user, items):
+    level = max(1, min(FRIDGE_MAX_LEVEL, int(user.fridge_level or 1)))
+    cap = fridge_capacity(level)
+    lines = [
+        f"❄️ یخچال روبی {user_display_name(user)}",
+        "",
+        f"⭐️ سطح یخچال : {level} / {FRIDGE_MAX_LEVEL}",
+        "",
+        f"🐟 ظرفیت یخچال : {len(items)} / {cap}",
+        "",
+        FRIDGE_SEPARATOR,
+    ]
+    if not items:
+        lines += ["", "یخچال فعلاً خالی است.", "", FRIDGE_SEPARATOR]
+    else:
+        for hunt in items:
+            lines += ["", fridge_item_block(hunt), "", FRIDGE_SEPARATOR]
+    if level >= FRIDGE_MAX_LEVEL:
+        lines += ["", "✨ یخچال در آخرین سطح ممکن میباشد."]
+    else:
+        cost = fridge_upgrade_cost(level)
+        cost_text = "رایگان 🎁" if cost == 0 else f"{cost:,} روب‌پوینت"
+        lines += ["", f"⭐ ارتقای بعدی یخچال : {cost_text} (+۱ جای جدید)"]
+    return "\n".join(lines)
+
+
+def fridge_keyboard(user, items):
+    owner_id = user.telegram_id
+    rows, row = [], []
+    for idx, hunt in enumerate(items, start=1):
+        row.append(InlineKeyboardButton(str(idx), callback_data=f"fridge:item:{hunt.id}:{owner_id}"))
+        if len(row) == 5:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    level = max(1, min(FRIDGE_MAX_LEVEL, int(user.fridge_level or 1)))
+    if level < FRIDGE_MAX_LEVEL:
+        cost = fridge_upgrade_cost(level)
+        cost_label = "رایگان 🎁" if cost == 0 else f"{cost:,} روب‌پوینت"
+        rows.append([InlineKeyboardButton(f"⭐ ارتقای یخچال ({cost_label})", callback_data=f"fridge:upgrade:0:{owner_id}")])
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+def fridge_item_keyboard(hunt, owner_id):
+    rows = []
+    if hunt.cooked:
+        rows.append([InlineKeyboardButton("💰 فروختن", callback_data=f"fridge:sell:{hunt.id}:{owner_id}")])
+    elif hunt.cooking_started_at:
+        rows.append([InlineKeyboardButton("🔄 بررسی وضعیت پخت", callback_data=f"fridge:item:{hunt.id}:{owner_id}")])
+    else:
+        rows.append([
+            InlineKeyboardButton("🔥 پختن", callback_data=f"fridge:cook:{hunt.id}:{owner_id}"),
+            InlineKeyboardButton("💰 فروختن", callback_data=f"fridge:sell:{hunt.id}:{owner_id}"),
+        ])
+    rows.append([InlineKeyboardButton("🔙 بازگشت به یخچال", callback_data=f"fridge:view:0:{owner_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def fridge_button(update, context):
+    q = update.callback_query
+    try:
+        _, action, arg1_s, owner_s = q.data.split(":")
+        arg1, owner_id = int(arg1_s), int(owner_s)
+    except Exception:
+        return
+    if q.from_user.id != owner_id:
+        await q.answer("⛔ این یخچال برای کاربر دیگری است.", show_alert=True)
+        return
+    if not await require_membership(update, context):
+        return
+    session = get_session()
+    try:
+        user = session.get(User, owner_id)
+        if not user:
+            await q.answer("کاربر پیدا نشد.", show_alert=True)
+            return
+        if user.level < FRIDGE_UNLOCK_LEVEL:
+            await q.answer(f"❄️ یخچال روبی در سطح {FRIDGE_UNLOCK_LEVEL} باز می‌شود.", show_alert=True)
+            return
+        if action == "view":
+            items = settle_all_fridge_items(session, user.telegram_id)
+            session.commit()
+            await q.answer()
+            await q.message.edit_text(fridge_text(user, items), reply_markup=fridge_keyboard(user, items))
+            return
+        if action == "upgrade":
+            level = max(1, min(FRIDGE_MAX_LEVEL, int(user.fridge_level or 1)))
+            if level >= FRIDGE_MAX_LEVEL:
+                await q.answer("✨ یخچال به آخرین سطح رسیده است.", show_alert=True)
+                return
+            cost = fridge_upgrade_cost(level)
+            if cost and (user.fox_points or 0) < cost:
+                await q.answer(f"روب‌پوینت کافی نیست. {cost:,} روب‌پوینت لازم داری.", show_alert=True)
+                return
+            if cost:
+                user.fox_points -= cost
+            user.fridge_level = level + 1
+            session.commit()
+            items = settle_all_fridge_items(session, user.telegram_id)
+            session.commit()
+            await q.answer(f"❄️ یخچال ارتقا پیدا کرد! سطح {user.fridge_level}", show_alert=True)
+            await q.message.edit_text(fridge_text(user, items), reply_markup=fridge_keyboard(user, items))
+            return
+        # از اینجا به بعد، اکشن‌ها مربوط به یک آیتم مشخص داخل یخچال هستند.
+        hunt = session.get(FoxHunt, arg1)
+        if not hunt or hunt.user_id != owner_id or hunt.status != "fridge":
+            await q.answer("این آیتم دیگر در یخچال نیست.", show_alert=True)
+            return
+        settle_fridge_item(hunt)
+        if action == "item":
+            session.commit()
+            await q.answer()
+            await q.message.edit_text(fridge_item_block(hunt), reply_markup=fridge_item_keyboard(hunt, owner_id))
+            return
+        if action == "cook":
+            if hunt.cooked:
+                await q.answer("🍖 این آیتم قبلاً پخته شده.", show_alert=True)
+            elif hunt.cooking_started_at:
+                remaining = fridge_cook_remaining(hunt)
+                await q.answer(f"🔥 در حال پخت است. {format_duration(remaining)} مانده.", show_alert=True)
+            else:
+                hunt.cooking_started_at = now_utc()
+                session.commit()
+                duration = fridge_cook_seconds(hunt.nutrition)
+                await q.answer(f"🔥 پخت شروع شد! {format_duration(duration)} طول می‌کشد.", show_alert=True)
+            await q.message.edit_text(fridge_item_block(hunt), reply_markup=fridge_item_keyboard(hunt, owner_id))
+            return
+        if action == "sell":
+            sold_value = hunt.sell_value
+            sold_name = f"{hunt.emoji} {hunt.item_name}"
+            user.fox_points = (user.fox_points or 0) + sold_value
+            hunt.status = "sold"
+            hunt.cooking_started_at = None
+            session.commit()
+            items = settle_all_fridge_items(session, user.telegram_id)
+            session.commit()
+            await q.answer("💰 فروخته شد!")
+            await q.message.edit_text(
+                f"💰 {sold_name} فروخته شد و {sold_value:,} روب‌پوینت گرفتی.\n"
+                f"🪙 موجودی روب‌پوینت: {int(user.fox_points):,}\n\n" + fridge_text(user, items),
+                reply_markup=fridge_keyboard(user, items)
+            )
+            return
+    finally:
+        session.close()
+    await q.answer()
 
 # ---------- جمع‌آوری روب‌پوینت ----------
 
@@ -2120,20 +2329,16 @@ async def fridge_command(update, context):
     try:
         user = get_or_create_user(session, update.effective_user)
         if await guard_fox_sickness(update, context, session, user): return
-        if user.level < 7:
-            await update.message.reply_text("🧊 یخچال روبی در سطح 7 باز می‌شود.", **reply_kwargs(update.message))
+        if user.level < FRIDGE_UNLOCK_LEVEL:
+            await update.message.reply_text(f"❄️ یخچال روبی در سطح {FRIDGE_UNLOCK_LEVEL} باز می‌شود.", **reply_kwargs(update.message))
             return
-        items = session.query(FoxHunt).filter(FoxHunt.user_id == user.telegram_id, FoxHunt.status == "fridge").order_by(FoxHunt.id.desc()).limit(20).all()
-        if not items:
-            text = "🧊 یخچال روبی\n\nیخچال فعلاً خالی است."
-        else:
-            text = "🧊 یخچال روبی\n\n" + "\n".join(
-                f"{i.emoji} {i.item_name} — ارزش غذایی {i.nutrition} — فروش {i.sell_value:,} روب پوینت"
-                for i in items
-            )
+        items = settle_all_fridge_items(session, user.telegram_id)
+        session.commit()
+        text = fridge_text(user, items)
+        markup = fridge_keyboard(user, items)
     finally:
         session.close()
-    await update.message.reply_text(text, **reply_kwargs(update.message))
+    await update.message.reply_text(text, reply_markup=markup, **reply_kwargs(update.message))
 
 
 # ---------- روباه زخمی در گپ ----------
@@ -4004,6 +4209,7 @@ def main():
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|resetask|resetyes|resetno):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|upgrade):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit):\d+:\d+:\d+$"))

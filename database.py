@@ -79,6 +79,9 @@ class User(Base):
     fox_sick_rest_until = Column(DateTime(timezone=True), nullable=True)
     fox_last_sick_at = Column(DateTime(timezone=True), nullable=True)
 
+    # یخچال روبی (از سطح 7 کاربر باز می‌شود)
+    fridge_level = Column(Integer, nullable=False, default=1)
+
 class Challenge(Base):
     __tablename__ = 'challenges'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -157,6 +160,9 @@ class FoxHunt(Base):
     nutrition = Column(Integer, nullable=False)
     sell_value = Column(Integer, nullable=False)
     status = Column(String, nullable=False, default='pending')
+    weight = Column(Float, nullable=True)                 # وزن (کیلوگرم)؛ موقع شکار رول می‌شود.
+    cooked = Column(Integer, nullable=False, default=0)    # 0 = خام، 1 = پخته (داخل یخچال)
+    cooking_started_at = Column(DateTime(timezone=True), nullable=True)  # زمان شروع پخت؛ None یعنی در حال پخت نیست.
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -237,6 +243,7 @@ def init_db():
         'fox_sick_next_dose_at': DT_SQL_TYPE,
         'fox_sick_rest_until': DT_SQL_TYPE,
         'fox_last_sick_at': DT_SQL_TYPE,
+        'fridge_level': 'INTEGER NOT NULL DEFAULT 1',
     }
     with engine.begin() as conn:
         for name, definition in additions.items():
@@ -244,6 +251,16 @@ def init_db():
                 conn.execute(text(f'ALTER TABLE users ADD COLUMN {name} {definition}'))
         if 'attempt_log' not in injured_cols:
             conn.execute(text("ALTER TABLE injured_foxes ADD COLUMN attempt_log VARCHAR"))
+        if 'fox_hunts' in inspector.get_table_names():
+            hunt_cols = {c['name'] for c in inspector.get_columns('fox_hunts')}
+            hunt_additions = {
+                'weight': 'FLOAT',
+                'cooked': 'INTEGER NOT NULL DEFAULT 0',
+                'cooking_started_at': DT_SQL_TYPE,
+            }
+            for name, definition in hunt_additions.items():
+                if name not in hunt_cols:
+                    conn.execute(text(f'ALTER TABLE fox_hunts ADD COLUMN {name} {definition}'))
         if 'ruby_tables' in inspector.get_table_names():
             ruby_cols = {c['name'] for c in inspector.get_columns('ruby_tables')}
             ruby_additions = {
@@ -272,6 +289,7 @@ def init_db():
         conn.execute(text("UPDATE users SET hunt_count = 0 WHERE hunt_count IS NULL OR hunt_count < 0"))
         conn.execute(text("UPDATE users SET fox_rescued_count = 0 WHERE fox_rescued_count IS NULL OR fox_rescued_count < 0"))
         conn.execute(text("UPDATE users SET fox_prestige_count = 0 WHERE fox_prestige_count IS NULL OR fox_prestige_count < 0"))
+        conn.execute(text("UPDATE users SET fridge_level = 1 WHERE fridge_level IS NULL OR fridge_level < 1"))
         if 'total_earned' not in cols:
             conn.execute(text('UPDATE users SET total_earned = points WHERE total_earned = 0'))
         if 'group_chats' in inspector.get_table_names():
