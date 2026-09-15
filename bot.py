@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto
 from telegram.ext import (
-    ApplicationBuilder, CallbackQueryHandler, CommandHandler, ChatMemberHandler,
+    ApplicationBuilder, ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, ChatMemberHandler,
     ContextTypes, MessageHandler, filters
 )
 
@@ -19,7 +19,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable,
-    FootballMatch, FootballPrediction, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, get_session, init_db
 )
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
@@ -92,6 +92,62 @@ def format_duration(seconds):
     if m:
         return f"{m} دقیقه و {s} ثانیه"
     return f"{s} ثانیه"
+
+
+FA_DIGITS_TABLE = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+
+
+def to_fa_digits(value):
+    return str(value).translate(FA_DIGITS_TABLE)
+
+
+def gregorian_to_jalali(gy, gm, gd):
+    """تبدیل تاریخ میلادی به شمسی (الگوریتم استاندارد تقویم جلالی)."""
+    g_days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    j_days_in_month = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29]
+    gy2 = gy - 1600
+    gm2 = gm - 1
+    gd2 = gd - 1
+    g_day_no = 365 * gy2 + (gy2 + 3) // 4 - (gy2 + 99) // 100 + (gy2 + 399) // 400
+    for i in range(gm2):
+        g_day_no += g_days_in_month[i]
+    if gm2 > 1 and ((gy % 4 == 0 and gy % 100 != 0) or (gy % 400 == 0)):
+        g_day_no += 1
+    g_day_no += gd2
+    j_day_no = g_day_no - 79
+    j_np = j_day_no // 12053
+    j_day_no %= 12053
+    jy = 979 + 33 * j_np + 4 * (j_day_no // 1461)
+    j_day_no %= 1461
+    if j_day_no >= 366:
+        jy += (j_day_no - 1) // 365
+        j_day_no = (j_day_no - 1) % 365
+    jm, jd = 12, j_day_no + 1
+    for i in range(11):
+        if j_day_no < j_days_in_month[i]:
+            jm = i + 1
+            jd = j_day_no + 1
+            break
+        j_day_no -= j_days_in_month[i]
+    return jy, jm, jd
+
+
+def tehran_dt(dt):
+    """زمان یو‌تی‌سی را به وقت محلی تهران (UTC+3:30) می‌برد."""
+    base = aware(dt) if dt is not None else now_utc()
+    return base + timedelta(hours=3, minutes=30)
+
+
+def jalali_datetime_str(dt):
+    jy, jm, jd = gregorian_to_jalali(dt.year, dt.month, dt.day)
+    return to_fa_digits(f"{jy:04d}/{jm:02d}/{jd:02d}  {dt.hour:02d}:{dt.minute:02d}")
+
+
+def mask_telegram_id(uid):
+    s = str(uid)
+    if len(s) <= 4:
+        return "*" * len(s)
+    return s[:2] + "*" * (len(s) - 4) + s[-2:]
 
 
 def reply_kwargs(message):
@@ -2804,6 +2860,270 @@ async def bank_withdraw_button(update,context):
         await q.answer('برداشت انجام شد.'); await q.message.edit_text(bank_text(user,account),reply_markup=bank_keyboard(account))
     finally: session.close()
 
+# ---------- فروشگاه گیفت روبی ----------
+
+GIFT_ITEMS = {
+    "15": {"label": "گیفت 15 استارزی💝🧸", "price": 60000},
+    "25": {"label": "گیفت 25 استارز🎁🌹", "price": 98000},
+    "50": {"label": "گیفت 50 استارزی 🎂💐🚀", "price": 200000},
+}
+GIFT_CARD_NUMBER = "6219861851160068"
+GIFT_CARD_OWNER = "ظریفی"
+GIFT_CHANNEL_USERNAME = "@foxfrenzy_gift"
+GIFT_MAX_QTY = 20
+
+
+def gift_shop_text():
+    lines = ["🎁 فروشگاه روبی", "", "یکی از گیفت‌های استارزی رو انتخاب کن ⬇️", ""]
+    for item in GIFT_ITEMS.values():
+        lines.append(f"┘─ {item['label']} — {item['price']:,} تومان")
+    return "\n".join(lines)
+
+
+def gift_shop_keyboard():
+    rows = [[InlineKeyboardButton(item["label"], callback_data=f"gift:pick:{key}:0")] for key, item in GIFT_ITEMS.items()]
+    return InlineKeyboardMarkup(rows)
+
+
+def gift_qty_text(gift_type, qty):
+    item = GIFT_ITEMS[gift_type]
+    return (
+        f"{item['label']}\n\n"
+        f"🔢 تعداد رو با دکمه‌های ➖ و ➕ تنظیم کن.\n"
+        f"💳 قیمت واحد: {item['price']:,} تومان\n"
+        f"💰 جمع کل ({qty} عدد): {item['price'] * qty:,} تومان\n\n"
+        f"وقتی تعداد درست بود، روی «✅ تایید تعداد» بزن."
+    )
+
+
+def gift_qty_keyboard(gift_type, qty):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("➖", callback_data=f"gift:qty:{gift_type}:dec"),
+            InlineKeyboardButton(str(qty), callback_data="gift:noop:0:0"),
+            InlineKeyboardButton("➕", callback_data=f"gift:qty:{gift_type}:inc"),
+        ],
+        [InlineKeyboardButton("✅ تایید تعداد", callback_data=f"gift:qtyok:{gift_type}:0")],
+        [InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="gift:back:0:0")],
+    ])
+
+
+def gift_order_summary_text(flow):
+    item = GIFT_ITEMS[flow["gift_type"]]
+    qty = flow["qty"]
+    total = item["price"] * qty
+    return (
+        f"🧾 خلاصه سفارش\n\n"
+        f"🎁 گیفت: {item['label']} × {qty}\n"
+        f"👤 آیدی عددی گیرنده: {flow['recipient_id']}\n"
+        f"📝 متن گیفت: {flow['gift_text']}\n"
+        f"💰 مبلغ قابل پرداخت: {total:,} تومان\n\n"
+        f"💳 پرداخت کارت به کارت به شماره کارت زیر:\n"
+        f"{GIFT_CARD_NUMBER}\n"
+        f"به نام: {GIFT_CARD_OWNER}\n\n"
+        f"بعد از واریز، عکس رسیدِ پرداخت رو همینجا بفرست.\n\n"
+        f"⚠️ توجه: فقط عکس رسید رو بفرست. اگه غیر از عکس رسید چیز دیگه‌ای بفرستی، "
+        f"به‌طور دائم از ربات بن می‌شی."
+    )
+
+
+async def gift_shop_command(update, context):
+    if not await require_membership(update, context):
+        return
+    context.user_data.pop("gift_flow", None)
+    await update.message.reply_text(gift_shop_text(), reply_markup=gift_shop_keyboard(), **reply_kwargs(update.message))
+
+
+async def gift_button(update, context):
+    q = update.callback_query
+    try:
+        _, action, arg1, arg2 = q.data.split(":")
+    except Exception:
+        await q.answer()
+        return
+    if not await require_membership(update, context):
+        return
+    if action == "noop":
+        await q.answer()
+        return
+    if action == "back":
+        context.user_data.pop("gift_flow", None)
+        await q.answer()
+        await q.message.edit_text(gift_shop_text(), reply_markup=gift_shop_keyboard())
+        return
+    if action == "pick":
+        gift_type = arg1
+        if gift_type not in GIFT_ITEMS:
+            await q.answer()
+            return
+        context.user_data["gift_flow"] = {"stage": "qty", "gift_type": gift_type, "qty": 1}
+        await q.answer()
+        await q.message.edit_text(gift_qty_text(gift_type, 1), reply_markup=gift_qty_keyboard(gift_type, 1))
+        return
+    if action == "qty":
+        gift_type, direction = arg1, arg2
+        flow = context.user_data.get("gift_flow") or {}
+        if flow.get("gift_type") != gift_type or flow.get("stage") != "qty":
+            flow = {"stage": "qty", "gift_type": gift_type, "qty": 1}
+        qty = flow.get("qty", 1)
+        qty = min(GIFT_MAX_QTY, qty + 1) if direction == "inc" else max(1, qty - 1)
+        flow["qty"] = qty
+        context.user_data["gift_flow"] = flow
+        await q.answer()
+        await q.message.edit_text(gift_qty_text(gift_type, qty), reply_markup=gift_qty_keyboard(gift_type, qty))
+        return
+    if action == "qtyok":
+        gift_type = arg1
+        flow = context.user_data.get("gift_flow") or {}
+        if flow.get("gift_type") != gift_type:
+            await q.answer("لطفاً دوباره از فروشگاه شروع کن.", show_alert=True)
+            return
+        flow["stage"] = "await_recipient"
+        flow["started_at"] = now_utc().isoformat()
+        context.user_data["gift_flow"] = flow
+        await q.answer()
+        await q.message.edit_text(
+            f"{GIFT_ITEMS[gift_type]['label']} × {flow['qty']}\n\n"
+            "👤 آیدی عددی کاربر گیرنده گیفت رو بفرست.\n"
+            "(برای گرفتن آیدی عددی خودت یا هر کاربر دیگه می‌تونی به @userinfobot پیام بدی)"
+        )
+        return
+    await q.answer()
+
+
+async def handle_gift_text(update, context):
+    flow = context.user_data.get("gift_flow")
+    if not flow or not update.message or not update.message.text:
+        return False
+    stage = flow.get("stage")
+    if stage not in ("await_recipient", "await_text"):
+        return False
+    text = update.message.text.strip()
+    if stage == "await_recipient":
+        if not re.fullmatch(r"\d{5,15}", text):
+            await update.message.reply_text(
+                "❗️ آیدی عددی معتبر نیست. فقط آیدی عددی کاربر گیرنده رو بفرست (مثلاً با @userinfobot پیدا کن).",
+                **reply_kwargs(update.message)
+            )
+            return True
+        flow["recipient_id"] = text
+        flow["stage"] = "await_text"
+        context.user_data["gift_flow"] = flow
+        await update.message.reply_text("📝 حالا متن گیفت رو بفرست؛ یعنی چی روی گیفت نوشته بشه.", **reply_kwargs(update.message))
+        return True
+    if stage == "await_text":
+        flow["gift_text"] = text[:300]
+        flow["stage"] = "await_receipt"
+        context.user_data["gift_flow"] = flow
+        await update.message.reply_text(gift_order_summary_text(flow), **reply_kwargs(update.message))
+        return True
+    return False
+
+
+async def finalize_gift_order(update, context, flow):
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        item = GIFT_ITEMS[flow["gift_type"]]
+        qty = flow["qty"]
+        total = item["price"] * qty
+        try:
+            started_at = datetime.fromisoformat(flow["started_at"])
+        except Exception:
+            started_at = now_utc()
+        order = GiftOrder(
+            user_id=user.telegram_id,
+            recipient_id=int(flow["recipient_id"]),
+            gift_type=flow["gift_type"],
+            quantity=qty,
+            unit_price=item["price"],
+            total_price=total,
+            gift_text=flow.get("gift_text") or "",
+            receipt_file_id=update.message.photo[-1].file_id,
+            status="pending",
+            started_at=started_at,
+        )
+        session.add(order)
+        session.commit()
+        order_id = order.id
+        context.user_data.pop("gift_flow", None)
+        await update.message.reply_text(
+            f"✅ سفارش شما ثبت شد (شماره سفارش: {order_id}).\n"
+            f"تیم پشتیبانی رسیدت رو بررسی می‌کنه و به‌زودی گیفت برای آیدی {order.recipient_id} ارسال می‌شه.",
+            **reply_kwargs(update.message)
+        )
+        caption = (
+            f"🆕 سفارش گیفت #{order_id}\n\n"
+            f"🎁 نوع گیفت: {item['label']} × {qty}\n"
+            f"💰 مبلغ: {total:,} تومان\n"
+            f"👤 آیدی سفارش‌دهنده: {order.user_id}\n"
+            f"🎯 آیدی گیرنده: {order.recipient_id}\n"
+            f"📝 متن گیفت: {order.gift_text}\n"
+            f"🕐 زمان سفارش: {jalali_datetime_str(tehran_dt(order.created_at))}"
+        )
+        for admin_id in ADMIN_IDS:
+            try:
+                await context.bot.send_photo(chat_id=admin_id, photo=order.receipt_file_id, caption=caption)
+            except Exception:
+                logger.warning("ارسال سفارش گیفت به ادمین %s ناموفق بود", admin_id)
+        order.status = "delivered"
+        order.delivered_at = now_utc()
+        session.commit()
+        elapsed = int((aware(order.delivered_at) - aware(order.started_at)).total_seconds()) if order.started_at else 0
+        channel_text = (
+            f"👍 سفارش {order_id} تحویل شد\n\n"
+            f"🎁 گیفت: {item['label']} × {qty}\n"
+            f"💳 {to_fa_digits(f'{total:,}')} تومان · کارت به کارت\n"
+            f"⏰ از سفارش تا تحویل: {to_fa_digits(format_duration(elapsed))}\n"
+            f" خریدار: {mask_telegram_id(order.user_id)}\n\n"
+            f"⏳ {jalali_datetime_str(tehran_dt(order.delivered_at))}\n"
+            f"تحویل داده شد\n\n"
+            f"🛍 خرید از روباهیو🦊: @fox_119bot"
+        )
+        try:
+            await context.bot.send_message(chat_id=GIFT_CHANNEL_USERNAME, text=channel_text)
+        except Exception:
+            logger.warning("ارسال پیام کانال گیفت ناموفق بود")
+    finally:
+        session.close()
+
+
+async def gift_flow_gate(update, context):
+    """وقتی کاربر منتظر ارسال رسیده: عکس یعنی ثبت سفارش، هر چیز دیگه یعنی بن دائم."""
+    flow = context.user_data.get("gift_flow")
+    if not flow or flow.get("stage") != "await_receipt":
+        return
+    if not update.message:
+        return
+    if update.message.photo:
+        await finalize_gift_order(update, context, flow)
+        raise ApplicationHandlerStop
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        user.is_banned = 1
+        session.commit()
+    finally:
+        session.close()
+    context.user_data.pop("gift_flow", None)
+    await update.message.reply_text("⛔️ چون به‌جای عکس رسید چیز دیگه‌ای فرستادی، به‌طور دائم از ربات بن شدی.")
+    raise ApplicationHandlerStop
+
+
+async def ban_gate(update, context):
+    """کاربرهای بن‌شده دائم دیگه نمی‌تونن هیچ کاری با ربات انجام بدن."""
+    user = update.effective_user
+    if not user or user.id in ADMIN_IDS:
+        return
+    session = get_session()
+    try:
+        u = session.get(User, user.id)
+        banned = bool(u and getattr(u, "is_banned", 0))
+    finally:
+        session.close()
+    if banned:
+        raise ApplicationHandlerStop
+
 # ---------- انتقال روب‌پوینت ----------
 
 async def transfer_command(update, context):
@@ -4166,6 +4486,7 @@ async def leaderboard_button(update, context):
 
 async def text_router(update, context):
     if not update.message or not update.message.text: return
+    if await handle_gift_text(update, context): return
     if await handle_bank_text(update, context): return
     if await handle_fox_rename_text(update, context): return
     if await handle_ruby_entry_text(update, context): return
@@ -4186,6 +4507,8 @@ async def text_router(update, context):
         await fridge_command(update, context); return
     if text in {"بانک", "بانک روبی", "🏦 بانک روبی"}:
         await bank_command(update, context); return
+    if text in {"شاپ روبی", "فروشگاه روبی", "🎁 شاپ روبی", "🎁 فروشگاه روبی"}:
+        await gift_shop_command(update, context); return
     if text in {"بازی روبی", "بازی های روبی", "بازی‌های روبی", "🕹 بازی های روبی"}:
         await ruby_games_command(update, context); return
     if text in {"کازینو روبی", "کازینو", "🃏 کازینو روبی"}:
@@ -4268,6 +4591,7 @@ def main():
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
     app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change):\d+$"))
+    app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|qty|qtyok|back|noop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|rest):\d+$"))
@@ -4281,6 +4605,8 @@ def main():
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
+    app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
+    app.add_handler(MessageHandler(filters.ALL,gift_flow_gate),group=-9)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
     app.add_handler(ChatMemberHandler(bot_joined_group, ChatMemberHandler.MY_CHAT_MEMBER), group=-2)
     app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, register_group_chat), group=-1)

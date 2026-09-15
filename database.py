@@ -82,6 +82,9 @@ class User(Base):
     # یخچال روبی (از سطح 7 کاربر باز می‌شود)
     fridge_level = Column(Integer, nullable=False, default=1)
 
+    # بن دائم (فروشگاه گیفت: تخلف در ارسال رسید)
+    is_banned = Column(Integer, nullable=False, default=0)
+
 class Challenge(Base):
     __tablename__ = 'challenges'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -209,6 +212,23 @@ class FootballPrediction(Base):
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class GiftOrder(Base):
+    __tablename__ = 'gift_orders'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    recipient_id = Column(BigInteger, nullable=False)
+    gift_type = Column(String, nullable=False)          # '15' | '25' | '50'
+    quantity = Column(Integer, nullable=False, default=1)
+    unit_price = Column(Integer, nullable=False)
+    total_price = Column(Integer, nullable=False)
+    gift_text = Column(String, nullable=True)
+    receipt_file_id = Column(String, nullable=True)
+    status = Column(String, nullable=False, default='pending')  # pending | delivered | rejected
+    started_at = Column(DateTime(timezone=True), nullable=True)   # زمان شروع سفارش (انتخاب گیفت)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 def init_db():
     Base.metadata.create_all(engine)
     inspector = inspect(engine)
@@ -244,6 +264,7 @@ def init_db():
         'fox_sick_rest_until': DT_SQL_TYPE,
         'fox_last_sick_at': DT_SQL_TYPE,
         'fridge_level': 'INTEGER NOT NULL DEFAULT 1',
+        'is_banned': 'INTEGER NOT NULL DEFAULT 0',
     }
     with engine.begin() as conn:
         for name, definition in additions.items():
@@ -290,6 +311,7 @@ def init_db():
         conn.execute(text("UPDATE users SET fox_rescued_count = 0 WHERE fox_rescued_count IS NULL OR fox_rescued_count < 0"))
         conn.execute(text("UPDATE users SET fox_prestige_count = 0 WHERE fox_prestige_count IS NULL OR fox_prestige_count < 0"))
         conn.execute(text("UPDATE users SET fridge_level = 1 WHERE fridge_level IS NULL OR fridge_level < 1"))
+        conn.execute(text("UPDATE users SET is_banned = 0 WHERE is_banned IS NULL"))
         if 'total_earned' not in cols:
             conn.execute(text('UPDATE users SET total_earned = points WHERE total_earned = 0'))
         if 'group_chats' in inspector.get_table_names():
