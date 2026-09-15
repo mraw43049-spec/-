@@ -2862,61 +2862,112 @@ async def bank_withdraw_button(update,context):
 
 # ---------- فروشگاه گیفت روبی ----------
 
-GIFT_ITEMS = {
-    "15": {"label": "گیفت 15 استارزی💝🧸", "price": 60000},
-    "25": {"label": "گیفت 25 استارز🎁🌹", "price": 98000},
-    "50": {"label": "گیفت 50 استارزی 🎂💐🚀", "price": 200000},
+GIFT_TIERS = {
+    "15": {
+        "tier_label": "گیفت 15 استارزی",
+        "price": 60000,
+        "options": {
+            "teddy": {"name": "تدی", "emoji": "🧸"},
+            "heart": {"name": "قلب", "emoji": "💝"},
+        },
+    },
+    "25": {
+        "tier_label": "گیفت 25 استارزی",
+        "price": 98000,
+        "options": {
+            "box": {"name": "کادو", "emoji": "🎁"},
+            "rose": {"name": "گل رز", "emoji": "🌹"},
+        },
+    },
+    "50": {
+        "tier_label": "گیفت 50 استارزی",
+        "price": 200000,
+        "options": {
+            "cake": {"name": "کیک", "emoji": "🎂"},
+            "bouquet": {"name": "دسته گل", "emoji": "💐"},
+            "rocket": {"name": "سفینه", "emoji": "🚀"},
+            "champagne": {"name": "شامپاین", "emoji": "🍾"},
+        },
+    },
 }
 GIFT_CARD_NUMBER = "6219861851160068"
 GIFT_CARD_OWNER = "ظریفی"
 GIFT_CHANNEL_USERNAME = "@foxfrenzy_gift"
 GIFT_MAX_QTY = 20
+GIFT_NO_TEXT_KEYBOARD = InlineKeyboardMarkup([[InlineKeyboardButton("🚫 بدون متن", callback_data="gift:notext:0:0")]])
+
+
+def gift_option_label(tier, option_key):
+    opt = GIFT_TIERS[tier]["options"][option_key]
+    return f"{opt['emoji']} {opt['name']}"
 
 
 def gift_shop_text():
-    lines = ["🎁 فروشگاه روبی", "", "یکی از گیفت‌های استارزی رو انتخاب کن ⬇️", ""]
-    for item in GIFT_ITEMS.values():
-        lines.append(f"┘─ {item['label']} — {item['price']:,} تومان")
+    lines = ["🎁 فروشگاه روبی", "", "یکی از تعرفه‌های استارزی رو انتخاب کن ⬇️", ""]
+    for tier in GIFT_TIERS.values():
+        icons = " ".join(o["emoji"] for o in tier["options"].values())
+        lines.append(f"┘─ {tier['tier_label']} {icons} — {tier['price']:,} تومان")
     return "\n".join(lines)
 
 
 def gift_shop_keyboard():
-    rows = [[InlineKeyboardButton(item["label"], callback_data=f"gift:pick:{key}:0")] for key, item in GIFT_ITEMS.items()]
+    rows = [
+        [InlineKeyboardButton(f"{tier['tier_label']} ({tier['price']:,} تومان)", callback_data=f"gift:pick:{key}:0")]
+        for key, tier in GIFT_TIERS.items()
+    ]
     return InlineKeyboardMarkup(rows)
 
 
-def gift_qty_text(gift_type, qty):
-    item = GIFT_ITEMS[gift_type]
+def gift_options_text(tier):
+    t = GIFT_TIERS[tier]
+    return f"{t['tier_label']}\n\n🎨 یکی از طرح‌های گیفت رو انتخاب کن ⬇️"
+
+
+def gift_options_keyboard(tier):
+    t = GIFT_TIERS[tier]
+    rows = [
+        [InlineKeyboardButton(gift_option_label(tier, key), callback_data=f"gift:opt:{tier}:{key}")]
+        for key in t["options"]
+    ]
+    rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="gift:backshop:0:0")])
+    return InlineKeyboardMarkup(rows)
+
+
+def gift_qty_text(tier, option_key, qty):
+    t = GIFT_TIERS[tier]
+    label = gift_option_label(tier, option_key)
     return (
-        f"{item['label']}\n\n"
+        f"{t['tier_label']} — {label}\n\n"
         f"🔢 تعداد رو با دکمه‌های ➖ و ➕ تنظیم کن.\n"
-        f"💳 قیمت واحد: {item['price']:,} تومان\n"
-        f"💰 جمع کل ({qty} عدد): {item['price'] * qty:,} تومان\n\n"
+        f"💳 قیمت واحد: {t['price']:,} تومان\n"
+        f"💰 جمع کل ({qty} عدد): {t['price'] * qty:,} تومان\n\n"
         f"وقتی تعداد درست بود، روی «✅ تایید تعداد» بزن."
     )
 
 
-def gift_qty_keyboard(gift_type, qty):
+def gift_qty_keyboard(tier, option_key, qty):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("➖", callback_data=f"gift:qty:{gift_type}:dec"),
+            InlineKeyboardButton("➖", callback_data=f"gift:qty:{tier}:dec"),
             InlineKeyboardButton(str(qty), callback_data="gift:noop:0:0"),
-            InlineKeyboardButton("➕", callback_data=f"gift:qty:{gift_type}:inc"),
+            InlineKeyboardButton("➕", callback_data=f"gift:qty:{tier}:inc"),
         ],
-        [InlineKeyboardButton("✅ تایید تعداد", callback_data=f"gift:qtyok:{gift_type}:0")],
-        [InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="gift:back:0:0")],
+        [InlineKeyboardButton("✅ تایید تعداد", callback_data=f"gift:qtyok:{tier}:0")],
+        [InlineKeyboardButton("🔙 بازگشت به طرح‌ها", callback_data=f"gift:backopt:{tier}:0")],
     ])
 
 
 def gift_order_summary_text(flow):
-    item = GIFT_ITEMS[flow["gift_type"]]
+    tier = GIFT_TIERS[flow["gift_type"]]
+    label = gift_option_label(flow["gift_type"], flow["gift_option"])
     qty = flow["qty"]
-    total = item["price"] * qty
+    total = tier["price"] * qty
+    gift_text_display = flow.get("gift_text") or "بدون متن"
     return (
         f"🧾 خلاصه سفارش\n\n"
-        f"🎁 گیفت: {item['label']} × {qty}\n"
+        f"🎁 گیفت: {tier['tier_label']} — {label} × {qty}\n"
         f"👤 آیدی عددی گیرنده: {flow['recipient_id']}\n"
-        f"📝 متن گیفت: {flow['gift_text']}\n"
+        f"📝 متن گیفت: {gift_text_display}\n"
         f"💰 مبلغ قابل پرداخت: {total:,} تومان\n\n"
         f"💳 پرداخت کارت به کارت به شماره کارت زیر:\n"
         f"{GIFT_CARD_NUMBER}\n"
@@ -2946,47 +2997,79 @@ async def gift_button(update, context):
     if action == "noop":
         await q.answer()
         return
-    if action == "back":
+    if action == "backshop":
         context.user_data.pop("gift_flow", None)
         await q.answer()
         await q.message.edit_text(gift_shop_text(), reply_markup=gift_shop_keyboard())
         return
-    if action == "pick":
-        gift_type = arg1
-        if gift_type not in GIFT_ITEMS:
+    if action == "backopt":
+        tier = arg1
+        if tier not in GIFT_TIERS:
             await q.answer()
             return
-        context.user_data["gift_flow"] = {"stage": "qty", "gift_type": gift_type, "qty": 1}
+        context.user_data["gift_flow"] = {"stage": "options", "gift_type": tier}
         await q.answer()
-        await q.message.edit_text(gift_qty_text(gift_type, 1), reply_markup=gift_qty_keyboard(gift_type, 1))
+        await q.message.edit_text(gift_options_text(tier), reply_markup=gift_options_keyboard(tier))
+        return
+    if action == "pick":
+        tier = arg1
+        if tier not in GIFT_TIERS:
+            await q.answer()
+            return
+        context.user_data["gift_flow"] = {"stage": "options", "gift_type": tier}
+        await q.answer()
+        await q.message.edit_text(gift_options_text(tier), reply_markup=gift_options_keyboard(tier))
+        return
+    if action == "opt":
+        tier, option_key = arg1, arg2
+        if tier not in GIFT_TIERS or option_key not in GIFT_TIERS[tier]["options"]:
+            await q.answer()
+            return
+        context.user_data["gift_flow"] = {"stage": "qty", "gift_type": tier, "gift_option": option_key, "qty": 1}
+        await q.answer()
+        await q.message.edit_text(gift_qty_text(tier, option_key, 1), reply_markup=gift_qty_keyboard(tier, option_key, 1))
         return
     if action == "qty":
-        gift_type, direction = arg1, arg2
+        tier, direction = arg1, arg2
         flow = context.user_data.get("gift_flow") or {}
-        if flow.get("gift_type") != gift_type or flow.get("stage") != "qty":
-            flow = {"stage": "qty", "gift_type": gift_type, "qty": 1}
+        if flow.get("gift_type") != tier or flow.get("stage") != "qty" or not flow.get("gift_option"):
+            await q.answer("لطفاً دوباره از فروشگاه شروع کن.", show_alert=True)
+            return
+        option_key = flow["gift_option"]
         qty = flow.get("qty", 1)
         qty = min(GIFT_MAX_QTY, qty + 1) if direction == "inc" else max(1, qty - 1)
         flow["qty"] = qty
         context.user_data["gift_flow"] = flow
         await q.answer()
-        await q.message.edit_text(gift_qty_text(gift_type, qty), reply_markup=gift_qty_keyboard(gift_type, qty))
+        await q.message.edit_text(gift_qty_text(tier, option_key, qty), reply_markup=gift_qty_keyboard(tier, option_key, qty))
         return
     if action == "qtyok":
-        gift_type = arg1
+        tier = arg1
         flow = context.user_data.get("gift_flow") or {}
-        if flow.get("gift_type") != gift_type:
+        if flow.get("gift_type") != tier or not flow.get("gift_option"):
             await q.answer("لطفاً دوباره از فروشگاه شروع کن.", show_alert=True)
             return
         flow["stage"] = "await_recipient"
         flow["started_at"] = now_utc().isoformat()
         context.user_data["gift_flow"] = flow
         await q.answer()
+        label = gift_option_label(tier, flow["gift_option"])
         await q.message.edit_text(
-            f"{GIFT_ITEMS[gift_type]['label']} × {flow['qty']}\n\n"
+            f"{GIFT_TIERS[tier]['tier_label']} — {label} × {flow['qty']}\n\n"
             "👤 آیدی عددی کاربر گیرنده گیفت رو بفرست.\n"
             "(برای گرفتن آیدی عددی خودت یا هر کاربر دیگه می‌تونی به @userinfobot پیام بدی)"
         )
+        return
+    if action == "notext":
+        flow = context.user_data.get("gift_flow") or {}
+        if flow.get("stage") != "await_text":
+            await q.answer()
+            return
+        flow["gift_text"] = ""
+        flow["stage"] = "await_receipt"
+        context.user_data["gift_flow"] = flow
+        await q.answer()
+        await q.message.edit_text(gift_order_summary_text(flow))
         return
     await q.answer()
 
@@ -3009,7 +3092,12 @@ async def handle_gift_text(update, context):
         flow["recipient_id"] = text
         flow["stage"] = "await_text"
         context.user_data["gift_flow"] = flow
-        await update.message.reply_text("📝 حالا متن گیفت رو بفرست؛ یعنی چی روی گیفت نوشته بشه.", **reply_kwargs(update.message))
+        await update.message.reply_text(
+            "📝 حالا متن گیفت رو بفرست؛ یعنی چی روی گیفت نوشته بشه.\n"
+            "یا اگه نمی‌خوای متنی روی گیفت باشه، دکمه زیر رو بزن.",
+            reply_markup=GIFT_NO_TEXT_KEYBOARD,
+            **reply_kwargs(update.message)
+        )
         return True
     if stage == "await_text":
         flow["gift_text"] = text[:300]
@@ -3024,9 +3112,11 @@ async def finalize_gift_order(update, context, flow):
     session = get_session()
     try:
         user = get_or_create_user(session, update.effective_user)
-        item = GIFT_ITEMS[flow["gift_type"]]
+        tier = GIFT_TIERS[flow["gift_type"]]
+        option_key = flow["gift_option"]
+        design_label = gift_option_label(flow["gift_type"], option_key)
         qty = flow["qty"]
-        total = item["price"] * qty
+        total = tier["price"] * qty
         try:
             started_at = datetime.fromisoformat(flow["started_at"])
         except Exception:
@@ -3035,8 +3125,9 @@ async def finalize_gift_order(update, context, flow):
             user_id=user.telegram_id,
             recipient_id=int(flow["recipient_id"]),
             gift_type=flow["gift_type"],
+            gift_design=option_key,
             quantity=qty,
-            unit_price=item["price"],
+            unit_price=tier["price"],
             total_price=total,
             gift_text=flow.get("gift_text") or "",
             receipt_file_id=update.message.photo[-1].file_id,
@@ -3054,11 +3145,11 @@ async def finalize_gift_order(update, context, flow):
         )
         caption = (
             f"🆕 سفارش گیفت #{order_id}\n\n"
-            f"🎁 نوع گیفت: {item['label']} × {qty}\n"
+            f"🎁 نوع گیفت: {tier['tier_label']} — {design_label} × {qty}\n"
             f"💰 مبلغ: {total:,} تومان\n"
             f"👤 آیدی سفارش‌دهنده: {order.user_id}\n"
             f"🎯 آیدی گیرنده: {order.recipient_id}\n"
-            f"📝 متن گیفت: {order.gift_text}\n"
+            f"📝 متن گیفت: {order.gift_text or 'بدون متن'}\n"
             f"🕐 زمان سفارش: {jalali_datetime_str(tehran_dt(order.created_at))}"
         )
         for admin_id in ADMIN_IDS:
@@ -3072,7 +3163,7 @@ async def finalize_gift_order(update, context, flow):
         elapsed = int((aware(order.delivered_at) - aware(order.started_at)).total_seconds()) if order.started_at else 0
         channel_text = (
             f"👍 سفارش {order_id} تحویل شد\n\n"
-            f"🎁 گیفت: {item['label']} × {qty}\n"
+            f"🎁 گیفت: {tier['tier_label']} — {design_label} × {qty}\n"
             f"💳 {to_fa_digits(f'{total:,}')} تومان · کارت به کارت\n"
             f"⏰ از سفارش تا تحویل: {to_fa_digits(format_duration(elapsed))}\n"
             f" خریدار: {mask_telegram_id(order.user_id)}\n\n"
@@ -3111,14 +3202,24 @@ async def gift_flow_gate(update, context):
 
 
 async def ban_gate(update, context):
-    """کاربرهای بن‌شده دائم دیگه نمی‌تونن هیچ کاری با ربات انجام بدن."""
+    """کاربرهای محروم (دائم یا موقت توسط پشتیبانی) دیگه نمی‌تونن هیچ کاری با ربات انجام بدن."""
     user = update.effective_user
     if not user or user.id in ADMIN_IDS:
         return
     session = get_session()
     try:
         u = session.get(User, user.id)
-        banned = bool(u and getattr(u, "is_banned", 0))
+        banned = False
+        if u:
+            if getattr(u, "is_banned", 0):
+                banned = True
+            elif getattr(u, "banned_until", None):
+                if now_utc() < aware(u.banned_until):
+                    banned = True
+                else:
+                    # محرومیت موقت تموم شده؛ خودکار برداشته می‌شه.
+                    u.banned_until = None
+                    session.commit()
     finally:
         session.close()
     if banned:
@@ -3427,7 +3528,19 @@ def admin_main_keyboard():
         [InlineKeyboardButton("⭐ تنظیم سطح", callback_data="admin:setlevel")],
         [InlineKeyboardButton("🦊 تنظیم روب‌پوینت", callback_data="admin:setfoxpoints")],
         [InlineKeyboardButton("⚽ پیش‌بینی فوتبال", callback_data="admin:football")],
+        [InlineKeyboardButton("🚫 محرومیت کاربر", callback_data="admin:banmenu")],
         [InlineKeyboardButton("📦 دریافت بکاپ اطلاعات", callback_data="admin:backup")],
+    ])
+
+
+def ban_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏱ ۱ روزه", callback_data="admin:banset:1")],
+        [InlineKeyboardButton("⏱ ۷ روزه", callback_data="admin:banset:7")],
+        [InlineKeyboardButton("⏱ ۳۰ روزه", callback_data="admin:banset:30")],
+        [InlineKeyboardButton("⛔ دائم", callback_data="admin:banset:permanent")],
+        [InlineKeyboardButton("✅ رفع محرومیت", callback_data="admin:banset:unban")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="admin:back")],
     ])
 
 
@@ -3456,9 +3569,34 @@ async def admin_callback(update, context):
     elif action == "addpoints": context.user_data["admin_action"]="addpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی کاربر + مقدار روب‌پوینت")
     elif action == "setlevel": context.user_data["admin_action"]="setlevel"; await q.message.reply_text("⭐ فرمت: آیدی عددی کاربر + سطح")
     elif action == "setfoxpoints": context.user_data["admin_action"]="setfoxpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی کاربر + مقدار روب‌پوینت")
+    elif action == "banmenu":
+        await q.message.reply_text("🚫 محرومیت کاربر\n\nمدت محرومیت رو انتخاب کن یا محرومیت رو بردار:", reply_markup=ban_menu_keyboard())
     elif action == "backup":
         raw, filename = build_backup_file()
         await q.message.reply_document(document=io.BytesIO(raw), filename=filename, caption="📦 بکاپ اطلاعات کاربران (دستی)")
+
+
+BAN_OPTION_LABELS = {
+    "1": "۱ روزه",
+    "7": "۷ روزه",
+    "30": "۳۰ روزه",
+    "permanent": "دائم",
+    "unban": "رفع محرومیت",
+}
+
+
+async def admin_banset_callback(update, context):
+    q = update.callback_query
+    if not admin_only(q.from_user.id):
+        await q.answer("دسترسی نداری.", show_alert=True)
+        return
+    option = q.data.split(":")[2]
+    if option not in BAN_OPTION_LABELS:
+        await q.answer()
+        return
+    await q.answer()
+    context.user_data["admin_action"] = f"ban:{option}"
+    await q.message.reply_text(f"🚫 محرومیت ({BAN_OPTION_LABELS[option]})\n\nآیدی عددی کاربر مورد نظر رو بفرست.")
 
 
 async def admin_text(update, context):
@@ -3477,6 +3615,39 @@ async def admin_text(update, context):
         await update.message.reply_text(f"✅ ارسال شد: {ok}\n❌ ناموفق: {fail}", **reply_kwargs(update.message)); return
     if action == "football_add_match":
         await football_add_match_text(update, context); return
+    if action.startswith("ban:"):
+        option = action.split(":", 1)[1]
+        if not text.lstrip("-").isdigit():
+            await update.message.reply_text("❗️ فقط آیدی عددی کاربر رو بفرست.", **reply_kwargs(update.message)); return
+        uid = int(text)
+        session=get_session()
+        try:
+            user=session.get(User,uid)
+            if not user: await update.message.reply_text("کاربر پیدا نشد.", **reply_kwargs(update.message)); return
+            if option == "unban":
+                user.is_banned = 0
+                user.banned_until = None
+                session.commit()
+                await update.message.reply_text(f"✅ محرومیت کاربر {uid} برداشته شد.", **reply_kwargs(update.message))
+                await notify_user_private(context.bot, uid, "📢 اطلاعیه پشتیبانی\n\n✅ محرومیت شما لغو شد و می‌تونی دوباره از ربات استفاده کنی.")
+            elif option == "permanent":
+                user.is_banned = 1
+                user.banned_until = None
+                session.commit()
+                await update.message.reply_text(f"⛔ کاربر {uid} به‌طور دائم محروم شد.", **reply_kwargs(update.message))
+                await notify_user_private(context.bot, uid, "📢 اطلاعیه پشتیبانی\n\n⛔️ شما به‌طور دائم از ربات محروم شدید.")
+            else:
+                days = int(option)
+                until = now_utc() + timedelta(days=days)
+                user.is_banned = 0
+                user.banned_until = until
+                session.commit()
+                until_text = jalali_datetime_str(tehran_dt(until))
+                await update.message.reply_text(f"⏱ کاربر {uid} به مدت {BAN_OPTION_LABELS[option]} محروم شد.\nتا: {until_text}", **reply_kwargs(update.message))
+                await notify_user_private(context.bot, uid, f"📢 اطلاعیه پشتیبانی\n\n⏱ شما به مدت {BAN_OPTION_LABELS[option]} از ربات محروم شدید.\nپایان محرومیت: {until_text}")
+        finally:
+            session.close()
+        return
     parts=text.split()
     if len(parts)!=2 or not all(p.lstrip("-").isdigit() for p in parts): await update.message.reply_text("فرمت اشتباه است.", **reply_kwargs(update.message)); return
     uid,value=int(parts[0]),int(parts[1]); session=get_session()
@@ -4573,7 +4744,8 @@ def main():
     app.add_handler(CommandHandler("leaderboard",leaderboard_command))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|setlevel|setfoxpoints|backup)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|setlevel|setfoxpoints|banmenu|backup)$"))
+    app.add_handler(CallbackQueryHandler(admin_banset_callback,pattern=r"^admin:banset:(?:1|7|30|permanent|unban)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|resetask|resetyes|resetno):\d+$"))
@@ -4591,7 +4763,7 @@ def main():
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
     app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change):\d+$"))
-    app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|qty|qtyok|back|noop):[^:]+:[^:]+$"))
+    app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|opt|qty|qtyok|backshop|backopt|notext|noop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|rest):\d+$"))

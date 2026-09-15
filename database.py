@@ -82,8 +82,9 @@ class User(Base):
     # یخچال روبی (از سطح 7 کاربر باز می‌شود)
     fridge_level = Column(Integer, nullable=False, default=1)
 
-    # بن دائم (فروشگاه گیفت: تخلف در ارسال رسید)
+    # بن دائم (فروشگاه گیفت: تخلف در ارسال رسید) یا محرومیت موقت توسط پشتیبانی
     is_banned = Column(Integer, nullable=False, default=0)
+    banned_until = Column(DateTime(timezone=True), nullable=True)
 
 class Challenge(Base):
     __tablename__ = 'challenges'
@@ -222,6 +223,7 @@ class GiftOrder(Base):
     unit_price = Column(Integer, nullable=False)
     total_price = Column(Integer, nullable=False)
     gift_text = Column(String, nullable=True)
+    gift_design = Column(String, nullable=True)          # کلید طرح انتخاب‌شده داخل تعرفه (مثلاً teddy/heart)
     receipt_file_id = Column(String, nullable=True)
     status = Column(String, nullable=False, default='pending')  # pending | delivered | rejected
     started_at = Column(DateTime(timezone=True), nullable=True)   # زمان شروع سفارش (انتخاب گیفت)
@@ -265,6 +267,7 @@ def init_db():
         'fox_last_sick_at': DT_SQL_TYPE,
         'fridge_level': 'INTEGER NOT NULL DEFAULT 1',
         'is_banned': 'INTEGER NOT NULL DEFAULT 0',
+        'banned_until': DT_SQL_TYPE,
     }
     with engine.begin() as conn:
         for name, definition in additions.items():
@@ -282,6 +285,14 @@ def init_db():
             for name, definition in hunt_additions.items():
                 if name not in hunt_cols:
                     conn.execute(text(f'ALTER TABLE fox_hunts ADD COLUMN {name} {definition}'))
+        if 'gift_orders' in inspector.get_table_names():
+            gift_cols = {c['name'] for c in inspector.get_columns('gift_orders')}
+            gift_additions = {
+                'gift_design': 'VARCHAR',
+            }
+            for name, definition in gift_additions.items():
+                if name not in gift_cols:
+                    conn.execute(text(f'ALTER TABLE gift_orders ADD COLUMN {name} {definition}'))
         if 'ruby_tables' in inspector.get_table_names():
             ruby_cols = {c['name'] for c in inspector.get_columns('ruby_tables')}
             ruby_additions = {
