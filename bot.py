@@ -2096,7 +2096,7 @@ def fridge_text(user, items):
         "",
         f"⭐️ سطح یخچال : {level} / {FRIDGE_MAX_LEVEL}",
         "",
-        f"🐟 ظرفیت یخچال : {len(items)} / {cap}",
+        f"🦊 ظرفیت یخچال : {len(items)} / {cap}",
         "",
         FRIDGE_SEPARATOR,
     ]
