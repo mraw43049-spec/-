@@ -1707,6 +1707,27 @@ def fox_profile_text(user):
     return "\n".join(lines)
 
 
+def settle_fox_hunger(user):
+    """هر FOX_HUNGER_INTERVAL_SECONDS (۲۵ دقیقه) یک واحد غذا از شکم روباه کم می‌شود؛
+    این کار مدام و بدون توقف ادامه دارد (زیر صفر نمی‌رود)."""
+    now = now_utc()
+    if user.fox_last_hunger_at is None:
+        user.fox_last_hunger_at = now
+        return 0
+    elapsed = max(0.0, (now - aware(user.fox_last_hunger_at)).total_seconds())
+    intervals = int(elapsed // FOX_HUNGER_INTERVAL_SECONDS)
+    if intervals <= 0:
+        return 0
+    belly = max(0, int(user.fox_belly or 0))
+    lost = min(belly, intervals)
+    user.fox_belly = belly - lost
+    # ساعت را فقط به اندازه‌ی بازه‌های کامل‌شده جلو می‌بریم (نه تا "now")
+    # تا باقیمانده‌ی زمانِ ناقص برای بازه‌ی بعدی از دست نرود؛ حتی وقتی شکم
+    # صفر است ساعت باید جلو برود، وگرنه با اولین غذا چند بازه‌ی قبلی یکجا کم می‌شود.
+    user.fox_last_hunger_at = aware(user.fox_last_hunger_at) + timedelta(seconds=intervals * FOX_HUNGER_INTERVAL_SECONDS)
+    return lost
+
+
 def update_fox_production(user):
     """
     تولید امن روباه:
@@ -1717,6 +1738,7 @@ def update_fox_production(user):
     - بعد از برداشت، ساعت تولید دقیقاً از همان لحظه دوباره شروع می‌شود؛
       بنابراین زمان قدیمی نمی‌تواند باعث تولید ناگهانی هزاران روب‌پوینت شود.
     """
+    settle_fox_hunger(user)
     now = now_utc()
     level = max(1, min(FOX_MAX_LEVEL, int(user.fox_level or 1)))
     storage_cap = fox_storage_capacity(level)
