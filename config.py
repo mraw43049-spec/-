@@ -13,3 +13,4 @@ CLAIM_COOLDOWN_SECONDS = int(os.getenv('CLAIM_COOLDOWN_SECONDS', '300'))
 CLAIM_POINTS_MIN = int(os.getenv('CLAIM_POINTS_MIN', '10'))
 CLAIM_POINTS_MAX = int(os.getenv('CLAIM_POINTS_MAX', '25'))
 ADMIN_IDS = {int(x.strip()) for x in os.getenv('ADMIN_IDS', '').split(',') if x.strip().isdigit()}
+REFERRAL_REWARD = int(os.getenv('REFERRAL_REWARD', '20000'))

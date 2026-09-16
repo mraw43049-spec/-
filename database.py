@@ -303,6 +303,19 @@ class MarketPrice(Base):
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class Referral(Base):
+    """زیرمجموعه‌گیری: هر کاربر با لینک اختصاصی خودش، بعد از تایید پشتیبانی، به معرف روب‌پوینت می‌ده."""
+    __tablename__ = 'referrals'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    referrer_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    referred_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False, unique=True)
+    status = Column(String, nullable=False, default='pending')  # pending / approved / rejected
+    reward = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    decided_by = Column(BigInteger, nullable=True)
+
+
 def init_db():
     Base.metadata.create_all(engine)
     inspector = inspect(engine)

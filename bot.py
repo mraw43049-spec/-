@@ -14,13 +14,13 @@ from telegram.ext import (
 )
 
 from config import (
-    ADMIN_IDS, BOT_TOKEN, CLAIM_COOLDOWN_SECONDS, CLAIM_KEYWORD,
+    ADMIN_IDS, BOT_TOKEN, CLAIM_COOLDOWN_SECONDS, CLAIM_KEYWORD, REFERRAL_REWARD,
     CLAIM_POINTS_MAX, CLAIM_POINTS_MIN, REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL,
     REQUIRED_CHANNEL_2, REQUIRED_CHANNEL_2_URL, DATABASE_URL
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, get_session, init_db
 )
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
@@ -829,10 +829,151 @@ async def start_command(update, context):
         return
     session = get_session()
     try:
-        get_or_create_user(session, update.effective_user)
+        existing = session.get(User, update.effective_user.id)
+        user = get_or_create_user(session, update.effective_user)
+        if existing is None and context.args:
+            await handle_referral_signup(session, user, context.args[0], context)
     finally:
         session.close()
     await update.message.reply_text(welcome_text(), reply_markup=welcome_keyboard(context), **reply_kwargs(update.message))
+
+
+async def handle_referral_signup(session, new_user, payload, context):
+    """وقتی کاربر جدید از لینک اختصاصی یکی دیگه وارد می‌شه، یک زیرمجموعه‌ی در-انتظار-تایید می‌سازه."""
+    m = re.fullmatch(r"ref_(\d+)", (payload or "").strip())
+    if not m:
+        return
+    referrer_id = int(m.group(1))
+    if referrer_id == new_user.telegram_id:
+        return
+    referrer = session.get(User, referrer_id)
+    if referrer is None:
+        return
+    already = session.query(Referral).filter(Referral.referred_id == new_user.telegram_id).first()
+    if already:
+        return
+    referral = Referral(referrer_id=referrer_id, referred_id=new_user.telegram_id, status="pending")
+    session.add(referral)
+    session.commit()
+    referred_display = (
+        f"@{new_user.username}" if new_user.username else (new_user.first_name or "کاربر ناشناس")
+    )
+    referrer_display = (
+        f"@{referrer.username}" if referrer.username else (referrer.first_name or "کاربر ناشناس")
+    )
+    caption = (
+        "🔗 زیرمجموعه‌ی جدید در انتظار تایید\n\n"
+        f"👤 معرف: {referrer_display}\n"
+        f"🆕 کاربر جدید: {referred_display}\n\n"
+        f"💰 در صورت تایید، {REFERRAL_REWARD:,} روب‌پوینت به معرف داده می‌شه."
+    )
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ تایید", callback_data=f"ref:approve:{referral.id}"),
+        InlineKeyboardButton("❌ رد", callback_data=f"ref:reject:{referral.id}"),
+    ]])
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=caption, reply_markup=kb)
+        except Exception:
+            logger.warning("ارسال زیرمجموعه‌ی جدید به ادمین %s ناموفق بود", admin_id)
+
+
+async def referral_admin_button(update, context):
+    q = update.callback_query
+    if not q or not q.from_user or q.from_user.id not in ADMIN_IDS:
+        await q.answer("⛔️ این دکمه فقط برای پشتیبانیه.", show_alert=True)
+        return
+    m = re.fullmatch(r"ref:(approve|reject):(\d+)", q.data or "")
+    if not m:
+        await q.answer()
+        return
+    action, referral_id = m.group(1), int(m.group(2))
+    session = get_session()
+    try:
+        referral = session.get(Referral, referral_id)
+        if not referral:
+            await q.answer("این زیرمجموعه دیگه پیدا نشد.", show_alert=True)
+            return
+        if referral.status != "pending":
+            await q.answer("قبلاً روی این زیرمجموعه تصمیم گرفته شده.", show_alert=True)
+            return
+        referred = session.get(User, referral.referred_id)
+        referrer = session.get(User, referral.referrer_id)
+        referred_display = (
+            f"@{referred.username}" if referred and referred.username else (referred.first_name if referred else "کاربر ناشناس")
+        )
+        referrer_display = (
+            f"@{referrer.username}" if referrer and referrer.username else (referrer.first_name if referrer else "کاربر ناشناس")
+        )
+        if action == "approve":
+            referral.status = "approved"
+            referral.reward = REFERRAL_REWARD
+            referral.decided_at = now_utc()
+            referral.decided_by = q.from_user.id
+            if referrer:
+                referrer.fox_points = (referrer.fox_points or 0) + REFERRAL_REWARD
+            session.commit()
+            await q.answer("✅ تایید شد.", show_alert=True)
+            try:
+                await q.message.edit_text(
+                    f"✅ زیرمجموعه تایید شد.\n\n👤 معرف: {referrer_display}\n🆕 کاربر: {referred_display}\n"
+                    f"💰 {REFERRAL_REWARD:,} روب‌پوینت به معرف اضافه شد."
+                )
+            except Exception:
+                pass
+            if referrer:
+                try:
+                    await context.bot.send_message(
+                        chat_id=referrer.telegram_id,
+                        text=f"🎉 زیرمجموعه‌ی تو تایید شد و {REFERRAL_REWARD:,} روب‌پوینت گرفتی!"
+                    )
+                except Exception:
+                    pass
+        else:
+            referral.status = "rejected"
+            referral.decided_at = now_utc()
+            referral.decided_by = q.from_user.id
+            session.commit()
+            await q.answer("❌ رد شد.", show_alert=True)
+            try:
+                await q.message.edit_text(
+                    f"❌ زیرمجموعه رد شد.\n\n👤 معرف: {referrer_display}\n🆕 کاربر: {referred_display}"
+                )
+            except Exception:
+                pass
+    finally:
+        session.close()
+
+
+def referral_text(user, session, bot_username):
+    total = session.query(Referral).filter(Referral.referrer_id == user.telegram_id).count()
+    approved = session.query(Referral).filter(Referral.referrer_id == user.telegram_id, Referral.status == "approved").count()
+    pending = session.query(Referral).filter(Referral.referrer_id == user.telegram_id, Referral.status == "pending").count()
+    earned = approved * REFERRAL_REWARD
+    link = f"https://t.me/{bot_username}?start=ref_{user.telegram_id}" if bot_username else "لینک بعد از تنظیم یوزرنیم ربات فعال می‌شه."
+    return (
+        "🔗 زیرمجموعه‌گیری روباهیو\n\n"
+        "هر کسی با لینک اختصاصی خودت وارد ربات بشه، بعد از تایید پشتیبانی "
+        f"{REFERRAL_REWARD:,} روب‌پوینت بهت می‌ده!\n\n"
+        f"🔗 لینک اختصاصی تو:\n{link}\n\n"
+        f"👥 کل زیرمجموعه: {total:,}\n"
+        f"✅ تاییدشده: {approved:,}\n"
+        f"⏳ در انتظار تایید: {pending:,}\n"
+        f"💰 روب‌پوینت کسب‌شده از زیرمجموعه: {earned:,}"
+    )
+
+
+async def referral_command(update, context):
+    if not await require_membership(update, context):
+        return
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        bot_username = getattr(context.bot, "username", None)
+        text = referral_text(user, session, bot_username)
+    finally:
+        session.close()
+    await update.message.reply_text(text, **reply_kwargs(update.message))
 
 
 async def guide_callback(update, context):
@@ -5740,6 +5881,8 @@ async def text_router(update, context):
         await fridge_command(update, context); return
     if text in {"کارخونه روبی", "کارخونه روبی!", "کارخونه", "🏭 کارخونه روبی"}:
         await factory_command(update, context); return
+    if re.sub(r"[\s‌]+", " ", text) in {"رفرال", "زیرمجموعه گیری", "زیر مجموعه گیری", "🔗 رفرال", "زیرمجموعه"}:
+        await referral_command(update, context); return
     if text in {"بانک", "بانک روبی", "🏦 بانک روبی"}:
         await bank_command(update, context); return
     if text in {"شاپ روبی", "فروشگاه روبی", "🎁 شاپ روبی", "🎁 فروشگاه روبی"}:
@@ -5767,11 +5910,12 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?|رفرال|زیرمجموعه(?:\s+گیری)?)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
         elif cmd in {"کارخونه روبی","کارخونه"}: await factory_command(update,context)
+        elif cmd in {"رفرال","زیرمجموعه","زیرمجموعه گیری"}: await referral_command(update,context)
         elif cmd in {"بازی روبی","بازی"}: await ruby_games_command(update,context)
         elif cmd in {"کازینو روبی","کازینو"}: await casino_command(update,context)
         elif cmd in {"گردونه","چرخ"}: await wheel_command(update,context)
@@ -5808,6 +5952,7 @@ def main():
     app.add_handler(CommandHandler("hunt",hunt_command))
     app.add_handler(CommandHandler("fox",fox_command))
     app.add_handler(CommandHandler("factory",factory_command))
+    app.add_handler(CommandHandler("referral",referral_command))
     app.add_handler(CommandHandler("roobam",roobam_command))
     app.add_handler(CommandHandler("leaderboard",leaderboard_command))
     app.add_handler(CallbackQueryHandler(jail_callback_gate), group=-20)
@@ -5821,6 +5966,7 @@ def main():
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|feed|upgrade):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
+    app.add_handler(CallbackQueryHandler(referral_admin_button,pattern=r"^ref:(approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit):\d+:\d+:\d+$"))
