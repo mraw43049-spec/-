@@ -138,7 +138,8 @@ FACTORY_MIN_HOURS_100 = 7            # زمان تولید یک بچ ۱۰۰٪ د
 
 FACTORY_WORKERS_MAX_LEVEL = 16       # حداکثر تعداد روباه‌کارگر = حداکثر تعداد تولید هم‌زمان
 
-FACTORY_UPGRADE_BASE_COST = 100_000  # هزینه‌ی اولین ارتقای انبار/دستگاه‌ها/کارکنان؛ هر ارتقای بعدی دوبرابر قبلی
+FACTORY_UPGRADE_BASE_COST = 75_000   # هزینه‌ی اولین ارتقای انبار/دستگاه‌ها/کارکنان (رسیدن به سطح ۲)
+FACTORY_UPGRADE_STEP_COST = 50_000   # هر ارتقای بعدی نسبت به ارتقای قبلی ۵۰ هزار روب‌پوینت بیشتر می‌شود
 
 # هر ردیف تولید: کلید، عنوان، حداقل «محصول تولیدشده‌ی کل» برای باز شدن، و آیتم‌هایش
 # هر آیتم: (ایموجی, اسم, هزینه‌ی ساخت هر عدد به روب‌پوینت, بیشترین قیمت فروش هر عدد به روب‌پوینت)
@@ -178,19 +179,25 @@ FACTORY_TIERS = [
 # ---------- بازار کارخونه (نوسان قیمت فروش محصولات) ----------
 # محصول تولیدشده دیگه خودکار فروخته نمی‌شه؛ اول میره تو انبار، بعد کاربر با قیمت روز می‌فروشدش.
 FACTORY_MARKET_UPDATE_SECONDS = 25 * 60   # هر ۲۵ دقیقه قیمت هر محصول یک بار عوض می‌شود.
-FACTORY_MARKET_FLOOR_RATIO = 0.55         # کف قیمت هر محصول: ۵۵٪ سقف قیمتش (همون عدد "sell" قبلی).
+FACTORY_MARKET_FLOOR_DROP = 10            # کف قیمت هر محصول = سقف قیمتش منهای ۱۰ روب‌پوینت.
 
 
 def factory_market_floor(ceiling):
-    """کف قیمت بازار برای یک محصول؛ سقف همون قیمتیه که قبلاً به‌عنوان «بیشترین قیمت فروش» تعریف شده بود."""
+    """کف قیمت بازار برای یک محصول؛ سقف همون قیمتیه که قبلاً به‌عنوان «بیشترین قیمت فروش» تعریف شده بود.
+    کف همیشه کمتر از سقفه (هیچ‌وقت باهاش برابر نمی‌شه) تا قیمت واقعاً نوسان داشته باشه."""
     ceiling = max(1, int(ceiling or 1))
-    return max(1, round(ceiling * FACTORY_MARKET_FLOOR_RATIO))
+    floor = ceiling - FACTORY_MARKET_FLOOR_DROP
+    if floor >= ceiling:
+        floor = ceiling - 1
+    return max(1, floor)
 
 
 def factory_market_roll_price(ceiling):
     """یک قیمت تصادفی جدید بین کف و سقف بازار برای این محصول برمی‌گرداند."""
     ceiling = max(1, int(ceiling or 1))
     floor = factory_market_floor(ceiling)
+    if floor >= ceiling:
+        return ceiling
     return random.randint(floor, ceiling)
 
 
@@ -219,11 +226,11 @@ def factory_workers_capacity(level):
 
 
 def factory_upgrade_cost(current_level, max_level):
-    """هزینه‌ی ارتقا از سطح فعلی به سطح بعدی؛ هر ارتقا نسبت به ارتقای قبلی دوبرابر می‌شود."""
+    """هزینه‌ی ارتقا از سطح فعلی به سطح بعدی: اولین ارتقا ۷۵هزار، هر ارتقای بعدی ۵۰هزار بیشتر از قبلی."""
     current_level = max(1, int(current_level or 1))
     if current_level >= max_level:
         return None
-    return FACTORY_UPGRADE_BASE_COST * (2 ** (current_level - 1))
+    return FACTORY_UPGRADE_BASE_COST + FACTORY_UPGRADE_STEP_COST * (current_level - 1)
 
 
 def factory_unlocked_tiers(produced_total):
