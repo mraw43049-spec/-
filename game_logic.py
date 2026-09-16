@@ -1,3 +1,5 @@
+import random
+
 GAME_EMOJIS={"dice":"🎲","darts":"🎯","bowling":"🎳","football":"⚽"}
 GAME_NAMES_FA={"dice":"تاس","darts":"دارت","bowling":"بولینگ","football":"فوتبال"}
 LEVELS=[{"level":1,"min_points":0,"unlocks":"dice"},{"level":2,"min_points":50,"unlocks":"dice"},{"level":3,"min_points":150,"unlocks":"darts"},{"level":4,"min_points":300,"unlocks":"bowling"},{"level":5,"min_points":500,"unlocks":"football"}]
@@ -172,6 +174,25 @@ FACTORY_TIERS = [
         ("🚢", "کشتی باری", 40, 80),
     ]},
 ]
+
+# ---------- بازار کارخونه (نوسان قیمت فروش محصولات) ----------
+# محصول تولیدشده دیگه خودکار فروخته نمی‌شه؛ اول میره تو انبار، بعد کاربر با قیمت روز می‌فروشدش.
+FACTORY_MARKET_UPDATE_SECONDS = 25 * 60   # هر ۲۵ دقیقه قیمت هر محصول یک بار عوض می‌شود.
+FACTORY_MARKET_FLOOR_RATIO = 0.55         # کف قیمت هر محصول: ۵۵٪ سقف قیمتش (همون عدد "sell" قبلی).
+
+
+def factory_market_floor(ceiling):
+    """کف قیمت بازار برای یک محصول؛ سقف همون قیمتیه که قبلاً به‌عنوان «بیشترین قیمت فروش» تعریف شده بود."""
+    ceiling = max(1, int(ceiling or 1))
+    return max(1, round(ceiling * FACTORY_MARKET_FLOOR_RATIO))
+
+
+def factory_market_roll_price(ceiling):
+    """یک قیمت تصادفی جدید بین کف و سقف بازار برای این محصول برمی‌گرداند."""
+    ceiling = max(1, int(ceiling or 1))
+    floor = factory_market_floor(ceiling)
+    return random.randint(floor, ceiling)
+
 
 FACTORY_TIERS_BY_KEY = {t["key"]: t for t in FACTORY_TIERS}
 

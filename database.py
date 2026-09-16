@@ -285,6 +285,24 @@ class FactoryOrder(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class FactoryInventory(Base):
+    """انبار محصولات ساخته‌شده‌ی هر کاربر؛ محصول برداشت‌شده اینجا می‌مونه تا خودِ کاربر بفروشدش."""
+    __tablename__ = 'factory_inventory'
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), primary_key=True)
+    item_key = Column(String, primary_key=True)
+    quantity = Column(Integer, nullable=False, default=0)
+
+
+class MarketPrice(Base):
+    """قیمت لحظه‌ای هر محصول کارخونه؛ هر ۲۵ دقیقه با جاب پس‌زمینه به‌روزرسانی می‌شود."""
+    __tablename__ = 'market_prices'
+    item_key = Column(String, primary_key=True)
+    price = Column(Integer, nullable=False)
+    high_price = Column(Integer, nullable=False)
+    low_price = Column(Integer, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 def init_db():
     Base.metadata.create_all(engine)
     inspector = inspect(engine)

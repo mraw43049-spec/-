@@ -20,7 +20,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, get_session, init_db
 )
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
@@ -30,7 +30,8 @@ from game_logic import (
     FACTORY_UNLOCK_LEVEL, FACTORY_BUILD_COST, FACTORY_BUILD_SECONDS, FACTORY_STORAGE_MAX_LEVEL,
     FACTORY_MACHINE_MAX_LEVEL, FACTORY_WORKERS_MAX_LEVEL, FACTORY_TIERS, FACTORY_TIERS_BY_KEY,
     FACTORY_ITEM_INDEX, factory_storage_capacity, factory_machine_hours_for_100, factory_workers_capacity,
-    factory_upgrade_cost, factory_unlocked_tiers, factory_order_plan
+    factory_upgrade_cost, factory_unlocked_tiers, factory_order_plan,
+    FACTORY_MARKET_UPDATE_SECONDS, factory_market_roll_price
 )
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -2805,10 +2806,65 @@ def factory_panel_text(user, orders):
 def factory_home_keyboard(owner_id):
     rows = [
         [InlineKeyboardButton("تولید🪄", callback_data=f"factory:menu:production:{owner_id}")],
+        [InlineKeyboardButton("📦 انبار محصول (فروش)", callback_data=f"factory:wh:0:{owner_id}")],
         [InlineKeyboardButton("کارکنان🦊", callback_data=f"factory:menu:workers:{owner_id}")],
         [InlineKeyboardButton("انبار🛖", callback_data=f"factory:menu:storage:{owner_id}")],
         [InlineKeyboardButton("دستگاه های تولید 🖨", callback_data=f"factory:menu:machine:{owner_id}")],
     ]
+    return InlineKeyboardMarkup(rows)
+
+
+def factory_get_or_create_market_price(session, item_key):
+    """قیمت روز یک محصول رو برمی‌گردونه؛ اگه هنوز ردیفی نداشته باشه، با سقف قیمت قبلی می‌سازدش."""
+    row = session.get(MarketPrice, item_key)
+    if row:
+        return row
+    info = FACTORY_ITEM_INDEX.get(item_key, {})
+    ceiling = int(info.get("sell") or 1)
+    price = factory_market_roll_price(ceiling)
+    row = MarketPrice(item_key=item_key, price=price, high_price=price, low_price=price, updated_at=now_utc())
+    session.add(row)
+    session.commit()
+    return row
+
+
+def factory_warehouse_text(user, session):
+    produced = factory_produced_total_of(user)
+    unlocked_tiers = factory_unlocked_tiers(produced)
+    inv_rows = session.query(FactoryInventory).filter(FactoryInventory.user_id == user.telegram_id).all()
+    inv_map = {r.item_key: int(r.quantity or 0) for r in inv_rows}
+    lines = ["📦 انبار و بازار کارخونه", "", "قیمت هر محصول هر ۲۵ دقیقه یک بار تو بازار تغییر می‌کنه.", ""]
+    for t in unlocked_tiers:
+        lines.append(t["title"])
+        for emoji, name, cost, sell in t["items"]:
+            price_row = factory_get_or_create_market_price(session, emoji)
+            qty = inv_map.get(emoji, 0)
+            lines.append(
+                f"┘─ {emoji} {name} | موجودی: {qty:,} | 💰 قیمت الان: {price_row.price:,} | "
+                f"📈 بیشترین قیمت: {price_row.high_price:,} | 📉 کمترین قیمت: {price_row.low_price:,}"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def factory_warehouse_keyboard(user, session, owner_id):
+    produced = factory_produced_total_of(user)
+    unlocked_tiers = factory_unlocked_tiers(produced)
+    inv_rows = session.query(FactoryInventory).filter(
+        FactoryInventory.user_id == user.telegram_id, FactoryInventory.quantity > 0
+    ).all()
+    inv_map = {r.item_key: int(r.quantity or 0) for r in inv_rows}
+    rows = []
+    for t in unlocked_tiers:
+        for emoji, name, cost, sell in t["items"]:
+            qty = inv_map.get(emoji, 0)
+            if qty > 0:
+                rows.append([InlineKeyboardButton(
+                    f"💰 فروش {emoji} {name} ({qty:,} عدد)", callback_data=f"factory:sell:{emoji}:{owner_id}"
+                )])
+    if inv_map:
+        rows.append([InlineKeyboardButton("💰 فروش کل انبار", callback_data=f"factory:sellall:0:{owner_id}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:home:0:{owner_id}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -2946,6 +3002,32 @@ def factory_upgrade_keyboard(kind, user, owner_id):
     return InlineKeyboardMarkup(rows)
 
 
+async def update_market_prices_job(context):
+    """هر ۲۵ دقیقه قیمت همه‌ی محصولات کارخونه رو تصادفی توی بازه‌ی مجاز عوض می‌کند."""
+    session = get_session()
+    try:
+        for item_key, info in FACTORY_ITEM_INDEX.items():
+            ceiling = int(info.get("sell") or 1)
+            new_price = factory_market_roll_price(ceiling)
+            row = session.get(MarketPrice, item_key)
+            if not row:
+                row = MarketPrice(
+                    item_key=item_key, price=new_price, high_price=new_price, low_price=new_price, updated_at=now_utc()
+                )
+                session.add(row)
+            else:
+                row.price = new_price
+                row.high_price = max(int(row.high_price or new_price), new_price)
+                row.low_price = min(int(row.low_price or new_price), new_price)
+                row.updated_at = now_utc()
+        session.commit()
+    except Exception as e:
+        logger.exception("update_market_prices_job failed: %s", e)
+        session.rollback()
+    finally:
+        session.close()
+
+
 async def factory_command(update, context):
     if not await require_membership(update, context):
         return
@@ -3007,10 +3089,10 @@ async def factory_button(update, context):
             if user.factory_built:
                 await q.answer("کارخونه قبلاً ساخته شده.", show_alert=True)
                 return
-            if (user.points or 0) < FACTORY_BUILD_COST:
+            if (user.fox_points or 0) < FACTORY_BUILD_COST:
                 await q.answer(f"روب‌پوینت کافی نیست. {FACTORY_BUILD_COST:,} روب‌پوینت لازم داری.", show_alert=True)
                 return
-            user.points -= FACTORY_BUILD_COST
+            user.fox_points -= FACTORY_BUILD_COST
             user.factory_built = 1
             user.factory_build_started_at = now_utc()
             session.commit()
@@ -3088,10 +3170,10 @@ async def factory_button(update, context):
             if used + plan["quantity"] > capacity:
                 await q.answer("🧳 انبار کارخونه جا نداره. اول انبار رو ارتقا بده یا سفارش‌های آماده رو بردار.", show_alert=True)
                 return
-            if (user.points or 0) < plan["cost"]:
+            if (user.fox_points or 0) < plan["cost"]:
                 await q.answer(f"روب‌پوینت کافی نیست. {plan['cost']:,} روب‌پوینت لازم داری.", show_alert=True)
                 return
-            user.points -= plan["cost"]
+            user.fox_points -= plan["cost"]
             order = FactoryOrder(
                 user_id=user.telegram_id, tier_key=tier_key, item_key=item_key, percent=int(percent_s),
                 quantity=plan["quantity"], cost_paid=plan["cost"], sell_total=plan["sell_total"],
@@ -3117,16 +3199,71 @@ async def factory_button(update, context):
                 await q.answer("⏳ هنوز آماده نشده.", show_alert=True)
                 return
             order.collected = 1
-            user.points = (user.points or 0) + order.sell_total
+            inv = session.get(FactoryInventory, (owner_id, order.item_key))
+            if inv:
+                inv.quantity = int(inv.quantity or 0) + order.quantity
+            else:
+                inv = FactoryInventory(user_id=owner_id, item_key=order.item_key, quantity=order.quantity)
+                session.add(inv)
             user.factory_produced_total = int(user.factory_produced_total or 0) + order.quantity
             session.commit()
             orders = factory_settle_orders(session, user.telegram_id)
             info = FACTORY_ITEM_INDEX.get(order.item_key, {"name": order.item_key})
-            await q.answer(f"💰 {order.quantity:,} عدد {info['name']} فروخته شد!", show_alert=True)
+            await q.answer(f"📦 {order.quantity:,} عدد {info['name']} به انبار محصول اضافه شد!", show_alert=True)
             await q.message.edit_text(
-                f"💰 {order.item_key} {info['name']} × {order.quantity:,} فروخته شد و "
-                f"{order.sell_total:,} روب‌پوینت گرفتی.\n\n" + factory_panel_text(user, orders) + factory_orders_text(orders),
+                f"📦 {order.item_key} {info['name']} × {order.quantity:,} به انبار محصول اضافه شد.\n"
+                "برای فروش با قیمت روز بازار، وارد «📦 انبار محصول» شو.\n\n"
+                + factory_panel_text(user, orders) + factory_orders_text(orders),
                 reply_markup=factory_home_keyboard(owner_id)
+            )
+            return
+
+        if action == "wh":
+            await q.answer()
+            await q.message.edit_text(
+                factory_warehouse_text(user, session),
+                reply_markup=factory_warehouse_keyboard(user, session, owner_id)
+            )
+            return
+
+        if action == "sell":
+            item_key = parts[2]
+            inv = session.get(FactoryInventory, (owner_id, item_key))
+            qty = int(inv.quantity or 0) if inv else 0
+            if qty <= 0:
+                await q.answer("از این محصول چیزی تو انبار نداری.", show_alert=True)
+                return
+            price_row = factory_get_or_create_market_price(session, item_key)
+            total = qty * int(price_row.price)
+            inv.quantity = 0
+            user.fox_points = (user.fox_points or 0) + total
+            session.commit()
+            info = FACTORY_ITEM_INDEX.get(item_key, {"name": item_key})
+            await q.answer(f"💰 {qty:,} عدد {info['name']} به قیمت {price_row.price:,} فروخته شد؛ +{total:,} روب‌پوینت!", show_alert=True)
+            await q.message.edit_text(
+                factory_warehouse_text(user, session),
+                reply_markup=factory_warehouse_keyboard(user, session, owner_id)
+            )
+            return
+
+        if action == "sellall":
+            inv_rows = session.query(FactoryInventory).filter(
+                FactoryInventory.user_id == owner_id, FactoryInventory.quantity > 0
+            ).all()
+            if not inv_rows:
+                await q.answer("انبار محصولت خالیه.", show_alert=True)
+                return
+            total = 0
+            for inv in inv_rows:
+                price_row = factory_get_or_create_market_price(session, inv.item_key)
+                total += int(inv.quantity) * int(price_row.price)
+                inv.quantity = 0
+            user.fox_points = (user.fox_points or 0) + total
+            session.commit()
+            await q.answer(f"💰 کل انبار فروخته شد؛ +{total:,} روب‌پوینت!", show_alert=True)
+            await q.message.edit_text(
+                factory_warehouse_text(user, session),
+                reply_markup=factory_warehouse_keyboard(user, session, owner_id)
             )
             return
 
@@ -3139,10 +3276,10 @@ async def factory_button(update, context):
             if not cost:
                 await q.answer("✨ این بخش در آخرین سطح ممکنه.", show_alert=True)
                 return
-            if (user.points or 0) < cost:
+            if (user.fox_points or 0) < cost:
                 await q.answer(f"روب‌پوینت کافی نیست. {cost:,} روب‌پوینت لازم داری.", show_alert=True)
                 return
-            user.points -= cost
+            user.fox_points -= cost
             setattr(user, level_attr, level + 1)
             session.commit()
             await q.answer("⭐ ارتقا با موفقیت انجام شد!", show_alert=True)
@@ -5638,6 +5775,7 @@ def main():
     if app.job_queue:
         app.job_queue.run_repeating(settle_all_smuggling, interval=30, first=10, name="ruby-smuggling-settler")
         app.job_queue.run_repeating(post_injured_fox_job, interval=INJURED_FOX_INTERVAL, first=5, name="injured-fox")
+        app.job_queue.run_repeating(update_market_prices_job, interval=FACTORY_MARKET_UPDATE_SECONDS, first=15, name="factory-market")
         if ADMIN_IDS:
             app.job_queue.run_repeating(daily_backup_job, interval=BACKUP_INTERVAL_SECONDS, first=60, name="daily-backup")
     db_kind = "PostgreSQL (پایدار ✅)" if DATABASE_URL.startswith("postgres") else "SQLite محلی (⚠️ روی Railway بدون Volume با هر دیپلوی پاک می‌شود)"
