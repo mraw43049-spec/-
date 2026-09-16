@@ -2954,8 +2954,18 @@ def factory_panel_text(user, orders):
     )
 
 
-def factory_home_keyboard(owner_id):
-    rows = [
+def factory_home_keyboard(owner_id, orders=None):
+    rows = []
+    if orders:
+        for o in orders:
+            remaining = seconds_left(o.started_at, (aware(o.ready_at) - aware(o.started_at)).total_seconds())
+            if remaining <= 0:
+                info = FACTORY_ITEM_INDEX.get(o.item_key, {"name": o.item_key})
+                rows.append([InlineKeyboardButton(
+                    f"📦 برداشت {o.item_key} {info['name']} ({o.quantity:,} عدد)",
+                    callback_data=f"factory:collect:{o.id}:{owner_id}"
+                )])
+    rows += [
         [InlineKeyboardButton("تولید🪄", callback_data=f"factory:menu:production:{owner_id}")],
         [InlineKeyboardButton("📦 انبار محصول (فروش)", callback_data=f"factory:wh:0:{owner_id}")],
         [InlineKeyboardButton("کارکنان🦊", callback_data=f"factory:menu:workers:{owner_id}")],
@@ -3236,7 +3246,7 @@ async def factory_command(update, context):
         else:
             orders = factory_settle_orders(session, user.telegram_id)
             text = factory_panel_text(user, orders) + factory_orders_text(orders)
-            markup = factory_home_keyboard(user.telegram_id)
+            markup = factory_home_keyboard(user.telegram_id, orders)
     finally:
         session.close()
     await update.message.reply_text(text, reply_markup=markup, **reply_kwargs(update.message))
@@ -3298,7 +3308,7 @@ async def factory_button(update, context):
             await q.answer()
             await q.message.edit_text(
                 factory_panel_text(user, orders) + factory_orders_text(orders),
-                reply_markup=factory_home_keyboard(owner_id)
+                reply_markup=factory_home_keyboard(owner_id, orders)
             )
             return
 
@@ -3385,7 +3395,7 @@ async def factory_button(update, context):
             await q.answer(f"🏭 تولید {item_key} شروع شد!", show_alert=True)
             await q.message.edit_text(
                 factory_panel_text(user, orders) + factory_orders_text(orders),
-                reply_markup=factory_home_keyboard(owner_id)
+                reply_markup=factory_home_keyboard(owner_id, orders)
             )
             return
 
@@ -3414,7 +3424,7 @@ async def factory_button(update, context):
                 f"📦 {order.item_key} {info['name']} × {order.quantity:,} به انبار محصول اضافه شد.\n"
                 "برای فروش با قیمت روز بازار، وارد «📦 انبار محصول» شو.\n\n"
                 + factory_panel_text(user, orders) + factory_orders_text(orders),
-                reply_markup=factory_home_keyboard(owner_id)
+                reply_markup=factory_home_keyboard(owner_id, orders)
             )
             return
 
@@ -3422,11 +3432,11 @@ async def factory_button(update, context):
             order_id = int(parts[2])
             order = session.get(FactoryOrder, order_id)
             if not order or order.user_id != owner_id or order.collected:
+                cur_orders = factory_settle_orders(session, user.telegram_id)
                 await q.answer("این سفارش دیگر در دسترس نیست.", show_alert=True)
                 await q.message.edit_text(
-                    factory_panel_text(user, factory_settle_orders(session, user.telegram_id))
-                    + factory_orders_text(factory_settle_orders(session, user.telegram_id)),
-                    reply_markup=factory_home_keyboard(owner_id)
+                    factory_panel_text(user, cur_orders) + factory_orders_text(cur_orders),
+                    reply_markup=factory_home_keyboard(owner_id, cur_orders)
                 )
                 return
             info = FACTORY_ITEM_INDEX.get(order.item_key, {"name": order.item_key})
@@ -3438,7 +3448,7 @@ async def factory_button(update, context):
             await q.answer(f"❌ تولید {info['name']} لغو شد؛ {refund:,} روب‌پوینت برگشت.", show_alert=True)
             await q.message.edit_text(
                 factory_panel_text(user, orders) + factory_orders_text(orders),
-                reply_markup=factory_home_keyboard(owner_id)
+                reply_markup=factory_home_keyboard(owner_id, orders)
             )
             return
 
