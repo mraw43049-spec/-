@@ -82,6 +82,14 @@ class User(Base):
     # یخچال روبی (از سطح 7 کاربر باز می‌شود)
     fridge_level = Column(Integer, nullable=False, default=1)
 
+    # کارخونه روبی (از سطح 10 کاربر باز می‌شود)
+    factory_built = Column(Integer, nullable=False, default=0)
+    factory_build_started_at = Column(DateTime(timezone=True), nullable=True)
+    factory_storage_level = Column(Integer, nullable=False, default=1)
+    factory_workers_level = Column(Integer, nullable=False, default=1)
+    factory_machine_level = Column(Integer, nullable=False, default=1)
+    factory_produced_total = Column(Integer, nullable=False, default=0)
+
     # بن دائم (فروشگاه گیفت: تخلف در ارسال رسید) یا محرومیت موقت توسط پشتیبانی
     is_banned = Column(Integer, nullable=False, default=0)
     banned_until = Column(DateTime(timezone=True), nullable=True)
@@ -261,6 +269,22 @@ class GiftOrder(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class FactoryOrder(Base):
+    __tablename__ = 'factory_orders'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    tier_key = Column(String, nullable=False)
+    item_key = Column(String, nullable=False)
+    percent = Column(Integer, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    cost_paid = Column(Integer, nullable=False)
+    sell_total = Column(Integer, nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    ready_at = Column(DateTime(timezone=True), nullable=False)
+    collected = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 def init_db():
     Base.metadata.create_all(engine)
     inspector = inspect(engine)
@@ -296,6 +320,12 @@ def init_db():
         'fox_sick_rest_until': DT_SQL_TYPE,
         'fox_last_sick_at': DT_SQL_TYPE,
         'fridge_level': 'INTEGER NOT NULL DEFAULT 1',
+        'factory_built': 'INTEGER NOT NULL DEFAULT 0',
+        'factory_build_started_at': DT_SQL_TYPE,
+        'factory_storage_level': 'INTEGER NOT NULL DEFAULT 1',
+        'factory_workers_level': 'INTEGER NOT NULL DEFAULT 1',
+        'factory_machine_level': 'INTEGER NOT NULL DEFAULT 1',
+        'factory_produced_total': 'INTEGER NOT NULL DEFAULT 0',
         'is_banned': 'INTEGER NOT NULL DEFAULT 0',
         'banned_until': DT_SQL_TYPE,
         'jail_until': DT_SQL_TYPE,
@@ -361,6 +391,11 @@ def init_db():
         conn.execute(text("UPDATE users SET fox_rescued_count = 0 WHERE fox_rescued_count IS NULL OR fox_rescued_count < 0"))
         conn.execute(text("UPDATE users SET fox_prestige_count = 0 WHERE fox_prestige_count IS NULL OR fox_prestige_count < 0"))
         conn.execute(text("UPDATE users SET fridge_level = 1 WHERE fridge_level IS NULL OR fridge_level < 1"))
+        conn.execute(text("UPDATE users SET factory_built = 0 WHERE factory_built IS NULL"))
+        conn.execute(text("UPDATE users SET factory_storage_level = 1 WHERE factory_storage_level IS NULL OR factory_storage_level < 1"))
+        conn.execute(text("UPDATE users SET factory_workers_level = 1 WHERE factory_workers_level IS NULL OR factory_workers_level < 1"))
+        conn.execute(text("UPDATE users SET factory_machine_level = 1 WHERE factory_machine_level IS NULL OR factory_machine_level < 1"))
+        conn.execute(text("UPDATE users SET factory_produced_total = 0 WHERE factory_produced_total IS NULL OR factory_produced_total < 0"))
         conn.execute(text("UPDATE users SET is_banned = 0 WHERE is_banned IS NULL"))
         conn.execute(text("UPDATE users SET jail_fine = 0 WHERE jail_fine IS NULL OR jail_fine < 0"))
         if 'injured_fox_stock' in added_user_cols:

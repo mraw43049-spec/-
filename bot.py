@@ -20,13 +20,17 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, get_session, init_db
 )
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
     fox_production_interval, fox_production_per_second, fox_rank, fox_upgrade_cost, fox_storage_capacity, get_level_for_points,
     get_unlocked_games, points_to_next_level, points_needed_for_level,
-    FRIDGE_UNLOCK_LEVEL, FRIDGE_MAX_LEVEL, fridge_capacity, fridge_upgrade_cost, fridge_cook_seconds
+    FRIDGE_UNLOCK_LEVEL, FRIDGE_MAX_LEVEL, fridge_capacity, fridge_upgrade_cost, fridge_cook_seconds,
+    FACTORY_UNLOCK_LEVEL, FACTORY_BUILD_COST, FACTORY_BUILD_SECONDS, FACTORY_STORAGE_MAX_LEVEL,
+    FACTORY_MACHINE_MAX_LEVEL, FACTORY_WORKERS_MAX_LEVEL, FACTORY_TIERS, FACTORY_TIERS_BY_KEY,
+    FACTORY_ITEM_INDEX, factory_storage_capacity, factory_machine_hours_for_100, factory_workers_capacity,
+    factory_upgrade_cost, factory_unlocked_tiers, factory_order_plan
 )
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -77,6 +81,9 @@ SPAM_WINDOW_SECONDS = 10
 SPAM_MESSAGE_LIMIT = 6
 SPAM_JAIL_SECONDS = 15 * 60
 SPAM_FINE = 750
+
+# ---------- کارخونه روبی ----------
+FACTORY_PERCENT_OPTIONS = [25, 50, 75, 100]
 
 # ---------- ابزارهای عمومی ----------
 
@@ -2708,6 +2715,444 @@ async def fridge_command(update, context):
     await update.message.reply_text(text, reply_markup=markup, **reply_kwargs(update.message))
 
 
+# ---------- کارخونه روبی ----------
+
+def factory_is_admin_account(user):
+    return int(user.telegram_id) in ADMIN_IDS
+
+
+def factory_settle_orders(session, user_id):
+    """سفارش‌هایی که زمانشون تموم شده رو فقط برمی‌گردونه؛ جمع‌آوریشون دستیه (دکمه‌ی برداشت)."""
+    return (
+        session.query(FactoryOrder)
+        .filter(FactoryOrder.user_id == user_id, FactoryOrder.collected == 0)
+        .order_by(FactoryOrder.id.asc())
+        .all()
+    )
+
+
+def factory_storage_used(orders):
+    return sum(int(o.quantity or 0) for o in orders)
+
+
+def factory_is_ready(user):
+    if not user.factory_built:
+        return False
+    if factory_is_admin_account(user):
+        return True
+    if not user.factory_build_started_at:
+        return False
+    return (now_utc() - aware(user.factory_build_started_at)).total_seconds() >= FACTORY_BUILD_SECONDS
+
+
+def factory_build_remaining(user):
+    if not user.factory_build_started_at:
+        return 0
+    return seconds_left(user.factory_build_started_at, FACTORY_BUILD_SECONDS)
+
+
+def factory_produced_total_of(user):
+    if factory_is_admin_account(user):
+        return max(int(user.factory_produced_total or 0), FACTORY_TIERS[-1]["unlock_produced"])
+    return int(user.factory_produced_total or 0)
+
+
+def factory_intro_text(user):
+    return (
+        "🦊 کارخونه روبی 🏭\n\n"
+        f"از سطح {FACTORY_UNLOCK_LEVEL} می‌تونی کارخونه‌ی خودتو بسازی و ازش تولید و فروش داشته باشی.\n\n"
+        f"💰 هزینه‌ی ساخت‌وساز: {FACTORY_BUILD_COST:,} روب‌پوینت\n"
+        f"⏳ زمان آماده‌سازی بعد از ساخت: {format_duration(FACTORY_BUILD_SECONDS)}"
+    )
+
+
+def factory_building_text(user):
+    remaining = factory_build_remaining(user)
+    return (
+        "🏗 کارخونه روبی در حال ساخت‌وسازه...\n\n"
+        f"⏳ تا افتتاح: {format_duration(remaining)}"
+    )
+
+
+def factory_panel_text(user, orders):
+    used = factory_storage_used(orders)
+    storage_level = max(1, min(FACTORY_STORAGE_MAX_LEVEL, int(user.factory_storage_level or 1)))
+    workers_level = max(1, min(FACTORY_WORKERS_MAX_LEVEL, int(user.factory_workers_level or 1)))
+    machine_level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(user.factory_machine_level or 1)))
+    capacity = factory_storage_capacity(storage_level)
+    workers_cap = factory_workers_capacity(workers_level)
+    active_count = len(orders)
+    hours_100 = factory_machine_hours_for_100(machine_level)
+    produced = factory_produced_total_of(user)
+    return (
+        "🦊 کارخونه روبی 🏭\n\n"
+        f"💼 مدیر کارخونه : {user_display_name(user)}\n\n"
+        "🧳 انبار کارخونه\n"
+        f"┘─ 🔺 ظرفیت انبار : {used:,} / {capacity:,} محصول\n"
+        f"┘─ ⭐️ سطح : {storage_level}\n\n"
+        "🤒 کارگران کارخونه\n"
+        f"┘─ 🦊 تعداد کارگران : {active_count} / {workers_cap} روباه\n"
+        f"┘─ ⭐️ سطح : {workers_level}\n\n"
+        "🖨 دستگاه های تولید\n"
+        f"┘─ ⏳ زمان تولید محصول (۱۰۰٪) : {format_duration(hours_100 * 3600)}\n"
+        f"┘─ ⭐️ سطح : {machine_level}\n\n"
+        f"🌟 سطح کارخونه : {machine_level}\n"
+        f"‏┘─ 🌡{produced:,} محصول تولید شده\n\n"
+        "🧮 شما درحال مدیریت کارخانه خود میباشید."
+    )
+
+
+def factory_home_keyboard(owner_id):
+    rows = [
+        [InlineKeyboardButton("تولید🪄", callback_data=f"factory:menu:production:{owner_id}")],
+        [InlineKeyboardButton("کارکنان🦊", callback_data=f"factory:menu:workers:{owner_id}")],
+        [InlineKeyboardButton("انبار🛖", callback_data=f"factory:menu:storage:{owner_id}")],
+        [InlineKeyboardButton("دستگاه های تولید 🖨", callback_data=f"factory:menu:machine:{owner_id}")],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def factory_build_keyboard(owner_id):
+    return InlineKeyboardMarkup([[InlineKeyboardButton(
+        f"🏗 ساخت کارخونه ({FACTORY_BUILD_COST:,} روب‌پوینت)", callback_data=f"factory:build:0:{owner_id}"
+    )]])
+
+
+def factory_production_menu_text(user):
+    produced = factory_produced_total_of(user)
+    lines = ["🪄 خط‌های تولید کارخونه:", ""]
+    for t in FACTORY_TIERS:
+        if produced >= t["unlock_produced"]:
+            lines.append(f"✅ {t['title']}")
+        else:
+            lines.append(f"🔒 {t['title']} (نیازمند {t['unlock_produced']:,} محصول تولیدشده)")
+    return "\n".join(lines)
+
+
+def factory_production_menu_keyboard(user, owner_id):
+    produced = factory_produced_total_of(user)
+    rows = []
+    for t in FACTORY_TIERS:
+        if produced >= t["unlock_produced"]:
+            rows.append([InlineKeyboardButton(t["title"], callback_data=f"factory:tier:{t['key']}:{owner_id}")])
+        else:
+            rows.append([InlineKeyboardButton(f"🔒 {t['title']}", callback_data=f"factory:locked:0:{owner_id}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:home:0:{owner_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def factory_tier_text(tier):
+    lines = [f"{tier['title']}", "", "یکی از محصولات این خط تولید رو انتخاب کن:", ""]
+    for emoji, name, cost, sell in tier["items"]:
+        lines.append(f"{emoji} {name} | ساخت هر عدد: {cost:,} روب‌پوینت | سقف فروش هر عدد: {sell:,} روب‌پوینت")
+    return "\n".join(lines)
+
+
+def factory_tier_keyboard(tier, owner_id):
+    rows = [[InlineKeyboardButton(f"{emoji} {name}", callback_data=f"factory:item:{tier['key']}:{emoji}:{owner_id}")]
+            for emoji, name, cost, sell in tier["items"]]
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:menu:production:{owner_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def factory_item_text(item_key, user):
+    info = FACTORY_ITEM_INDEX[item_key]
+    storage_level = max(1, min(FACTORY_STORAGE_MAX_LEVEL, int(user.factory_storage_level or 1)))
+    machine_level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(user.factory_machine_level or 1)))
+    lines = [f"{item_key} {info['name']}", ""]
+    for p in FACTORY_PERCENT_OPTIONS:
+        plan = factory_order_plan(item_key, p, storage_level, machine_level)
+        lines.append(
+            f"┘─ {p}٪ : {plan['quantity']:,} عدد | هزینه: {plan['cost']:,} روب‌پوینت | "
+            f"زمان: {format_duration(plan['seconds'])} | ارزش فروش: {plan['sell_total']:,} روب‌پوینت"
+        )
+    return "\n".join(lines)
+
+
+def factory_item_keyboard(tier_key, item_key, owner_id):
+    row = [InlineKeyboardButton(f"{p}٪", callback_data=f"factory:pct:{tier_key}:{item_key}:{p}:{owner_id}")
+           for p in FACTORY_PERCENT_OPTIONS]
+    return InlineKeyboardMarkup([row, [InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:tier:{tier_key}:{owner_id}")]])
+
+
+def factory_orders_text(orders):
+    if not orders:
+        return "\n\nفعلاً هیچ سفارش تولیدی در جریان نیست."
+    lines = ["", "📦 سفارش‌های تولید:"]
+    for o in orders:
+        info = FACTORY_ITEM_INDEX.get(o.item_key, {"name": o.item_key})
+        remaining = seconds_left(o.started_at, (aware(o.ready_at) - aware(o.started_at)).total_seconds())
+        if remaining <= 0:
+            state = "✅ آماده‌ی برداشت"
+        else:
+            state = f"⏳ {format_duration(remaining)} مانده"
+        lines.append(f"┘─ {o.item_key} {info['name']} × {o.quantity:,} — {state}")
+    return "\n".join(lines)
+
+
+def factory_orders_keyboard(orders, owner_id):
+    rows = []
+    for o in orders:
+        remaining = seconds_left(o.started_at, (aware(o.ready_at) - aware(o.started_at)).total_seconds())
+        if remaining <= 0:
+            info = FACTORY_ITEM_INDEX.get(o.item_key, {"name": o.item_key})
+            rows.append([InlineKeyboardButton(
+                f"💰 برداشت {o.item_key} {info['name']} ({o.sell_total:,} روب‌پوینت)",
+                callback_data=f"factory:collect:{o.id}:{owner_id}"
+            )])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:home:0:{owner_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def factory_upgrade_text(kind, user):
+    if kind == "storage":
+        level = max(1, min(FACTORY_STORAGE_MAX_LEVEL, int(user.factory_storage_level or 1)))
+        cap = factory_storage_capacity(level)
+        cost = factory_upgrade_cost(level, FACTORY_STORAGE_MAX_LEVEL)
+        title = "🧳 انبار کارخونه"
+        cur = f"ظرفیت فعلی: {cap:,} محصول"
+        nxt = f"ظرفیت بعدی: {factory_storage_capacity(level + 1):,} محصول" if cost else ""
+    elif kind == "workers":
+        level = max(1, min(FACTORY_WORKERS_MAX_LEVEL, int(user.factory_workers_level or 1)))
+        cap = factory_workers_capacity(level)
+        cost = factory_upgrade_cost(level, FACTORY_WORKERS_MAX_LEVEL)
+        title = "🤒 کارگران کارخونه"
+        cur = f"تعداد کارگر فعلی: {cap} روباه"
+        nxt = f"تعداد کارگر بعدی: {factory_workers_capacity(level + 1)} روباه" if cost else ""
+    else:
+        level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(user.factory_machine_level or 1)))
+        hours = factory_machine_hours_for_100(level)
+        cost = factory_upgrade_cost(level, FACTORY_MACHINE_MAX_LEVEL)
+        title = "🖨 دستگاه های تولید"
+        cur = f"زمان تولید ۱۰۰٪ فعلی: {format_duration(hours * 3600)}"
+        nxt = f"زمان تولید ۱۰۰٪ بعدی: {format_duration(factory_machine_hours_for_100(level + 1) * 3600)}" if cost else ""
+    lines = [title, "", f"⭐ سطح فعلی: {level}", cur]
+    if cost:
+        lines += ["", nxt, f"💰 هزینه‌ی ارتقا: {cost:,} روب‌پوینت"]
+    else:
+        lines += ["", "✨ این بخش در آخرین سطح ممکنه."]
+    return "\n".join(lines)
+
+
+def factory_upgrade_keyboard(kind, user, owner_id):
+    max_level = {"storage": FACTORY_STORAGE_MAX_LEVEL, "workers": FACTORY_WORKERS_MAX_LEVEL, "machine": FACTORY_MACHINE_MAX_LEVEL}[kind]
+    level_attr = {"storage": "factory_storage_level", "workers": "factory_workers_level", "machine": "factory_machine_level"}[kind]
+    level = max(1, min(max_level, int(getattr(user, level_attr) or 1)))
+    rows = []
+    cost = factory_upgrade_cost(level, max_level)
+    if cost:
+        rows.append([InlineKeyboardButton(f"⭐ ارتقا ({cost:,} روب‌پوینت)", callback_data=f"factory:upg:{kind}:{owner_id}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:home:0:{owner_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def factory_command(update, context):
+    if not await require_membership(update, context):
+        return
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        if user.level < FACTORY_UNLOCK_LEVEL:
+            await update.message.reply_text(
+                f"🏭 کارخونه روبی از سطح {FACTORY_UNLOCK_LEVEL} باز می‌شود.\n⭐ سطح فعلی تو: {user.level}",
+                **reply_kwargs(update.message)
+            )
+            return
+        if factory_is_admin_account(user) and not user.factory_built:
+            user.factory_built = 1
+            user.factory_build_started_at = now_utc() - timedelta(seconds=FACTORY_BUILD_SECONDS)
+            session.commit()
+        if not user.factory_built:
+            text, markup = factory_intro_text(user), factory_build_keyboard(user.telegram_id)
+        elif not factory_is_ready(user):
+            text, markup = factory_building_text(user), None
+        else:
+            orders = factory_settle_orders(session, user.telegram_id)
+            text = factory_panel_text(user, orders) + factory_orders_text(orders)
+            markup = factory_home_keyboard(user.telegram_id)
+    finally:
+        session.close()
+    await update.message.reply_text(text, reply_markup=markup, **reply_kwargs(update.message))
+
+
+async def factory_button(update, context):
+    q = update.callback_query
+    parts = q.data.split(":")
+    try:
+        owner_id = int(parts[-1])
+    except Exception:
+        await q.answer()
+        return
+    if q.from_user.id != owner_id:
+        await q.answer("⛔ این کارخونه برای کاربر دیگری است.", show_alert=True)
+        return
+    if not await require_membership(update, context):
+        return
+    session = get_session()
+    try:
+        user = session.get(User, owner_id)
+        if not user:
+            await q.answer("کاربر پیدا نشد.", show_alert=True)
+            return
+        if user.level < FACTORY_UNLOCK_LEVEL:
+            await q.answer(f"🏭 کارخونه روبی از سطح {FACTORY_UNLOCK_LEVEL} باز می‌شود.", show_alert=True)
+            return
+        action = parts[1]
+
+        if action == "locked":
+            await q.answer("🔒 این خط تولید هنوز باز نشده.", show_alert=True)
+            return
+
+        if action == "build":
+            if user.factory_built:
+                await q.answer("کارخونه قبلاً ساخته شده.", show_alert=True)
+                return
+            if (user.points or 0) < FACTORY_BUILD_COST:
+                await q.answer(f"روب‌پوینت کافی نیست. {FACTORY_BUILD_COST:,} روب‌پوینت لازم داری.", show_alert=True)
+                return
+            user.points -= FACTORY_BUILD_COST
+            user.factory_built = 1
+            user.factory_build_started_at = now_utc()
+            session.commit()
+            await q.answer("🏗 ساخت‌وساز کارخونه شروع شد!", show_alert=True)
+            await q.message.edit_text(factory_building_text(user), reply_markup=None)
+            return
+
+        if not user.factory_built:
+            await q.answer("هنوز کارخونه نساختی.", show_alert=True)
+            return
+        if not factory_is_ready(user):
+            await q.answer("کارخونه هنوز آماده‌ی افتتاح نیست.", show_alert=True)
+            await q.message.edit_text(factory_building_text(user), reply_markup=None)
+            return
+
+        if action == "home":
+            orders = factory_settle_orders(session, user.telegram_id)
+            await q.answer()
+            await q.message.edit_text(
+                factory_panel_text(user, orders) + factory_orders_text(orders),
+                reply_markup=factory_home_keyboard(owner_id)
+            )
+            return
+
+        if action == "menu":
+            kind = parts[2]
+            if kind == "production":
+                await q.answer()
+                await q.message.edit_text(factory_production_menu_text(user), reply_markup=factory_production_menu_keyboard(user, owner_id))
+            elif kind in ("storage", "workers", "machine"):
+                await q.answer()
+                await q.message.edit_text(factory_upgrade_text(kind, user), reply_markup=factory_upgrade_keyboard(kind, user, owner_id))
+            return
+
+        if action == "tier":
+            tier_key = parts[2]
+            tier = FACTORY_TIERS_BY_KEY.get(tier_key)
+            produced = factory_produced_total_of(user)
+            if not tier or produced < tier["unlock_produced"]:
+                await q.answer("🔒 این خط تولید هنوز باز نشده.", show_alert=True)
+                return
+            await q.answer()
+            await q.message.edit_text(factory_tier_text(tier), reply_markup=factory_tier_keyboard(tier, owner_id))
+            return
+
+        if action == "item":
+            tier_key, item_key = parts[2], parts[3]
+            tier = FACTORY_TIERS_BY_KEY.get(tier_key)
+            produced = factory_produced_total_of(user)
+            if not tier or produced < tier["unlock_produced"] or item_key not in FACTORY_ITEM_INDEX:
+                await q.answer("🔒 این خط تولید هنوز باز نشده.", show_alert=True)
+                return
+            await q.answer()
+            await q.message.edit_text(factory_item_text(item_key, user), reply_markup=factory_item_keyboard(tier_key, item_key, owner_id))
+            return
+
+        if action == "pct":
+            tier_key, item_key, percent_s = parts[2], parts[3], parts[4]
+            tier = FACTORY_TIERS_BY_KEY.get(tier_key)
+            produced = factory_produced_total_of(user)
+            if not tier or produced < tier["unlock_produced"] or item_key not in FACTORY_ITEM_INDEX:
+                await q.answer("🔒 این خط تولید هنوز باز نشده.", show_alert=True)
+                return
+            orders = factory_settle_orders(session, user.telegram_id)
+            workers_level = max(1, min(FACTORY_WORKERS_MAX_LEVEL, int(user.factory_workers_level or 1)))
+            workers_cap = factory_workers_capacity(workers_level)
+            if len(orders) >= workers_cap:
+                await q.answer("🦊 همه‌ی کارگرها مشغول‌اند. یک سفارش رو برداشت کن یا کارگر بیشتری استخدام کن.", show_alert=True)
+                return
+            storage_level = max(1, min(FACTORY_STORAGE_MAX_LEVEL, int(user.factory_storage_level or 1)))
+            machine_level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(user.factory_machine_level or 1)))
+            plan = factory_order_plan(item_key, int(percent_s), storage_level, machine_level)
+            capacity = factory_storage_capacity(storage_level)
+            used = factory_storage_used(orders)
+            if used + plan["quantity"] > capacity:
+                await q.answer("🧳 انبار کارخونه جا نداره. اول انبار رو ارتقا بده یا سفارش‌های آماده رو بردار.", show_alert=True)
+                return
+            if (user.points or 0) < plan["cost"]:
+                await q.answer(f"روب‌پوینت کافی نیست. {plan['cost']:,} روب‌پوینت لازم داری.", show_alert=True)
+                return
+            user.points -= plan["cost"]
+            order = FactoryOrder(
+                user_id=user.telegram_id, tier_key=tier_key, item_key=item_key, percent=int(percent_s),
+                quantity=plan["quantity"], cost_paid=plan["cost"], sell_total=plan["sell_total"],
+                started_at=now_utc(), ready_at=now_utc() + timedelta(seconds=plan["seconds"]), collected=0,
+            )
+            session.add(order)
+            session.commit()
+            orders = factory_settle_orders(session, user.telegram_id)
+            await q.answer(f"🏭 تولید {item_key} شروع شد!", show_alert=True)
+            await q.message.edit_text(
+                factory_panel_text(user, orders) + factory_orders_text(orders),
+                reply_markup=factory_home_keyboard(owner_id)
+            )
+            return
+
+        if action == "collect":
+            order_id = int(parts[2])
+            order = session.get(FactoryOrder, order_id)
+            if not order or order.user_id != owner_id or order.collected:
+                await q.answer("این سفارش دیگر در دسترس نیست.", show_alert=True)
+                return
+            if now_utc() < aware(order.ready_at):
+                await q.answer("⏳ هنوز آماده نشده.", show_alert=True)
+                return
+            order.collected = 1
+            user.points = (user.points or 0) + order.sell_total
+            user.factory_produced_total = int(user.factory_produced_total or 0) + order.quantity
+            session.commit()
+            orders = factory_settle_orders(session, user.telegram_id)
+            info = FACTORY_ITEM_INDEX.get(order.item_key, {"name": order.item_key})
+            await q.answer(f"💰 {order.quantity:,} عدد {info['name']} فروخته شد!", show_alert=True)
+            await q.message.edit_text(
+                f"💰 {order.item_key} {info['name']} × {order.quantity:,} فروخته شد و "
+                f"{order.sell_total:,} روب‌پوینت گرفتی.\n\n" + factory_panel_text(user, orders) + factory_orders_text(orders),
+                reply_markup=factory_home_keyboard(owner_id)
+            )
+            return
+
+        if action == "upg":
+            kind = parts[2]
+            max_level = {"storage": FACTORY_STORAGE_MAX_LEVEL, "workers": FACTORY_WORKERS_MAX_LEVEL, "machine": FACTORY_MACHINE_MAX_LEVEL}[kind]
+            level_attr = {"storage": "factory_storage_level", "workers": "factory_workers_level", "machine": "factory_machine_level"}[kind]
+            level = max(1, min(max_level, int(getattr(user, level_attr) or 1)))
+            cost = factory_upgrade_cost(level, max_level)
+            if not cost:
+                await q.answer("✨ این بخش در آخرین سطح ممکنه.", show_alert=True)
+                return
+            if (user.points or 0) < cost:
+                await q.answer(f"روب‌پوینت کافی نیست. {cost:,} روب‌پوینت لازم داری.", show_alert=True)
+                return
+            user.points -= cost
+            setattr(user, level_attr, level + 1)
+            session.commit()
+            await q.answer("⭐ ارتقا با موفقیت انجام شد!", show_alert=True)
+            await q.message.edit_text(factory_upgrade_text(kind, user), reply_markup=factory_upgrade_keyboard(kind, user, owner_id))
+            return
+    finally:
+        session.close()
+    await q.answer()
+
+
 # ---------- روباه زخمی در گپ ----------
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -5073,6 +5518,8 @@ async def text_router(update, context):
         await hunt_command(update, context); return
     if text in {"یخچال روبی", "🧊 یخچال روبی"}:
         await fridge_command(update, context); return
+    if text in {"کارخونه روبی", "کارخونه روبی!", "کارخونه", "🏭 کارخونه روبی"}:
+        await factory_command(update, context); return
     if text in {"بانک", "بانک روبی", "🏦 بانک روبی"}:
         await bank_command(update, context); return
     if text in {"شاپ روبی", "فروشگاه روبی", "🎁 شاپ روبی", "🎁 فروشگاه روبی"}:
@@ -5100,10 +5547,11 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
+        elif cmd in {"کارخونه روبی","کارخونه"}: await factory_command(update,context)
         elif cmd in {"بازی روبی","بازی"}: await ruby_games_command(update,context)
         elif cmd in {"کازینو روبی","کازینو"}: await casino_command(update,context)
         elif cmd in {"گردونه","چرخ"}: await wheel_command(update,context)
@@ -5139,6 +5587,7 @@ def main():
     app.add_handler(CommandHandler("transfer",transfer_command))
     app.add_handler(CommandHandler("hunt",hunt_command))
     app.add_handler(CommandHandler("fox",fox_command))
+    app.add_handler(CommandHandler("factory",factory_command))
     app.add_handler(CommandHandler("roobam",roobam_command))
     app.add_handler(CommandHandler("leaderboard",leaderboard_command))
     app.add_handler(CallbackQueryHandler(jail_callback_gate), group=-20)
@@ -5151,6 +5600,7 @@ def main():
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|resetask|resetyes|resetno):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|feed|upgrade):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit):\d+:\d+:\d+$"))
@@ -5177,7 +5627,7 @@ def main():
     app.add_handler(CallbackQueryHandler(football_predict_match_button,pattern=r"^fbpred:match:\d+$"))
     app.add_handler(CallbackQueryHandler(football_predict_pick_button,pattern=r"^fbpred:pick:\d+:(home|draw|away)$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
-    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.ALL,gift_flow_gate),group=-9)

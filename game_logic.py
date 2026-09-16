@@ -120,3 +120,109 @@ def fridge_cook_seconds(nutrition):
     if n in FRIDGE_COOK_SECONDS:
         return FRIDGE_COOK_SECONDS[n]
     return FRIDGE_COOK_SECONDS[max(FRIDGE_COOK_SECONDS)]
+
+# ---------- کارخونه روبی ----------
+FACTORY_UNLOCK_LEVEL = 10
+FACTORY_BUILD_COST = 150_000
+FACTORY_BUILD_SECONDS = 3 * 60 * 60  # ۳ ساعت تا افتتاح کارخونه بعد از ساخت‌وساز
+
+FACTORY_STORAGE_BASE = 25_000        # ظرفیت انبار در سطح ۱
+FACTORY_STORAGE_STEP = 10_000        # هر ارتقا +۱۰ هزار جا
+FACTORY_STORAGE_MAX_LEVEL = 6        # آخرین سطح انبار: 25k -> 35k -> 45k -> 55k -> 65k -> 75k
+
+FACTORY_MACHINE_MAX_LEVEL = 15       # آخرین سطح کارخونه/دستگاه‌های تولید
+FACTORY_BASE_HOURS_100 = 21          # زمان تولید یک بچ ۱۰۰٪ در سطح ۱ دستگاه‌ها (ساعت)
+FACTORY_MIN_HOURS_100 = 7            # زمان تولید یک بچ ۱۰۰٪ در آخرین سطح دستگاه‌ها (ساعت)
+
+FACTORY_WORKERS_MAX_LEVEL = 16       # حداکثر تعداد روباه‌کارگر = حداکثر تعداد تولید هم‌زمان
+
+FACTORY_UPGRADE_BASE_COST = 100_000  # هزینه‌ی اولین ارتقای انبار/دستگاه‌ها/کارکنان؛ هر ارتقای بعدی دوبرابر قبلی
+
+# هر ردیف تولید: کلید، عنوان، حداقل «محصول تولیدشده‌ی کل» برای باز شدن، و آیتم‌هایش
+# هر آیتم: (ایموجی, اسم, هزینه‌ی ساخت هر عدد به روب‌پوینت, بیشترین قیمت فروش هر عدد به روب‌پوینت)
+FACTORY_TIERS = [
+    {"key": "candy", "title": "تولید آبنبات 🍭", "unlock_produced": 0, "items": [
+        ("🍬", "آبنبات", 1, 3),
+        ("🍭", "آبنبات چوبی", 3, 5),
+        ("🍫", "شکلات", 5, 8),
+    ]},
+    {"key": "watch", "title": "تولید ساعت ⌚", "unlock_produced": 75_000, "items": [
+        ("⌚", "ساعت مچی", 8, 15),
+        ("⏳", "ساعت شنی", 9, 18),
+        ("⏰", "ساعت زنگ‌دار", 12, 25),
+    ]},
+    {"key": "sandwich", "title": "تولید ساندویچ 🍔", "unlock_produced": 120_000, "items": [
+        ("🌭", "هات‌داگ", 16, 36),
+        ("🥪", "ساندویچ", 18, 35),
+        ("🍔", "همبرگر", 20, 38),
+    ]},
+    {"key": "music", "title": "ابزار موسیقی 🎻", "unlock_produced": 175_000, "items": [
+        ("🎺", "ترومپت", 22, 42),
+        ("🎸", "گیتار", 24, 45),
+        ("🎻", "ویولن", 26, 48),
+    ]},
+    {"key": "satellite", "title": "تولید ماهواره 🛰", "unlock_produced": 230_000, "items": [
+        ("🛰", "ماهواره", 28, 53),
+        ("🛸", "بشقاب پرنده", 30, 58),
+        ("🚀", "موشک", 32, 62),
+    ]},
+    {"key": "ship", "title": "تولید کشتی 🛳", "unlock_produced": 300_000, "items": [
+        ("🛥", "قایق", 34, 65),
+        ("🛳", "کشتی مسافربری", 36, 72),
+        ("🚢", "کشتی باری", 40, 80),
+    ]},
+]
+
+FACTORY_TIERS_BY_KEY = {t["key"]: t for t in FACTORY_TIERS}
+
+# نگاشت مستقیم ایموجی محصول -> (کلید ردیف، اسم، هزینه‌ی ساخت، سقف قیمت فروش)
+FACTORY_ITEM_INDEX = {}
+for _t in FACTORY_TIERS:
+    for _emoji, _name, _cost, _sell in _t["items"]:
+        FACTORY_ITEM_INDEX[_emoji] = {"tier": _t["key"], "name": _name, "cost": _cost, "sell": _sell}
+del _t, _emoji, _name, _cost, _sell
+
+
+def factory_storage_capacity(level):
+    level = max(1, min(FACTORY_STORAGE_MAX_LEVEL, int(level or 1)))
+    return FACTORY_STORAGE_BASE + (level - 1) * FACTORY_STORAGE_STEP
+
+
+def factory_machine_hours_for_100(level):
+    level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(level or 1)))
+    return max(FACTORY_MIN_HOURS_100, FACTORY_BASE_HOURS_100 - (level - 1))
+
+
+def factory_workers_capacity(level):
+    return max(1, min(FACTORY_WORKERS_MAX_LEVEL, int(level or 1)))
+
+
+def factory_upgrade_cost(current_level, max_level):
+    """هزینه‌ی ارتقا از سطح فعلی به سطح بعدی؛ هر ارتقا نسبت به ارتقای قبلی دوبرابر می‌شود."""
+    current_level = max(1, int(current_level or 1))
+    if current_level >= max_level:
+        return None
+    return FACTORY_UPGRADE_BASE_COST * (2 ** (current_level - 1))
+
+
+def factory_unlocked_tiers(produced_total):
+    produced_total = int(produced_total or 0)
+    return [t for t in FACTORY_TIERS if produced_total >= t["unlock_produced"]]
+
+
+def factory_order_plan(item_key, percent, storage_level, machine_level):
+    """محاسبه‌ی تعداد، هزینه، زمان و ارزش فروش یک سفارش تولید بر اساس درصد انتخابی."""
+    info = FACTORY_ITEM_INDEX.get(item_key)
+    if not info:
+        return None
+    percent = max(1, min(100, int(percent)))
+    capacity = factory_storage_capacity(storage_level)
+    quantity = max(1, round(capacity * percent / 100))
+    cost = quantity * info["cost"]
+    hours_100 = factory_machine_hours_for_100(machine_level)
+    seconds = max(60, round(hours_100 * 3600 * percent / 100))
+    sell_total = quantity * info["sell"]
+    return {
+        "quantity": quantity, "cost": cost, "seconds": seconds, "sell_total": sell_total,
+        "name": info["name"], "tier": info["tier"], "unit_sell": info["sell"], "unit_cost": info["cost"],
+    }
