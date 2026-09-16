@@ -2732,6 +2732,16 @@ def factory_settle_orders(session, user_id):
     )
 
 
+def factory_active_order_for_item(session, user_id, item_key):
+    """اگه از این محصول یک سفارش تمام‌نشده (هنوز جمع‌آوری‌نشده) داشته باشه برش می‌گردونه."""
+    return (
+        session.query(FactoryOrder)
+        .filter(FactoryOrder.user_id == user_id, FactoryOrder.item_key == item_key, FactoryOrder.collected == 0)
+        .order_by(FactoryOrder.id.asc())
+        .first()
+    )
+
+
 def factory_storage_used(orders):
     return sum(int(o.quantity or 0) for o in orders)
 
@@ -2929,6 +2939,40 @@ def factory_item_keyboard(tier_key, item_key, owner_id):
     row = [InlineKeyboardButton(f"{p}٪", callback_data=f"factory:pct:{tier_key}:{item_key}:{p}:{owner_id}")
            for p in FACTORY_PERCENT_OPTIONS]
     return InlineKeyboardMarkup([row, [InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:tier:{tier_key}:{owner_id}")]])
+
+
+def factory_progress_bar(percent, length=5):
+    percent = max(0, min(100, int(percent or 0)))
+    filled = max(0, min(length, round(percent / 100 * length)))
+    return "▰" * filled + "▱" * (length - filled)
+
+
+def factory_producing_status_text(user, order):
+    info = FACTORY_ITEM_INDEX.get(order.item_key, {"name": order.item_key})
+    total_seconds = max(1, (aware(order.ready_at) - aware(order.started_at)).total_seconds())
+    remaining = seconds_left(order.started_at, total_seconds)
+    percent = int(round((total_seconds - remaining) / total_seconds * 100))
+    percent = max(0, min(100, percent))
+    bar = factory_progress_bar(percent)
+    remaining_text = "تکمیل شد ✅" if remaining <= 0 else format_duration(remaining)
+    return (
+        "🦊 کارخونه روبی 🏭\n\n"
+        f"💼 مدیر کارخونه : {user_display_name(user)}\n\n"
+        f"✨ درحال تولید {order.item_key} {info['name']} ..\n"
+        f"┘─ ⏳ زمان باقی مانده : {remaining_text}\n"
+        f"┘─ ✅ تکمیل شده : {bar} | {percent}%\n\n"
+        "❗️ شما درحال تولید این محصول هستی؛ از هر محصول فقط یک سفارش هم‌زمان ممکنه.\n\n"
+        "❓ آیا از لغو تولید این محصول مطمئنی؟ (روب‌پوینتش کامل بهت برمی‌گرده)"
+    )
+
+
+def factory_producing_status_keyboard(order, owner_id):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ بله", callback_data=f"factory:cancelorder:{order.id}:{owner_id}"),
+            InlineKeyboardButton("❌ خیر", callback_data=f"factory:home:0:{owner_id}"),
+        ]
+    ])
 
 
 def factory_orders_text(orders):
@@ -3145,7 +3189,14 @@ async def factory_button(update, context):
             if not tier or produced < tier["unlock_produced"] or item_key not in FACTORY_ITEM_INDEX:
                 await q.answer("🔒 این خط تولید هنوز باز نشده.", show_alert=True)
                 return
+            active_order = factory_active_order_for_item(session, owner_id, item_key)
             await q.answer()
+            if active_order:
+                await q.message.edit_text(
+                    factory_producing_status_text(user, active_order),
+                    reply_markup=factory_producing_status_keyboard(active_order, owner_id)
+                )
+                return
             await q.message.edit_text(factory_item_text(item_key, user), reply_markup=factory_item_keyboard(tier_key, item_key, owner_id))
             return
 
@@ -3155,6 +3206,14 @@ async def factory_button(update, context):
             produced = factory_produced_total_of(user)
             if not tier or produced < tier["unlock_produced"] or item_key not in FACTORY_ITEM_INDEX:
                 await q.answer("🔒 این خط تولید هنوز باز نشده.", show_alert=True)
+                return
+            active_order = factory_active_order_for_item(session, owner_id, item_key)
+            if active_order:
+                await q.answer("⏳ از این محصول همین الان یک سفارش در حال تولیده.", show_alert=True)
+                await q.message.edit_text(
+                    factory_producing_status_text(user, active_order),
+                    reply_markup=factory_producing_status_keyboard(active_order, owner_id)
+                )
                 return
             orders = factory_settle_orders(session, user.telegram_id)
             workers_level = max(1, min(FACTORY_WORKERS_MAX_LEVEL, int(user.factory_workers_level or 1)))
@@ -3214,6 +3273,30 @@ async def factory_button(update, context):
                 f"📦 {order.item_key} {info['name']} × {order.quantity:,} به انبار محصول اضافه شد.\n"
                 "برای فروش با قیمت روز بازار، وارد «📦 انبار محصول» شو.\n\n"
                 + factory_panel_text(user, orders) + factory_orders_text(orders),
+                reply_markup=factory_home_keyboard(owner_id)
+            )
+            return
+
+        if action == "cancelorder":
+            order_id = int(parts[2])
+            order = session.get(FactoryOrder, order_id)
+            if not order or order.user_id != owner_id or order.collected:
+                await q.answer("این سفارش دیگر در دسترس نیست.", show_alert=True)
+                await q.message.edit_text(
+                    factory_panel_text(user, factory_settle_orders(session, user.telegram_id))
+                    + factory_orders_text(factory_settle_orders(session, user.telegram_id)),
+                    reply_markup=factory_home_keyboard(owner_id)
+                )
+                return
+            info = FACTORY_ITEM_INDEX.get(order.item_key, {"name": order.item_key})
+            refund = int(order.cost_paid or 0)
+            user.fox_points = (user.fox_points or 0) + refund
+            session.delete(order)
+            session.commit()
+            orders = factory_settle_orders(session, user.telegram_id)
+            await q.answer(f"❌ تولید {info['name']} لغو شد؛ {refund:,} روب‌پوینت برگشت.", show_alert=True)
+            await q.message.edit_text(
+                factory_panel_text(user, orders) + factory_orders_text(orders),
                 reply_markup=factory_home_keyboard(owner_id)
             )
             return
