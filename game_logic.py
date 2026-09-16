@@ -125,8 +125,8 @@ def fridge_cook_seconds(nutrition):
 
 # ---------- کارخونه روبی ----------
 FACTORY_UNLOCK_LEVEL = 10
-FACTORY_BUILD_COST = 150_000
-FACTORY_BUILD_SECONDS = 3 * 60 * 60  # ۳ ساعت تا افتتاح کارخونه بعد از ساخت‌وساز
+FACTORY_BUILD_COST = 10_000
+FACTORY_BUILD_SECONDS = 1 * 60 * 60  # ۱ ساعت تا افتتاح کارخونه بعد از تعمیر
 
 FACTORY_STORAGE_BASE = 25_000        # ظرفیت انبار در سطح ۱
 FACTORY_STORAGE_STEP = 10_000        # هر ارتقا +۱۰ هزار جا

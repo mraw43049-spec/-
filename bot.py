@@ -2761,16 +2761,16 @@ def factory_produced_total_of(user):
 def factory_intro_text(user):
     return (
         "🦊 کارخونه روبی 🏭\n\n"
-        f"از سطح {FACTORY_UNLOCK_LEVEL} می‌تونی کارخونه‌ی خودتو بسازی و ازش تولید و فروش داشته باشی.\n\n"
-        f"💰 هزینه‌ی ساخت‌وساز: {FACTORY_BUILD_COST:,} روب‌پوینت\n"
-        f"⏳ زمان آماده‌سازی بعد از ساخت: {format_duration(FACTORY_BUILD_SECONDS)}"
+        f"از سطح {FACTORY_UNLOCK_LEVEL} می‌تونی کارخونه‌ی خودتو تعمیر کنی و ازش تولید و فروش داشته باشی.\n\n"
+        f"💰 هزینه‌ی تعمیر: {FACTORY_BUILD_COST:,} روب‌پوینت\n"
+        f"⏳ زمان آماده‌سازی بعد از تعمیر: {format_duration(FACTORY_BUILD_SECONDS)}"
     )
 
 
 def factory_building_text(user):
     remaining = factory_build_remaining(user)
     return (
-        "🏗 کارخونه روبی در حال ساخت‌وسازه...\n\n"
+        "🔧 کارخونه روبی در حال تعمیره...\n\n"
         f"⏳ تا افتتاح: {format_duration(remaining)}"
     )
 
@@ -2870,7 +2870,7 @@ def factory_warehouse_keyboard(user, session, owner_id):
 
 def factory_build_keyboard(owner_id):
     return InlineKeyboardMarkup([[InlineKeyboardButton(
-        f"🏗 ساخت کارخونه ({FACTORY_BUILD_COST:,} روب‌پوینت)", callback_data=f"factory:build:0:{owner_id}"
+        f"🔧 تعمیر کارخونه ({FACTORY_BUILD_COST:,} روب‌پوینت)", callback_data=f"factory:build:0:{owner_id}"
     )]])
 
 
@@ -3087,7 +3087,7 @@ async def factory_button(update, context):
 
         if action == "build":
             if user.factory_built:
-                await q.answer("کارخونه قبلاً ساخته شده.", show_alert=True)
+                await q.answer("کارخونه قبلاً تعمیر شده.", show_alert=True)
                 return
             if (user.fox_points or 0) < FACTORY_BUILD_COST:
                 await q.answer(f"روب‌پوینت کافی نیست. {FACTORY_BUILD_COST:,} روب‌پوینت لازم داری.", show_alert=True)
@@ -3096,12 +3096,12 @@ async def factory_button(update, context):
             user.factory_built = 1
             user.factory_build_started_at = now_utc()
             session.commit()
-            await q.answer("🏗 ساخت‌وساز کارخونه شروع شد!", show_alert=True)
+            await q.answer("🔧 تعمیر کارخونه شروع شد!", show_alert=True)
             await q.message.edit_text(factory_building_text(user), reply_markup=None)
             return
 
         if not user.factory_built:
-            await q.answer("هنوز کارخونه نساختی.", show_alert=True)
+            await q.answer("هنوز کارخونه رو تعمیر نکردی.", show_alert=True)
             return
         if not factory_is_ready(user):
             await q.answer("کارخونه هنوز آماده‌ی افتتاح نیست.", show_alert=True)
