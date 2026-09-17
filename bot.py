@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timezone, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto
+from telegram.error import RetryAfter, Forbidden, BadRequest, TimedOut, NetworkError
 from telegram.ext import (
     ApplicationBuilder, ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, ChatMemberHandler,
     ContextTypes, MessageHandler, filters
@@ -825,14 +826,21 @@ def guide_item_keyboard(idx):
 
 
 async def start_command(update, context):
+    # پیلود رفرال رو همین اول ذخیره می‌کنیم؛ چون اگه کاربر هنوز عضو کانال‌ها نباشه،
+    # require_membership همینجا برمی‌گرده و قبلاً کد رفرال اصلاً پردازش نمی‌شد.
+    if context.args:
+        payload = context.args[0].strip()
+        if re.fullmatch(r"ref_\d+", payload):
+            context.user_data['pending_referral'] = payload
     if not await require_membership(update, context):
         return
     session = get_session()
     try:
         existing = session.get(User, update.effective_user.id)
         user = get_or_create_user(session, update.effective_user)
-        if existing is None and context.args:
-            await handle_referral_signup(session, user, context.args[0], context)
+        payload = context.user_data.pop('pending_referral', None)
+        if existing is None and payload:
+            await handle_referral_signup(session, user, payload, context)
     finally:
         session.close()
     await update.message.reply_text(welcome_text(), reply_markup=welcome_keyboard(context), **reply_kwargs(update.message))
@@ -4615,6 +4623,48 @@ async def notify_user_private(bot, user_id, text):
     except Exception as e:
         logger.info("Could not notify user %s: %s", user_id, e)
 
+
+async def _send_to_user_safe(bot, uid, text, max_retries=3):
+    """
+    ارسال پیام به یک کاربر، با احترام به محدودیت نرخ ارسال تلگرام (Flood control).
+    اگه تلگرام بگه صبر کن (RetryAfter)، به‌جای اینکه فوراً «ناموفق» حساب بشه،
+    همون مدت صبر می‌کنه و دوباره امتحان می‌کنه.
+    """
+    for attempt in range(max_retries):
+        try:
+            await bot.send_message(chat_id=uid, text=text)
+            return True
+        except RetryAfter as e:
+            await asyncio.sleep(float(e.retry_after) + 0.5)
+        except (Forbidden, BadRequest):
+            # کاربر بات رو بلاک کرده یا چت دیگه معتبر نیست؛ تلاش دوباره فایده‌ای نداره.
+            return False
+        except (TimedOut, NetworkError):
+            await asyncio.sleep(1.5)
+        except Exception:
+            return False
+    return False
+
+
+async def broadcast_to_users(bot, user_ids, text, delay=0.05):
+    """
+    پیام رو یکی‌یکی به کاربرا می‌فرسته، با یه فاصله‌ی کوچیک بین هر ارسال تا به
+    محدودیت نرخ ارسال تلگرام (حدود ۳۰ پیام در ثانیه) نخوریم. قبلاً همه‌ی پیام‌ها
+    پشت‌سرهم و بدون وقفه فرستاده می‌شدن؛ بعد از چند پیام اول تلگرام باقی
+    ارسال‌ها رو با خطای Flood رد می‌کرد و اونا بی‌هیچ تلاش دوباره‌ای «ناموفق»
+    حساب می‌شدن — همین باعث می‌شد پیام همگانی فقط برای چند نفر اول بره.
+    """
+    ok = fail = 0
+    for uid in user_ids:
+        sent = await _send_to_user_safe(bot, uid, text)
+        if sent:
+            ok += 1
+        else:
+            fail += 1
+        await asyncio.sleep(delay)
+    return ok, fail
+
+
 def admin_only(user_id): return user_id in ADMIN_IDS
 
 def build_backup_file():
@@ -4679,6 +4729,7 @@ def admin_main_keyboard():
         [InlineKeyboardButton("👥 تعداد کاربران", callback_data="admin:users")],
         [InlineKeyboardButton("📣 پیام همگانی", callback_data="admin:broadcast")],
         [InlineKeyboardButton("🦊 افزودن/کسر روب‌پوینت", callback_data="admin:addpoints")],
+        [InlineKeyboardButton("🎁 هدیه روب‌پوینت به همه", callback_data="admin:giftall")],
         [InlineKeyboardButton("⭐ تنظیم سطح", callback_data="admin:setlevel")],
         [InlineKeyboardButton("🦊 تنظیم روب‌پوینت", callback_data="admin:setfoxpoints")],
         [InlineKeyboardButton("⚽ پیش‌بینی فوتبال", callback_data="admin:football")],
@@ -4721,6 +4772,9 @@ async def admin_callback(update, context):
         await q.message.reply_text(f"👥 تعداد کاربران ثبت‌شده: {count}")
     elif action == "broadcast": context.user_data["admin_action"]="broadcast"; await q.message.reply_text("📣 متن پیام همگانی را بفرست.")
     elif action == "addpoints": context.user_data["admin_action"]="addpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی کاربر + مقدار روب‌پوینت")
+    elif action == "giftall":
+        context.user_data["admin_action"]="giftall"
+        await q.message.reply_text("🎁 چند روب‌پوینت به همه‌ی کاربرا هدیه داده بشه؟\nفقط عدد بفرست (مثلاً 500). برای کسر از همه، عدد منفی بفرست.")
     elif action == "setlevel": context.user_data["admin_action"]="setlevel"; await q.message.reply_text("⭐ فرمت: آیدی عددی کاربر + سطح")
     elif action == "setfoxpoints": context.user_data["admin_action"]="setfoxpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی کاربر + مقدار روب‌پوینت")
     elif action == "banmenu":
@@ -4762,11 +4816,33 @@ async def admin_text(update, context):
         session=get_session()
         try: users=[u.telegram_id for u in session.query(User).all()]
         finally: session.close()
-        ok=fail=0
-        for uid in users:
-            try: await context.bot.send_message(uid,"📢 پیام مدیریت:\n\n"+text); ok+=1
-            except Exception: fail+=1
-        await update.message.reply_text(f"✅ ارسال شد: {ok}\n❌ ناموفق: {fail}", **reply_kwargs(update.message)); return
+        await update.message.reply_text(f"📣 در حال ارسال به {len(users)} کاربر... ممکنه چند دقیقه طول بکشه.", **reply_kwargs(update.message))
+        ok, fail = await broadcast_to_users(context.bot, users, "📢 پیام مدیریت:\n\n"+text)
+        await update.message.reply_text(f"✅ ارسال شد: {ok}\n❌ ناموفق (بلاک/حذف حساب): {fail}", **reply_kwargs(update.message)); return
+    if action == "giftall":
+        cleaned = text.replace(",", "").replace("،", "").strip()
+        if not cleaned.lstrip("-").isdigit():
+            await update.message.reply_text("❗️ فقط یک عدد بفرست (مثلاً 500 یا 500-).", **reply_kwargs(update.message)); return
+        amount = int(cleaned)
+        if amount == 0:
+            await update.message.reply_text("مقدار نمی‌تونه صفر باشه.", **reply_kwargs(update.message)); return
+        session=get_session()
+        try:
+            users = session.query(User).all()
+            for u in users:
+                u.fox_points = max(0, int(u.fox_points or 0) + amount)
+            session.commit()
+            user_ids = [u.telegram_id for u in users]
+        finally:
+            session.close()
+        count = len(user_ids)
+        await update.message.reply_text(f"🎁 روب‌پوینت {count} کاربر آپدیت شد.\n📣 در حال اطلاع‌رسانی...", **reply_kwargs(update.message))
+        if amount > 0:
+            gift_text = f"🎉 هدیه‌ی پشتیبانی!\n\n🦊 {amount:,} روب‌پوینت به همه‌ی کاربرا هدیه داده شد و به حساب شما هم اضافه شد! 🦊"
+        else:
+            gift_text = f"📢 اطلاعیه پشتیبانی\n\n🦊 {abs(amount):,} روب‌پوینت از حساب همه‌ی کاربرا کسر شد."
+        ok, fail = await broadcast_to_users(context.bot, user_ids, gift_text)
+        await update.message.reply_text(f"✅ روب‌پوینت {count} کاربر آپدیت شد.\n📨 اطلاع‌رسانی موفق: {ok}\n❌ ناموفق (بلاک/حذف حساب): {fail}", **reply_kwargs(update.message)); return
     if action == "football_add_match":
         await football_add_match_text(update, context); return
     if action.startswith("ban:"):
@@ -5135,7 +5211,11 @@ async def membership_callback(update, context):
         await q.answer("عضویت تأیید شد! 🎉")
         session = get_session()
         try:
-            get_or_create_user(session, q.from_user)
+            existing = session.get(User, q.from_user.id)
+            user = get_or_create_user(session, q.from_user)
+            payload = context.user_data.pop('pending_referral', None)
+            if existing is None and payload:
+                await handle_referral_signup(session, user, payload, context)
         finally:
             session.close()
         try:
@@ -5968,7 +6048,7 @@ def main():
     app.add_handler(CallbackQueryHandler(jail_callback_gate), group=-20)
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|setlevel|setfoxpoints|banmenu|backup)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|giftall|setlevel|setfoxpoints|banmenu|backup)$"))
     app.add_handler(CallbackQueryHandler(admin_banset_callback,pattern=r"^admin:banset:(?:1|7|30|permanent|unban)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
