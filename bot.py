@@ -4589,6 +4589,24 @@ async def points_flow_gate(update, context):
     raise ApplicationHandlerStop
 
 
+async def purchase_flow_gate(update, context):
+    """گیت مشترک برای فلوهای «خرید گیفت استارزی» و «خرید روب پوینت».
+
+    هر دو گیت قبلاً جدا و هر دو با filters.ALL روی گروه -9 ثبت شده بودند؛
+    چون گروه‌های PTB فقط اولین هندلرِ match‌شده را اجرا می‌کنند و
+    filters.ALL همیشه match می‌شود، gift_flow_gate همیشه زودتر اجرا و
+    نوبت points_flow_gate هیچ‌وقت نمی‌رسید (حتی برای کاربرهایی که اصلاً
+    gift_flow نداشتند). این تابع هر دو را به ترتیب داخل یک هندلر واحد
+    صدا می‌زند تا هر دو فلو واقعاً بررسی شوند.
+    """
+    if context.user_data.get("gift_flow"):
+        await gift_flow_gate(update, context)
+        return
+    if context.user_data.get("points_flow"):
+        await points_flow_gate(update, context)
+        return
+
+
 async def points_admin_button(update, context):
     q = update.callback_query
     if not q or not q.from_user or q.from_user.id not in ADMIN_IDS:
@@ -6477,8 +6495,7 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
-    app.add_handler(MessageHandler(filters.ALL,gift_flow_gate),group=-9)
-    app.add_handler(MessageHandler(filters.ALL,points_flow_gate),group=-9)
+    app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
     app.add_handler(ChatMemberHandler(bot_joined_group, ChatMemberHandler.MY_CHAT_MEMBER), group=-2)
     app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, register_group_chat), group=-1)
