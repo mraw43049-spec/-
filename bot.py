@@ -21,7 +21,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, get_session, init_db
 )
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
@@ -331,6 +331,35 @@ def get_or_create_user(session, tg_user):
             user.level = calculated; changed = True
         if changed:
             session.commit()
+    return user
+
+
+def get_or_create_user_by_id(session, telegram_id):
+    """برای مواردی که فقط آیدی عددی کاربر داریم و آبجکت تلگرامش رو نداریم (مثلاً گیرنده روب پوینت)."""
+    user = session.get(User, telegram_id)
+    if user is None:
+        user = User(
+            telegram_id=telegram_id,
+            username=None,
+            first_name=None,
+            points=0,
+            total_earned=0,
+            level=1,
+            fox_name="مکار",
+            fox_level=1,
+            fox_belly=3,
+            fox_belly_capacity=3,
+            fox_points=0,
+            fox_storage=0,
+            fox_total_earned=0,
+            fox_production_remainder=0.0,
+            fox_claim_count=0, hunt_count=0, fox_rescued_count=0, fox_prestige_count=0,
+            fox_last_hunger_at=now_utc(),
+            wheel_last_spin_at=None,
+            wheel_last_reward=None,
+        )
+        session.add(user)
+        session.commit()
     return user
 
 
@@ -4027,6 +4056,7 @@ def gift_shop_keyboard():
         [InlineKeyboardButton(f"{tier['tier_label']} ({tier['price']:,} تومان)", callback_data=f"gift:pick:{key}:0")]
         for key, tier in GIFT_TIERS.items()
     ]
+    rows.append([InlineKeyboardButton("🦊 خرید روب پوینت", callback_data="points:shop:0:0")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -4094,6 +4124,7 @@ async def gift_shop_command(update, context):
     if not await require_membership(update, context):
         return
     context.user_data.pop("gift_flow", None)
+    context.user_data.pop("points_flow", None)
     await update.message.reply_text(gift_shop_text(), reply_markup=gift_shop_keyboard(), **reply_kwargs(update.message))
 
 
@@ -4111,6 +4142,7 @@ async def gift_button(update, context):
         return
     if action == "backshop":
         context.user_data.pop("gift_flow", None)
+        context.user_data.pop("points_flow", None)
         await q.answer()
         await q.message.edit_text(gift_shop_text(), reply_markup=gift_shop_keyboard())
         return
@@ -4311,6 +4343,316 @@ async def gift_flow_gate(update, context):
     context.user_data.pop("gift_flow", None)
     await update.message.reply_text("⛔️ چون به‌جای عکس رسید چیز دیگه‌ای فرستادی، به‌طور دائم از ربات بن شدی.")
     raise ApplicationHandlerStop
+
+
+# ---------- خرید روب پوینت 🦊 ----------
+
+POINTS_PACKAGES = {
+    "1": {"points": 250000, "price": 15000},
+    "2": {"points": 500000, "price": 22000},
+    "3": {"points": 1000000, "price": 45000},
+    "4": {"points": 3000000, "price": 130000},
+}
+POINTS_CARD_NUMBER = GIFT_CARD_NUMBER
+POINTS_CARD_OWNER = GIFT_CARD_OWNER
+POINTS_CHANNEL_USERNAME = GIFT_CHANNEL_USERNAME
+POINTS_SUPPORT_CONTACT = "@escotch"
+
+
+def points_package_label(key):
+    p = POINTS_PACKAGES[key]
+    return f"{p['points']:,} روب پوینت — {p['price']:,} تومان"
+
+
+def points_shop_text():
+    return (
+        "🦊 خرید روب پوینت\n\n"
+        "یکی از بسته‌های زیر رو انتخاب کن ⬇️\n\n"
+        f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}"
+    )
+
+
+def points_shop_keyboard():
+    rows = [
+        [InlineKeyboardButton(points_package_label(key), callback_data=f"points:pick:{key}:0")]
+        for key in POINTS_PACKAGES
+    ]
+    rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="gift:backshop:0:0")])
+    return InlineKeyboardMarkup(rows)
+
+
+def points_order_summary_text(flow):
+    pkg = POINTS_PACKAGES[flow["package_key"]]
+    return (
+        f"🧾 خلاصه سفارش\n\n"
+        f"🪙 روب پوینت: {pkg['points']:,}\n"
+        f"👤 آیدی عددی گیرنده: {flow['recipient_id']}\n"
+        f"💰 مبلغ قابل پرداخت: {pkg['price']:,} تومان\n\n"
+        f"💳 پرداخت کارت به کارت به شماره کارت زیر:\n"
+        f"{POINTS_CARD_NUMBER}\n"
+        f"به نام: {POINTS_CARD_OWNER}\n\n"
+        f"بعد از واریز، عکس رسیدِ پرداخت رو همینجا بفرست.\n\n"
+        f"⚠️ توجه: فقط عکس رسید رو بفرست تا سفارش برای پشتیبانی ارسال بشه.\n"
+        f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}"
+    )
+
+
+async def points_shop_entry(update, context):
+    """ورود به بخش «خرید روب پوینت» از داخل فروشگاه روبی."""
+    context.user_data.pop("points_flow", None)
+    await update.callback_query.message.edit_text(points_shop_text(), reply_markup=points_shop_keyboard())
+
+
+async def points_button(update, context):
+    q = update.callback_query
+    try:
+        _, action, arg1, arg2 = q.data.split(":")
+    except Exception:
+        await q.answer()
+        return
+    if not await require_membership(update, context):
+        return
+    if action == "shop":
+        context.user_data.pop("gift_flow", None)
+        await q.answer()
+        await points_shop_entry(update, context)
+        return
+    if action == "backshop":
+        context.user_data.pop("points_flow", None)
+        await q.answer()
+        await q.message.edit_text(points_shop_text(), reply_markup=points_shop_keyboard())
+        return
+    if action == "pick":
+        key = arg1
+        if key not in POINTS_PACKAGES:
+            await q.answer()
+            return
+        context.user_data["points_flow"] = {
+            "stage": "await_recipient",
+            "package_key": key,
+            "started_at": now_utc().isoformat(),
+        }
+        await q.answer()
+        pkg = POINTS_PACKAGES[key]
+        await q.message.edit_text(
+            f"🪙 بسته انتخابی: {pkg['points']:,} روب پوینت — {pkg['price']:,} تومان\n\n"
+            "👤 آیدی عددی کاربری که می‌خوای روب پوینت رو دریافت کنه وارد کن.\n"
+            "(برای گرفتن آیدی عددی خودت یا هر کاربر دیگه می‌تونی به @userinfobot پیام بدی)"
+        )
+        return
+    await q.answer()
+
+
+async def handle_points_text(update, context):
+    flow = context.user_data.get("points_flow")
+    if not flow or not update.message or not update.message.text:
+        return False
+    if flow.get("stage") != "await_recipient":
+        return False
+    text = update.message.text.strip()
+    if not re.fullmatch(r"\d{5,15}", text):
+        await update.message.reply_text(
+            "❗️ آیدی عددی معتبر نیست. فقط آیدی عددیِ کاربر گیرنده رو بفرست (مثلاً با @userinfobot پیدا کن).",
+            **reply_kwargs(update.message)
+        )
+        return True
+    flow["recipient_id"] = text
+    flow["stage"] = "await_receipt"
+    context.user_data["points_flow"] = flow
+    await update.message.reply_text(points_order_summary_text(flow), **reply_kwargs(update.message))
+    return True
+
+
+def points_admin_caption(order):
+    pkg = POINTS_PACKAGES[order.package_key]
+    return (
+        f"🆕 سفارش خرید روب پوینت #{order.id}\n\n"
+        f"🪙 مقدار: {pkg['points']:,} روب پوینت\n"
+        f"💰 مبلغ: {pkg['price']:,} تومان\n"
+        f"👤 آیدی عددی سفارش‌دهنده: {order.user_id}\n"
+        f"🎯 آیدی عددی گیرنده: {order.recipient_id}\n"
+        f"🕐 زمان سفارش: {jalali_datetime_str(tehran_dt(order.created_at))}\n\n"
+        f"⏳ وضعیت: در انتظار بررسی"
+    )
+
+
+def points_admin_keyboard(order_id):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ تایید", callback_data=f"pts:approve:{order_id}"),
+        InlineKeyboardButton("❌ رد", callback_data=f"pts:reject:{order_id}"),
+    ]])
+
+
+def points_channel_text(order, status_line):
+    pkg = POINTS_PACKAGES[order.package_key]
+    return (
+        f"🦊 سفارش خرید روب پوینت #{order.id}\n\n"
+        f"🪙 مقدار: {pkg['points']:,} روب پوینت\n"
+        f"💳 {pkg['price']:,} تومان · کارت به کارت\n"
+        f"👤 سفارش‌دهنده: {mask_telegram_id(order.user_id)}\n"
+        f"🎯 گیرنده: {mask_telegram_id(order.recipient_id)}\n"
+        f"🕐 {jalali_datetime_str(tehran_dt(order.created_at))}\n\n"
+        f"{status_line}\n\n"
+        f"🛍 خرید از روباهیو🦊: @fox_119bot"
+    )
+
+
+async def finalize_points_order(update, context, flow):
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        pkg = POINTS_PACKAGES[flow["package_key"]]
+        try:
+            started_at = datetime.fromisoformat(flow["started_at"])
+        except Exception:
+            started_at = now_utc()
+        order = PointsPurchase(
+            user_id=user.telegram_id,
+            recipient_id=int(flow["recipient_id"]),
+            package_key=flow["package_key"],
+            points_amount=pkg["points"],
+            price=pkg["price"],
+            receipt_file_id=update.message.photo[-1].file_id,
+            status="pending",
+            started_at=started_at,
+        )
+        session.add(order)
+        session.commit()
+        order_id = order.id
+        context.user_data.pop("points_flow", None)
+        await update.message.reply_text(
+            f"✅ سفارش شما ثبت شد (شماره سفارش: {order_id}).\n"
+            f"تیم پشتیبانی رسیدت رو بررسی می‌کنه و به‌زودی {order.points_amount:,} روب پوینت به آیدی {order.recipient_id} اضافه می‌شه.\n"
+            f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}",
+            **reply_kwargs(update.message)
+        )
+        for admin_id in ADMIN_IDS:
+            try:
+                await context.bot.send_photo(
+                    chat_id=admin_id,
+                    photo=order.receipt_file_id,
+                    caption=points_admin_caption(order),
+                    reply_markup=points_admin_keyboard(order_id),
+                )
+            except Exception:
+                logger.warning("ارسال سفارش خرید روب پوینت به ادمین %s ناموفق بود", admin_id)
+        try:
+            msg = await context.bot.send_message(
+                chat_id=POINTS_CHANNEL_USERNAME,
+                text=points_channel_text(order, "⏳ وضعیت: در حال بررسی")
+            )
+            order.channel_message_id = msg.message_id
+            session.commit()
+        except Exception:
+            logger.warning("ارسال پیام کانال خرید روب پوینت ناموفق بود")
+    finally:
+        session.close()
+
+
+async def points_flow_gate(update, context):
+    """وقتی کاربر منتظر ارسال رسیده برای خرید روب پوینت: فقط عکس رسید پذیرفته می‌شه."""
+    flow = context.user_data.get("points_flow")
+    if not flow or flow.get("stage") != "await_receipt":
+        return
+    if not update.message:
+        return
+    if update.message.photo:
+        await finalize_points_order(update, context, flow)
+        raise ApplicationHandlerStop
+    await update.message.reply_text(
+        "⚠️ فقط عکس رسید پرداخت رو بفرست تا سفارش برای پشتیبانی ارسال بشه.",
+        **reply_kwargs(update.message)
+    )
+    raise ApplicationHandlerStop
+
+
+async def points_admin_button(update, context):
+    q = update.callback_query
+    if not q or not q.from_user or q.from_user.id not in ADMIN_IDS:
+        await q.answer("⛔️ این دکمه فقط برای پشتیبانیه.", show_alert=True)
+        return
+    m = re.fullmatch(r"pts:(approve|reject):(\d+)", q.data or "")
+    if not m:
+        await q.answer()
+        return
+    action, order_id = m.group(1), int(m.group(2))
+    session = get_session()
+    try:
+        order = session.get(PointsPurchase, order_id)
+        if not order:
+            await q.answer("این سفارش دیگه پیدا نشد.", show_alert=True)
+            return
+        if order.status != "pending":
+            await q.answer("قبلاً روی این سفارش تصمیم گرفته شده.", show_alert=True)
+            return
+        pkg = POINTS_PACKAGES[order.package_key]
+        if action == "approve":
+            recipient = get_or_create_user_by_id(session, order.recipient_id)
+            recipient.fox_points = (recipient.fox_points or 0) + order.points_amount
+            order.status = "approved"
+            order.decided_at = now_utc()
+            order.decided_by = q.from_user.id
+            session.commit()
+            await q.answer("✅ تایید شد.", show_alert=True)
+            try:
+                await q.message.edit_caption(caption=points_admin_caption(order) + "\n✅ تایید شد و پوینت واریز شد.")
+            except Exception:
+                pass
+            try:
+                await context.bot.send_message(
+                    chat_id=order.user_id,
+                    text=f"✅ سفارش شما (#{order.id}) تایید شد و {order.points_amount:,} روب پوینت به آیدی {order.recipient_id} اضافه شد."
+                )
+            except Exception:
+                pass
+            if order.recipient_id != order.user_id:
+                try:
+                    await context.bot.send_message(
+                        chat_id=order.recipient_id,
+                        text=f"🎉 {order.points_amount:,} روب پوینت به حساب تو اضافه شد!"
+                    )
+                except Exception:
+                    pass
+            if order.channel_message_id:
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=POINTS_CHANNEL_USERNAME,
+                        message_id=order.channel_message_id,
+                        text=points_channel_text(order, "✅ وضعیت: تایید شد و تحویل داده شد")
+                    )
+                except Exception:
+                    pass
+        else:
+            order.status = "rejected"
+            order.decided_at = now_utc()
+            order.decided_by = q.from_user.id
+            session.commit()
+            await q.answer("❌ رد شد.", show_alert=True)
+            try:
+                await q.message.edit_caption(caption=points_admin_caption(order) + "\n❌ رد شد.")
+            except Exception:
+                pass
+            try:
+                await context.bot.send_message(
+                    chat_id=order.user_id,
+                    text=(
+                        f"❌ سفارش شما (#{order.id}) رد شد.\n"
+                        f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}"
+                    )
+                )
+            except Exception:
+                pass
+            if order.channel_message_id:
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=POINTS_CHANNEL_USERNAME,
+                        message_id=order.channel_message_id,
+                        text=points_channel_text(order, "❌ وضعیت: رد شد")
+                    )
+                except Exception:
+                    pass
+    finally:
+        session.close()
 
 
 async def _active_jail(session, user):
@@ -5970,6 +6312,7 @@ async def text_router(update, context):
     if not update.message or not update.message.text: return
     if await handle_jail_memory_text(update, context): return
     if await handle_gift_text(update, context): return
+    if await handle_points_text(update, context): return
     if await handle_bank_text(update, context): return
     if await handle_fox_rename_text(update, context): return
     if await handle_ruby_entry_text(update, context): return
@@ -6093,6 +6436,8 @@ def main():
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
     app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change):\d+$"))
     app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|opt|qty|qtyok|backshop|backopt|notext|noop):[^:]+:[^:]+$"))
+    app.add_handler(CallbackQueryHandler(points_button,pattern=r"^points:(?:shop|pick|backshop):[^:]+:[^:]+$"))
+    app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|rest):\d+$"))
@@ -6110,6 +6455,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.ALL,gift_flow_gate),group=-9)
+    app.add_handler(MessageHandler(filters.ALL,points_flow_gate),group=-9)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
     app.add_handler(ChatMemberHandler(bot_joined_group, ChatMemberHandler.MY_CHAT_MEMBER), group=-2)
     app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, register_group_chat), group=-1)

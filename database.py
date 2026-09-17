@@ -269,6 +269,23 @@ class GiftOrder(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class PointsPurchase(Base):
+    __tablename__ = 'points_purchases'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)   # آیدی سفارش‌دهنده
+    recipient_id = Column(BigInteger, nullable=False)                              # آیدی گیرنده روب‌پوینت
+    package_key = Column(String, nullable=False)         # '1' | '2' | '3' | '4'
+    points_amount = Column(Integer, nullable=False)
+    price = Column(Integer, nullable=False)
+    receipt_file_id = Column(String, nullable=True)
+    status = Column(String, nullable=False, default='pending')  # pending | approved | rejected
+    channel_message_id = Column(BigInteger, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    decided_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class FactoryOrder(Base):
     __tablename__ = 'factory_orders'
     id = Column(Integer, primary_key=True, autoincrement=True)
