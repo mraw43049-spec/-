@@ -869,10 +869,17 @@ async def handle_referral_signup(session, new_user, payload, context):
     referrer_display = (
         f"@{referrer.username}" if referrer.username else (referrer.first_name or "کاربر ناشناس")
     )
+    # آمار معرف (کل/تاییدشده/در انتظار) رو همینجا حساب می‌کنیم تا هم توی پیام ادمین
+    # برای تصمیم‌گیری نشون داده بشه، هم برای خود معرف فرستاده بشه؛ چون قبلاً معرف
+    # هیچ اطلاعی از ثبت شدن زیرمجموعه‌ش نمی‌گرفت و فقط پیام ادمین می‌رفت.
+    total = session.query(Referral).filter(Referral.referrer_id == referrer_id).count()
+    approved = session.query(Referral).filter(Referral.referrer_id == referrer_id, Referral.status == "approved").count()
+    pending = session.query(Referral).filter(Referral.referrer_id == referrer_id, Referral.status == "pending").count()
     caption = (
         "🔗 زیرمجموعه‌ی جدید در انتظار تایید\n\n"
-        f"👤 معرف: {referrer_display}\n"
+        f"👤 معرف: {referrer_display} (آیدی: {referrer_id})\n"
         f"🆕 کاربر جدید: {referred_display}\n\n"
+        f"📊 آمار این معرف: {total:,} کل | {approved:,} تاییدشده | {pending:,} در انتظار\n"
         f"💰 در صورت تایید، {REFERRAL_REWARD:,} روب‌پوینت به معرف داده می‌شه."
     )
     kb = InlineKeyboardMarkup([[
@@ -884,6 +891,21 @@ async def handle_referral_signup(session, new_user, payload, context):
             await context.bot.send_message(chat_id=admin_id, text=caption, reply_markup=kb)
         except Exception:
             logger.warning("ارسال زیرمجموعه‌ی جدید به ادمین %s ناموفق بود", admin_id)
+    # به خودِ معرف هم خبر بدیم که دعوتش ثبت شده و در انتظار تاییده، وگرنه معرف تا وقتی
+    # خودش دستی /رفرال رو نزنه، هیچ‌وقت متوجه نمی‌شه که کسی با لینکش وارد شده.
+    try:
+        await context.bot.send_message(
+            chat_id=referrer_id,
+            text=(
+                f"🔗 {referred_display} با لینک اختصاصی تو وارد ربات شد!\n"
+                "⏳ این زیرمجموعه الان در انتظار تایید پشتیبانیه.\n\n"
+                f"👥 کل زیرمجموعه: {total:,}\n"
+                f"✅ تاییدشده: {approved:,}\n"
+                f"⏳ در انتظار تایید: {pending:,}"
+            )
+        )
+    except Exception:
+        logger.info("اطلاع‌رسانی آمار زیرمجموعه به معرف %s ناموفق بود", referrer_id)
 
 
 async def referral_admin_button(update, context):
@@ -4763,8 +4785,9 @@ async def admin_callback(update, context):
         session=get_session()
         try:
             users=session.query(User).count(); points=sum((u.points or 0) for u in session.query(User).all()); earned=sum((u.total_earned or 0) for u in session.query(User).all()); games=session.query(Challenge).count(); fox=sum((u.fox_points or 0) for u in session.query(User).all())
+            ref_total=session.query(Referral).count(); ref_approved=session.query(Referral).filter(Referral.status=="approved").count(); ref_pending=session.query(Referral).filter(Referral.status=="pending").count()
         finally: session.close()
-        await q.message.reply_text(f"📊 آمار کلی\n\n👥 کاربران: {users}\n💰 پوینت معمولی: {points}\n📈 کل کسب‌شده: {earned}\n🦊 روب‌پوینت: {fox:,.2f}\n🎮 بازی‌ها: {games}")
+        await q.message.reply_text(f"📊 آمار کلی\n\n👥 کاربران: {users}\n💰 پوینت معمولی: {points}\n📈 کل کسب‌شده: {earned}\n🦊 روب‌پوینت: {fox:,.2f}\n🎮 بازی‌ها: {games}\n\n🔗 زیرمجموعه‌گیری: {ref_total} کل | {ref_approved} تاییدشده | {ref_pending} در انتظار")
     elif action == "users":
         session=get_session()
         try: count=session.query(User).count()
