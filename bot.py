@@ -4044,19 +4044,31 @@ def gift_option_label(tier, option_key):
 
 
 def gift_shop_text():
-    lines = ["🎁 فروشگاه روبی", "", "یکی از تعرفه‌های استارزی رو انتخاب کن ⬇️", ""]
+    return "🎁 فروشگاه روبی\n\nیکی از بخش‌های زیر رو انتخاب کن ⬇️"
+
+
+def gift_shop_keyboard():
+    rows = [
+        [InlineKeyboardButton("🦊 خرید روب پوینت", callback_data="points:shop:0:0")],
+        [InlineKeyboardButton("🎁 خرید گیفت استارزی", callback_data="gift:tiers:0:0")],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def gift_tiers_text():
+    lines = ["🎁 خرید گیفت استارزی", "", "یکی از تعرفه‌های استارزی رو انتخاب کن ⬇️", ""]
     for tier in GIFT_TIERS.values():
         icons = " ".join(o["emoji"] for o in tier["options"].values())
         lines.append(f"┘─ {tier['tier_label']} {icons} — {tier['price']:,} تومان")
     return "\n".join(lines)
 
 
-def gift_shop_keyboard():
+def gift_tiers_keyboard():
     rows = [
         [InlineKeyboardButton(f"{tier['tier_label']} ({tier['price']:,} تومان)", callback_data=f"gift:pick:{key}:0")]
         for key, tier in GIFT_TIERS.items()
     ]
-    rows.append([InlineKeyboardButton("🦊 خرید روب پوینت", callback_data="points:shop:0:0")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="gift:backshop:0:0")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -4071,7 +4083,7 @@ def gift_options_keyboard(tier):
         [InlineKeyboardButton(gift_option_label(tier, key), callback_data=f"gift:opt:{tier}:{key}")]
         for key in t["options"]
     ]
-    rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="gift:backshop:0:0")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت به تعرفه‌ها", callback_data="gift:backtiers:0:0")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -4145,6 +4157,16 @@ async def gift_button(update, context):
         context.user_data.pop("points_flow", None)
         await q.answer()
         await q.message.edit_text(gift_shop_text(), reply_markup=gift_shop_keyboard())
+        return
+    if action == "tiers":
+        context.user_data.pop("gift_flow", None)
+        await q.answer()
+        await q.message.edit_text(gift_tiers_text(), reply_markup=gift_tiers_keyboard())
+        return
+    if action == "backtiers":
+        context.user_data.pop("gift_flow", None)
+        await q.answer()
+        await q.message.edit_text(gift_tiers_text(), reply_markup=gift_tiers_keyboard())
         return
     if action == "backopt":
         tier = arg1
@@ -4392,7 +4414,8 @@ def points_order_summary_text(flow):
         f"{POINTS_CARD_NUMBER}\n"
         f"به نام: {POINTS_CARD_OWNER}\n\n"
         f"بعد از واریز، عکس رسیدِ پرداخت رو همینجا بفرست.\n\n"
-        f"⚠️ توجه: فقط عکس رسید رو بفرست تا سفارش برای پشتیبانی ارسال بشه.\n"
+        f"⚠️ توجه: فقط عکس رسید واقعی پرداخت رو بفرست تا سفارش برای پشتیبانی ارسال بشه.\n"
+        f"🚫 اگه رسید فیک (جعلی) بفرستی، توسط پشتیبانی به‌طور دائم از ربات بن می‌شی.\n"
         f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}"
     )
 
@@ -4521,8 +4544,8 @@ async def finalize_points_order(update, context, flow):
         order_id = order.id
         context.user_data.pop("points_flow", None)
         await update.message.reply_text(
-            f"✅ سفارش شما ثبت شد (شماره سفارش: {order_id}).\n"
-            f"تیم پشتیبانی رسیدت رو بررسی می‌کنه و به‌زودی {order.points_amount:,} روب پوینت به آیدی {order.recipient_id} اضافه می‌شه.\n"
+            f"✅ شما روب پوینت سفارش داده‌اید (شماره سفارش: {order_id}).\n"
+            f"⏳ منتظر تایید پشتیبانی باشید؛ به‌زودی {order.points_amount:,} روب پوینت به آیدی {order.recipient_id} اضافه می‌شه.\n"
             f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}",
             **reply_kwargs(update.message)
         )
@@ -6435,7 +6458,7 @@ def main():
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
     app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change):\d+$"))
-    app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|opt|qty|qtyok|backshop|backopt|notext|noop):[^:]+:[^:]+$"))
+    app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|opt|qty|qtyok|backshop|backopt|tiers|backtiers|notext|noop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(points_button,pattern=r"^points:(?:shop|pick|backshop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
