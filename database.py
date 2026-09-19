@@ -158,6 +158,32 @@ class RubyTable(Base):
     state = Column(String, nullable=True, default='')
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+class FriendRequest(Base):
+    __tablename__ = 'friend_requests'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sender_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    receiver_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    status = Column(String, nullable=False, default='pending')  # pending | accepted | rejected
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+class Friendship(Base):
+    __tablename__ = 'friendships'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user1_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    user2_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    last_action_user1_at = Column(DateTime(timezone=True), nullable=True)
+    last_action_user2_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class CityDonation(Base):
+    __tablename__ = 'city_donations'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, ForeignKey('group_chats.chat_id'), nullable=False)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    amount = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class RubySmuggling(Base):
     __tablename__ = 'ruby_smuggling'
     id = Column(Integer, primary_key=True, autoincrement=True)

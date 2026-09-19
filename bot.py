@@ -21,7 +21,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, get_session, init_db
 )
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
@@ -1254,8 +1254,42 @@ def render_xo_panel(tid,name,pot_line,ids,names_by_id,state):
     turn_id=state['turn']; turn_symbol=state['symbols'].get(str(turn_id),'?')
     lines=[f"{state['symbols'].get(str(uid),'?')} — {names_by_id.get(uid,str(uid))}" for uid in ids]
     text=(f"🕹 {name}\n\n🎮 بازی در جریانه!{pot_line}\n\n"+"\n".join(lines)+
-          f"\n\n▶️ نوبت: {names_by_id.get(turn_id,str(turn_id))} ({turn_symbol})")
+          f"\n\n▶️ نوبت: {names_by_id.get(turn_id,str(turn_id))} ({turn_symbol})\n⏱ زمان باقی‌مانده نوبت: {ruby_turn_remaining(state)} ثانیه")
     return text,xo_keyboard(tid,state['board'])
+
+def ruby_turn_remaining(state):
+    raw=state.get('turn_started_at')
+    if not raw: return 60
+    try:
+        started=datetime.fromisoformat(raw)
+        if started.tzinfo is None: started=started.replace(tzinfo=timezone.utc)
+        return max(0,int(60-(now_utc()-started).total_seconds()))
+    except Exception: return 60
+
+async def ruby_simple_turn_timeout(context):
+    tid=int(context.job.data['tid']); token=context.job.data.get('token')
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active' or t.game_type not in ('xo','cz_rabbit'): return
+        state=json.loads(t.state or '{}')
+        if token and state.get('turn_token')!=token: return
+        if ruby_turn_remaining(state)>0:
+            context.job_queue.run_once(ruby_simple_turn_timeout,ruby_turn_remaining(state),data={'tid':tid,'token':state.get('turn_token')}); return
+        ids=[int(x) for x in (t.players or '').split(',') if x]; current=state.get('turn')
+        if current not in ids: return
+        winner=[x for x in ids if x!=current][0]
+        t.status='finished'; pot=t.pot or 0
+        if pot:
+            u=session.get(User,winner)
+            if u: u.fox_points=(u.fox_points or 0)+pot
+        state['turn_token']=None; t.state=json.dumps(state); session.commit()
+        players=[session.get(User,i) for i in ids]; names={u.telegram_id:user_display_name(u) for u in players if u}
+        chat_id=t.chat_id; message_id=t.message_id; name=RUBY_GAME_CONFIG[t.game_type][0]
+    finally: session.close()
+    text=f"🕹 {name}\n\n⏰ نوبت {names.get(current,str(current))} تمام شد و در ۶۰ ثانیه حرکت نکرد.\n🏆 {names.get(winner,str(winner))} برنده شد!"+(f"\n💰 جایزه: {pot:,} روب‌پوینت" if pot else '')
+    try: await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=None)
+    except Exception: pass
 
 def xo_winner_symbol(board):
     for a,b,c in XO_LINES:
@@ -1292,7 +1326,7 @@ def render_rabbit_panel(tid,name,pot_line,ids,names_by_id,state):
         text = (
             f"🕹 {name}\n\n🎮 مرحله‌ی شکار شروع شد!{pot_line}\n\n"
             "روی خونه‌ها بزن تا خرگوش پیدا کنی؛ هرکی پنجه🐾 رو پیدا کنه می‌بازه!\n\n"
-            f"▶️ نوبت: {names_by_id.get(turn_id,str(turn_id))}"
+            f"▶️ نوبت: {names_by_id.get(turn_id,str(turn_id))}\n⏱ زمان باقی‌مانده نوبت: {ruby_turn_remaining(state)} ثانیه"
         )
     return text, rabbit_keyboard(tid, state)
 
@@ -1617,7 +1651,8 @@ async def ask_ruby_entry_amount(chat_id,message_id,context,key,count,owner_id):
             f"سقف مجاز: {RUBY_MAX_ENTRY:,} روب‌پوینت.\nبرای بازی رایگان عدد 0 رو بفرست.\n"
             "مثال: 50k / 50کا / 50م / 200000\n\n"
             "👇 جواب این پیام رو (یا فقط عدد رو) در همین چت بفرست."
-        )
+        ),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت",callback_data=f"rubysetup:back:{owner_id}")]])
     )
 
 async def finalize_ruby_setup(chat_id,message_id,context,key,count,amount,owner_id):
@@ -1639,6 +1674,17 @@ async def finalize_ruby_setup(chat_id,message_id,context,key,count,amount,owner_
         text=f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n💰 مبلغ ورودی : {fee_text}\n\nآماده‌ای؟",
         reply_markup=kb
     )
+
+async def ruby_setup_back(update,context):
+    q=update.callback_query
+    try: owner=int(q.data.split(':')[2])
+    except Exception: return
+    if q.from_user.id!=owner:
+        await q.answer('⛔ این پنل برای کاربر دیگری است.',show_alert=True); return
+    context.user_data.pop('ruby_setup',None)
+    await q.answer()
+    try: await q.message.edit_text('🕹 انتخاب بازی روبی لغو شد.',reply_markup=None)
+    except Exception: pass
 
 async def handle_ruby_entry_text(update,context):
     setup=context.user_data.get('ruby_setup')
@@ -1697,7 +1743,7 @@ async def ruby_create_table(update,context):
             t=session.get(RubyTable,tid)
             t.status='active'
             if key=='cz_rabbit':
-                t.state=json.dumps({"phase":"plant","paws":{},"revealed":[]})
+                t.state=json.dumps({"phase":"plant","paws":{},"revealed":[],"turn_started_at":now_utc().isoformat(),"turn_token":f"{t.id}-{ids[0]}-{int(now_utc().timestamp()*1000)}"})
             session.commit()
         finally: session.close()
         if key in RUBY_GAME_EMOJI:
@@ -1824,9 +1870,9 @@ async def ruby_join_table(update,context):
                 # شروع‌کننده اولین راند، همیشه سازنده میز است (اولین نفر در لیست بازیکنان).
                 t.state=json.dumps({"round":1,"wins":{str(i):0 for i in ids},"choices":{},"starter":ids[0]})
             elif game_type=='xo':
-                t.state=json.dumps({"board":[""]*9,"turn":ids[0],"symbols":{str(ids[0]):"X",str(ids[1]):"O"}})
+                t.state=json.dumps({"board":[""]*9,"turn":ids[0],"turn_started_at":now_utc().isoformat(),"turn_token":f"{t.id}-{ids[0]}-{int(now_utc().timestamp()*1000)}","symbols":{str(ids[0]):"X",str(ids[1]):"O"}})
             elif game_type=='cz_rabbit':
-                t.state=json.dumps({"phase":"plant","paws":{},"revealed":[]})
+                t.state=json.dumps({"phase":"plant","paws":{},"revealed":[],"turn_started_at":now_utc().isoformat(),"turn_token":f"{t.id}-{ids[0]}-{int(now_utc().timestamp()*1000)}"})
             elif game_type=='cz_pairs':
                 t.state=json.dumps(create_pairs_state(ids))
             elif game_type=='cz_dice':
@@ -1862,10 +1908,14 @@ async def ruby_join_table(update,context):
             state=json.loads(state_raw or '{}')
             text,kb=render_xo_panel(tid_,name,pot_line,ids,names_by_id,state)
             await q.message.edit_text(text,reply_markup=kb)
+            if context.job_queue:
+                context.job_queue.run_once(ruby_simple_turn_timeout,ruby_turn_remaining(state),data={'tid':tid_,'token':state.get('turn_token')})
         elif game_type=='cz_rabbit':
             state=json.loads(state_raw or '{}')
             text,kb=render_rabbit_panel(tid_,name,pot_line,ids,names_by_id,state)
             await q.message.edit_text(text,reply_markup=kb)
+            if context.job_queue and state.get('phase')=='hunt':
+                context.job_queue.run_once(ruby_simple_turn_timeout,ruby_turn_remaining(state),data={'tid':tid_,'token':state.get('turn_token')})
         elif game_type=='cz_pairs':
             state=json.loads(state_raw or '{}')
             text,kb=render_pairs_panel(tid_,name,pot_line,ids,names_by_id,state)
@@ -2073,6 +2123,8 @@ async def ruby_xo_move(update,context):
         if q.from_user.id not in ids:
             await q.answer("تو بازیکن این میز نیستی.",show_alert=True); return
         state=json.loads(t.state or '{}')
+        if ruby_turn_remaining(state)<=0:
+            await q.answer('⏰ ۶۰ ثانیه‌ات تمام شده.',show_alert=True); return
         if state.get('turn')!=q.from_user.id:
             await q.answer("نوبت تو نیست؛ صبر کن.",show_alert=True); return
         board=state['board']
@@ -2100,6 +2152,8 @@ async def ruby_xo_move(update,context):
                         if u: u.fox_points=(u.fox_points or 0)+share
         else:
             state['turn']=other_id
+            state['turn_started_at']=now_utc().isoformat()
+            state['turn_token']=f"{tid}-{other_id}-{int(now_utc().timestamp()*1000)}"
         state['board']=board
         t.state=json.dumps(state)
         players=[session.get(User,i) for i in ids]
@@ -2135,6 +2189,8 @@ async def ruby_xo_move(update,context):
             await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
         except Exception:
             pass
+        if context.job_queue:
+            context.job_queue.run_once(ruby_simple_turn_timeout,ruby_turn_remaining(state_snapshot),data={'tid':tid_,'token':state_snapshot.get('turn_token')})
 
 async def ruby_rabbit_choice(update,context):
     q=update.callback_query; _,tid_s,cell_s=q.data.split(":"); tid=int(tid_s); cell=int(cell_s)
@@ -2155,7 +2211,7 @@ async def ruby_rabbit_choice(update,context):
                 await q.answer("قبلاً پنجه‌تو گذاشتی؛ صبر کن حریفت هم بذاره.",show_alert=True); return
             state.setdefault('paws',{})[str(uid)]=cell
             if len(state['paws'])>=len(ids):
-                state['phase']='hunt'; state['turn']=ids[0]; state['revealed']=[]
+                state['phase']='hunt'; state['turn']=ids[0]; state['revealed']=[]; state['turn_started_at']=now_utc().isoformat(); state['turn_token']=f"{t.id}-{ids[0]}-{int(now_utc().timestamp()*1000)}"
             t.state=json.dumps(state)
             players=[session.get(User,i) for i in ids]
             names_by_id={u.telegram_id:user_display_name(u) for u in players if u}
@@ -2171,6 +2227,8 @@ async def ruby_rabbit_choice(update,context):
             return
 
         # مرحله شکار
+        if ruby_turn_remaining(state)<=0:
+            await q.answer('⏰ ۶۰ ثانیه‌ات تمام شده.',show_alert=True); return
         if state.get('turn')!=uid:
             await q.answer("نوبت تو نیست؛ صبر کن.",show_alert=True); return
         revealed=set(state.get('revealed') or [])
@@ -2194,6 +2252,8 @@ async def ruby_rabbit_choice(update,context):
             state['revealed']=list(revealed)
             other_id=[i for i in ids if i!=uid][0]
             state['turn']=other_id
+            state['turn_started_at']=now_utc().isoformat()
+            state['turn_token']=f"{tid}-{other_id}-{int(now_utc().timestamp()*1000)}"
         t.state=json.dumps(state)
         players=[session.get(User,i) for i in ids]
         names_by_id={u.telegram_id:user_display_name(u) for u in players if u}
@@ -2222,6 +2282,8 @@ async def ruby_rabbit_choice(update,context):
             await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
         except Exception:
             pass
+        if context.job_queue and not match_finished:
+            context.job_queue.run_once(ruby_simple_turn_timeout,ruby_turn_remaining(state_snapshot),data={'tid':tid_,'token':state_snapshot.get('turn_token')})
 
 def _parse_ruby_scores(raw):
     scores={}
@@ -4262,8 +4324,12 @@ async def bank_button(update,context):
             kb=InlineKeyboardMarkup([[InlineKeyboardButton('25٪',callback_data=f'bank:w:{uid}:25'),InlineKeyboardButton('50٪',callback_data=f'bank:w:{uid}:50')],[InlineKeyboardButton('75٪',callback_data=f'bank:w:{uid}:75'),InlineKeyboardButton('100٪',callback_data=f'bank:w:{uid}:100')]])
             await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n➖ درصد برداشت را انتخاب کن:',reply_markup=kb); return
         if action=='w': return
-        if action=='deposit': context.user_data['bank_action']='deposit'; await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n➕ مبلغ واریز را در جواب همین پنل بفرست.\nمثال: 50k / 50کا / 50میل / 50م / 50m'); return
-        if action=='transfer': context.user_data['bank_action']='transfer'; await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n🦊 کارت به کارت روبی 💳\n\n🔺 مبلغ و شماره حساب مقصد را در جواب همین پنل بفرست.\nمثال: 500 123456789000\n\n⏱ هر 5 دقیقه یک‌بار · کارمزد 5٪'); return
+        if action=='back':
+            context.user_data.pop('bank_action',None)
+            await q.answer()
+            await q.message.edit_text(bank_text(user,account),reply_markup=bank_keyboard(account)); return
+        if action=='deposit': context.user_data['bank_action']='deposit'; await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n➕ مبلغ واریز را در جواب همین پنل بفرست.\nمثال: 50k / 50کا / 50میل / 50م / 50m',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{uid}')]])); return
+        if action=='transfer': context.user_data['bank_action']='transfer'; await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n🦊 کارت به کارت روبی 💳\n\n🔺 مبلغ و شماره حساب مقصد را در جواب همین پنل بفرست.\nمثال: 500 123456789000\n\n⏱ هر 5 دقیقه یک‌بار · کارمزد 5٪',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{uid}')]])); return
         if action=='transactions':
             rows=session.query(BankTransaction).filter(BankTransaction.account_number==account.account_number).order_by(BankTransaction.id.desc()).limit(10).all()
             txt='📃 آخرین تراکنش‌ها\n\n' + ('\n'.join(f"{r.created_at:%Y-%m-%d %H:%M} | {('به حساب ' + str(r.counterparty_user_id)) if r.direction in ('card_out','card_transfer_out') else ('از حساب ' + str(r.counterparty_user_id)) if r.counterparty_user_id else r.description or r.direction} | {r.amount:,} 🪙" for r in rows[:3]) if rows else 'تراکنشی ثبت نشده است.')
@@ -5978,17 +6044,219 @@ async def roobam_command(update,context):
     target=update.message.reply_to_message.from_user if update.message.reply_to_message and update.message.reply_to_message.from_user else update.effective_user
     session=get_session()
     try:
-        user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0)
+        user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0);ref_count=session.query(Referral).filter(Referral.referrer_id==user.telegram_id,Referral.status=='approved').count();ref_rank=session.query(Referral.referrer_id).filter(Referral.status=='approved').group_by(Referral.referrer_id).having(__import__('sqlalchemy').func.count(Referral.id)>ref_count).count()+1
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
-        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_display_name(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_display_name(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
     finally:session.close()
-    await update.message.reply_text(text,**reply_kwargs(update.message))
+    await update.message.reply_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(user_display_name(user),url=f"tg://user?id={user.telegram_id}")]]),**reply_kwargs(update.message))
+
+# ---------- دوستان روباهیو 🦊 ----------
+FRIEND_LIMIT = 3
+FRIEND_ACTION_COOLDOWN = 30 * 60
+
+def friendship_pair(a,b):
+    return (a,b) if a < b else (b,a)
+
+def get_friendship(session,a,b):
+    x,y=friendship_pair(a,b)
+    return session.query(Friendship).filter(Friendship.user1_id==x,Friendship.user2_id==y).first()
+
+def friend_action_left(friendship, uid):
+    last = friendship.last_action_user1_at if friendship.user1_id == uid else friendship.last_action_user2_at
+    if not last: return 0
+    return max(0,int(FRIEND_ACTION_COOLDOWN-(now_utc()-aware(last)).total_seconds()))
+
+def friend_list(session, uid):
+    rows=session.query(Friendship).filter((Friendship.user1_id==uid)|(Friendship.user2_id==uid)).all()
+    out=[]
+    for f in rows:
+        other=f.user2_id if f.user1_id==uid else f.user1_id
+        u=session.get(User,other)
+        if u: out.append(u)
+    return out
+
+def friends_keyboard(uid, friends=None):
+    rows=[]
+    for f in (friends or []):
+        rows.append([InlineKeyboardButton(f"🦊 {user_display_name(f)}",callback_data=f"friend:view:{uid}:{f.telegram_id}")])
+    if len(friends or []) < FRIEND_LIMIT:
+        rows.append([InlineKeyboardButton("➕ افزودن دوست",callback_data=f"friend:add:{uid}")])
+    rows.append([InlineKeyboardButton("🔄 تازه‌سازی",callback_data=f"friend:home:{uid}")])
+    return InlineKeyboardMarkup(rows)
+
+def friends_panel_text(session, user):
+    friends=friend_list(session,user.telegram_id)
+    lines=[f"👥 دوستان روباهیو🦊 {len(friends)}/{FRIEND_LIMIT}",""]
+    if not friends:
+        lines.append("هنوز دوستی به لیستت اضافه نشده.")
+    for i,f in enumerate(friends,1):
+        rank=ranking_position(session,'fox_points',f.fox_points or 0)
+        lines += [f"{i}. {user_display_name(f)}",f"🪪 شناسه کاربری: @{f.username}" if f.username else f"🪪 آیدی عددی: {f.telegram_id}",f"🌍 رتبه جهانی روب‌پوینت: #{rank}",f"💰 روب‌پوینت: {int(f.fox_points or 0):,} 🪙",""]
+    return '\n'.join(lines), friends
+
+async def resolve_friend_target(bot, raw):
+    raw=raw.strip().lstrip('@')
+    if raw.isdigit():
+        try: return await bot.get_chat(int(raw))
+        except Exception: return None
+    try: return await bot.get_chat('@'+raw)
+    except Exception: return None
+
+async def friends_command(update,context):
+    if not await require_membership(update,context): return
+    session=get_session()
+    try:
+        user=get_or_create_user(session,update.effective_user)
+        text,friends=friends_panel_text(session,user)
+    finally: session.close()
+    await update.message.reply_text(text,reply_markup=friends_keyboard(user.telegram_id,friends),**reply_kwargs(update.message))
+
+async def friend_request_button(update,context):
+    q=update.callback_query; parts=(q.data or '').split(':')
+    if len(parts)<3: return
+    action=parts[1]; owner=int(parts[2])
+    if q.from_user.id!=owner:
+        await q.answer('⛔ این پنل برای کاربر دیگری است.',show_alert=True); return
+    if action=='home':
+        session=get_session()
+        try:
+            user=get_or_create_user(session,q.from_user); text,friends=friends_panel_text(session,user)
+        finally: session.close()
+        await q.answer()
+        await q.message.edit_text(text,reply_markup=friends_keyboard(owner,friends)); return
+    if action=='add':
+        context.user_data['friend_add_owner']=owner
+        await q.answer()
+        await q.message.edit_text('➕ افزودن دوست روبی\n\nآیدی عددی یا شناسه کاربری دوستت را بفرست.\nمثال: 123456789 یا @username\n\n🔙 برای لغو بنویس: لغو')
+        return
+    if action=='view' and len(parts)==4:
+        fid=int(parts[3]); session=get_session()
+        try:
+            user=get_or_create_user(session,q.from_user); f=session.get(User,fid); fs=get_friendship(session,owner,fid)
+            if not f or not fs:
+                await q.answer('❌ این کاربر در لیست دوستانت نیست.',show_alert=True); return
+            rank=ranking_position(session,'fox_points',f.fox_points or 0); left=friend_action_left(fs,owner)
+            text=(f"🦊 دوست روباهیو\n\n👤 {user_display_name(f)}\n" + (f"🪪 شناسه کاربری: @{f.username}" if f.username else f"🪪 آیدی عددی: {f.telegram_id}") + f"\n🌍 رتبه جهانی: #{rank}\n💰 روب‌پوینت: {int(f.fox_points or 0):,} 🪙\n\n" + (f"⏳ تعامل بعدی با این دوست: {format_duration(left)}" if left else '✅ می‌تونی با این دوست تعامل کنی.'))
+        finally: session.close()
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton('💰 ارسال روب‌پوینت',callback_data=f'friend:points:{owner}:{fid}')],[InlineKeyboardButton('💬 پیام',callback_data=f'friend:msg:{owner}:{fid}')],[InlineKeyboardButton('🔙 دوستان',callback_data=f'friend:home:{owner}')]])
+        await q.answer(); await q.message.edit_text(text,reply_markup=kb); return
+    if action in ('points','msg') and len(parts)==4:
+        fid=int(parts[3]); context.user_data['friend_action']={'owner':owner,'friend_id':fid,'type':action,'message_id':q.message.message_id}
+        await q.answer()
+        prompt='💰 مقدار روب‌پوینت را بفرست:' if action=='points' else '💬 پیام کوتاهت را بفرست:'
+        await q.message.edit_text(prompt+'\n\n🔙 برای لغو بنویس: لغو',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'friend:view:{owner}:{fid}')]]))
+
+async def handle_friend_text(update,context):
+    # افزودن دوست
+    owner=context.user_data.get('friend_add_owner')
+    if owner:
+        text=update.message.text.strip()
+        if text=='لغو':
+            context.user_data.pop('friend_add_owner',None); await friends_command(update,context); return True
+        context.user_data.pop('friend_add_owner',None)
+        if update.effective_user.id!=owner: return True
+        session=get_session()
+        try:
+            me=get_or_create_user(session,update.effective_user); friends=friend_list(session,owner)
+            if len(friends)>=FRIEND_LIMIT:
+                await update.message.reply_text('❌ ظرفیت دوستانت پر شده؛ حداکثر ۳ دوست.',**reply_kwargs(update.message)); return True
+            target_chat=await resolve_friend_target(context.bot,text)
+            if not target_chat or getattr(target_chat,'type',None)!='private':
+                await update.message.reply_text('❌ کاربر پیدا نشد. آیدی عددی یا @username معتبر بفرست.',**reply_kwargs(update.message)); return True
+            tid=target_chat.id
+            if tid==owner:
+                await update.message.reply_text('❌ نمی‌تونی خودت رو دوست اضافه کنی.',**reply_kwargs(update.message)); return True
+            target=get_or_create_user(session,target_chat)
+            if get_friendship(session,owner,tid):
+                await update.message.reply_text('ℹ️ این کاربر از قبل دوستته.',**reply_kwargs(update.message)); return True
+            if len(friend_list(session,tid))>=FRIEND_LIMIT:
+                await update.message.reply_text('❌ ظرفیت دوستان اون کاربر پره.',**reply_kwargs(update.message)); return True
+            pending=session.query(FriendRequest).filter(FriendRequest.sender_id==owner,FriendRequest.receiver_id==tid,FriendRequest.status=='pending').first()
+            if pending:
+                await update.message.reply_text('⏳ درخواست دوستی قبلاً ارسال شده.',**reply_kwargs(update.message)); return True
+            reverse=session.query(FriendRequest).filter(FriendRequest.sender_id==tid,FriendRequest.receiver_id==owner,FriendRequest.status=='pending').first()
+            if reverse:
+                await update.message.reply_text('📩 اون کاربر قبلاً برای تو درخواست فرستاده؛ اول همون رو قبول کن.',**reply_kwargs(update.message)); return True
+            req=FriendRequest(sender_id=owner,receiver_id=tid,status='pending',created_at=now_utc()); session.add(req); session.commit(); rid=req.id
+            sender_name=user_display_name(me)
+        finally: session.close()
+        await update.message.reply_text(f'📨 درخواست دوستی برای {user_display_name(target)} ارسال شد.',**reply_kwargs(update.message))
+        try:
+            await context.bot.send_message(tid,f'🦊 {sender_name} می‌خواد باهات دوست بشه!\n\nبا قبول درخواست، هر دوتون در لیست دوستان هم قرار می‌گیرید.',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('✅ قبول درخواست',callback_data=f'friendaccept:{rid}')],[InlineKeyboardButton('❌ رد درخواست',callback_data=f'friendreject:{rid}')]]))
+        except Exception: pass
+        return True
+    action=context.user_data.get('friend_action')
+    if not action: return False
+    text=update.message.text.strip()
+    if text=='لغو':
+        context.user_data.pop('friend_action',None); await friends_command(update,context); return True
+    context.user_data.pop('friend_action',None)
+    owner=action['owner']; fid=action['friend_id']
+    if update.effective_user.id!=owner: return True
+    session=get_session()
+    try:
+        fs=get_friendship(session,owner,fid)
+        target=session.get(User,fid); me=session.get(User,owner)
+        if not fs or not target:
+            await update.message.reply_text('❌ دوستی پیدا نشد.',**reply_kwargs(update.message)); return True
+        left=friend_action_left(fs,owner)
+        if left:
+            await update.message.reply_text(f'⏳ برای این دوست {format_duration(left)} دیگه صبر کن.',**reply_kwargs(update.message)); return True
+        if action['type']=='points':
+            amount=parse_amount(text)
+            if amount<=0 or (me.fox_points or 0)<amount: raise ValueError
+            me.fox_points-=amount; target.fox_points=(target.fox_points or 0)+amount
+            now=now_utc()
+            if fs.user1_id==owner: fs.last_action_user1_at=now
+            else: fs.last_action_user2_at=now
+            session.commit(); result=f'💰 {amount:,} روب‌پوینت به {user_display_name(target)} فرستادی.'
+        else:
+            if len(text)<1 or len(text)>500: raise ValueError
+            now=now_utc()
+            if fs.user1_id==owner: fs.last_action_user1_at=now
+            else: fs.last_action_user2_at=now
+            session.commit(); result=f'💬 پیامت برای {user_display_name(target)} ارسال شد.'
+            await context.bot.send_message(fid,f'💬 پیام از {user_display_name(me)}:\n\n{text}')
+    except ValueError:
+        await update.message.reply_text('❌ مقدار/متن نامعتبره.',**reply_kwargs(update.message)); return True
+    finally: session.close()
+    await update.message.reply_text(result,**reply_kwargs(update.message)); return True
+
+async def friend_decision_button(update,context):
+    q=update.callback_query; parts=q.data.split(':'); rid=int(parts[1]); accept=q.data.startswith('friendaccept:')
+    session=get_session()
+    try:
+        req=session.get(FriendRequest,rid)
+        if not req or req.status!='pending' or req.receiver_id!=q.from_user.id:
+            await q.answer('❌ این درخواست دیگر فعال نیست.',show_alert=True); return
+        sender= session.get(User,req.sender_id); receiver=session.get(User,req.receiver_id)
+        if len(friend_list(session,req.receiver_id))>=FRIEND_LIMIT:
+            await q.answer('❌ ظرفیت دوستانت پر شده.',show_alert=True); return
+        if accept:
+            if len(friend_list(session,req.sender_id))>=FRIEND_LIMIT:
+                await q.answer('❌ ظرفیت دوستان فرستنده پر شده.',show_alert=True); return
+            a,b=friendship_pair(req.sender_id,req.receiver_id)
+            session.add(Friendship(user1_id=a,user2_id=b,created_at=now_utc()))
+            req.status='accepted'; req.decided_at=now_utc(); session.commit(); sender_name=user_display_name(sender); receiver_name=user_display_name(receiver)
+        else:
+            req.status='rejected'; req.decided_at=now_utc(); session.commit(); sender_name=user_display_name(sender); receiver_name=user_display_name(receiver)
+    finally: session.close()
+    await q.answer('✅ درخواست قبول شد!' if accept else '❌ درخواست رد شد.')
+    try: await q.message.edit_text('✅ دوست شدین! حالا هر دو نفر در لیست دوستان همدیگه هستید.' if accept else '❌ درخواست دوستی رد شد.')
+    except Exception: pass
+    if accept:
+        try: await context.bot.send_message(req.sender_id,f'🎉 {receiver_name} درخواست دوستی‌ات رو قبول کرد؛ حالا هر دو در لیست دوستان هم هستید.')
+        except Exception: pass
+    else:
+        try: await context.bot.send_message(req.sender_id,f'ℹ️ {receiver_name} درخواست دوستی رو رد کرد.')
+        except Exception: pass
+
 # ---------- شهر روبی ----------
 
 CITY_BASE_REQ = {'points': 150, 'rescued': 5, 'hunts': 10, 'treasury': 100_000}
 CITY_REQ_GROWTH = 1.5       # ضریب رشد هدف روب‌روب/روباه‌زخمی/شکار در هر ارتقا
-CITY_TREASURY_GROWTH = 4    # دارایی مورد نیاز خزانه هر ارتقا ۴ برابر می‌شه
-CITY_MAX_LEVEL = 11         # سطح شروع ۱؛ با ۱۰ بار ارتقا به ۱۱ می‌رسه
+CITY_TREASURY_GROWTH = 3    # دارایی خزانه در هر سطح ۳ برابر می‌شود
+CITY_MAX_LEVEL = 10         # آخرین سطح شهر ۱۰ است
 CITY_CLAIM_COOLDOWN_BONUS = 10  # ثانیه؛ باف «روب روب سریع‌تر»
 CITY_DONATE_REWARD = 200    # پاداش هر دونیت‌کننده هنگام ارتقای شهر
 
@@ -6039,8 +6307,12 @@ def bump_city_stat(session, chat_id, chat_title=None, **deltas):
         setattr(row, field, (getattr(row, field) or 0) + delta)
     return row
 
-def city_keyboard(chat_id):
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🏦 دونیت به خزانه شهر", callback_data=f"citydonate:{chat_id}")]])
+def city_keyboard(chat_id, level=1):
+    rows=[]
+    if int(level or 1) < CITY_MAX_LEVEL:
+        rows.append([InlineKeyboardButton("🏦 دونیت به خزانه شهر", callback_data=f"citydonate:{chat_id}")])
+    rows.append([InlineKeyboardButton("🥇 برترین دونیت های شهر", callback_data=f"citytop:{chat_id}")])
+    return InlineKeyboardMarkup(rows)
 
 def city_mayor_display_label(row):
     if row.city_mayor_id and row.city_mayor_name:
@@ -6115,7 +6387,7 @@ async def city_command(update, context):
         text = city_panel_text(session, row)
     finally:
         session.close()
-    await update.message.reply_text(text, reply_markup=city_keyboard(chat.id), **reply_kwargs(update.message))
+    await update.message.reply_text(text, reply_markup=city_keyboard(chat.id,row.city_level), **reply_kwargs(update.message))
 
 async def city_donate_button(update, context):
     q = update.callback_query
@@ -6126,8 +6398,64 @@ async def city_donate_button(update, context):
         return
     if not await require_membership(update, context): return
     context.user_data['city_donate_chat_id'] = chat_id
+    context.user_data['city_donate_message_id'] = q.message.message_id
+    session=get_session()
+    try:
+        row=session.get(GroupChat, chat_id)
+        if not row:
+            await q.answer("❌ شهر پیدا نشد.", show_alert=True); return
+        if (row.city_level or 1) >= CITY_MAX_LEVEL:
+            await q.answer("🏆 شهر به آخرین سطح رسیده و دیگر دونیت لازم نیست.", show_alert=True); return
+        text=city_panel_text(session,row)+"\n\n🏦 مبلغ دونیت را همینجا در پاسخ به این پنل بفرست.\nمثال: 5000 / 5k / 5کا"
+    finally: session.close()
     await q.answer()
-    await q.message.reply_text("🏦 مبلغی که می‌خوای به خزانه‌ی شهر دونیت کنی رو بفرست.\nمثال: 5000 / 5k / 5کا")
+    try: await q.message.edit_text(text, reply_markup=city_keyboard(chat_id,row.city_level))
+    except Exception: pass
+
+async def city_top_donors_button(update, context):
+    q=update.callback_query
+    try: chat_id=int(q.data.split(":")[1])
+    except Exception: return
+    if not await require_membership(update, context): return
+    session=get_session()
+    try:
+        row=session.get(GroupChat,chat_id)
+        if not row:
+            await q.answer("❌ شهر پیدا نشد.",show_alert=True); return
+        rows=(session.query(CityDonation.user_id, CityDonation.amount)
+              .filter(CityDonation.chat_id==chat_id)
+              .all())
+        totals={}
+        for uid,amount in rows: totals[int(uid)]=totals.get(int(uid),0)+int(amount or 0)
+        ordered=sorted(totals.items(), key=lambda x:(-x[1],x[0]))[:20]
+        lines=[f"🥇 برترین دونیت های شهر «{row.title or 'گپ'}»\n"]
+        if not ordered:
+            lines.append("هنوز کسی به خزانه دونیت نکرده.")
+        else:
+            for i,(uid,total) in enumerate(ordered,1):
+                u=session.get(User,uid)
+                name=user_display_name(u) if u else str(uid)
+                lines.append(f"{i}. {name} — 🪙 {total:,} روب‌پوینت")
+                lines.append("")
+        text='\n'.join(lines)
+    finally: session.close()
+    await q.answer()
+    try: await q.message.edit_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به شهر",callback_data=f"cityback:{chat_id}")]]))
+    except Exception: pass
+
+async def city_back_button(update, context):
+    q=update.callback_query
+    try: chat_id=int(q.data.split(":")[1])
+    except Exception: return
+    session=get_session()
+    try:
+        row=session.get(GroupChat,chat_id)
+        if not row: return
+        text=city_panel_text(session,row)
+    finally: session.close()
+    await q.answer()
+    try: await q.message.edit_text(text,reply_markup=city_keyboard(chat_id,row.city_level))
+    except Exception: pass
 
 async def handle_city_donate_text(update, context):
     chat_id = context.user_data.get('city_donate_chat_id')
@@ -6154,12 +6482,23 @@ async def handle_city_donate_text(update, context):
         donors = set(x for x in (row.city_donors or '').split(',') if x)
         donors.add(str(user.telegram_id))
         row.city_donors = ','.join(donors)
+        session.add(CityDonation(chat_id=chat_id,user_id=user.telegram_id,amount=amount,created_at=now_utc()))
         session.commit()
         chat_title = row.title
     finally:
         session.close()
-    await update.message.reply_text(f"🏦 {amount:,} روب‌پوینت به خزانه‌ی شهر «{chat_title}» دونیت کردی! 🙏", **reply_kwargs(update.message))
     await maybe_level_up_city(context, chat_id)
+    session=get_session()
+    try:
+        row=session.get(GroupChat,chat_id)
+        panel_text=city_panel_text(session,row) if row else f"🏦 دونیت {amount:,} روب‌پوینت انجام شد!"
+    finally: session.close()
+    panel_message_id=context.user_data.pop('city_donate_message_id',None)
+    if panel_message_id:
+        try:
+            await context.bot.edit_message_text(chat_id=update.effective_chat.id,message_id=panel_message_id,text=panel_text,reply_markup=city_keyboard(chat_id,row.city_level))
+        except Exception:
+            pass
     return True
 
 async def maybe_level_up_city(context, chat_id):
@@ -6540,6 +6879,7 @@ CITY_LEADERBOARD_CATEGORIES = [
 CITY_LEADERBOARD_MAP = dict(CITY_LEADERBOARD_CATEGORIES)
 
 LEADERBOARD_CATEGORIES = [
+    ('referral_count', '👑 لیدر برد رفرال ها'),
     ('fox_points', '💰 روب پوینت 🦊'),
     ('fox_rescued_count', '🎃 روباه های زخمی'),
     ('hunt_count', '⚔️ شکار'),
@@ -6601,8 +6941,15 @@ def build_city_leaderboard_text(session, field, title, page=1):
 
 
 def build_leaderboard_text(session, field, title, page=1):
-    users = session.query(User).order_by(getattr(User, field).desc(), User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
-    entries = [f'{i}. {user_display_name(u)} — {int(getattr(u, field) or 0):,}' for i, u in enumerate(users, 1)]
+    if field == 'referral_count':
+        counts = dict(session.query(Referral.referrer_id, __import__('sqlalchemy').func.count(Referral.id)).filter(Referral.status=='approved').group_by(Referral.referrer_id).all())
+        users = session.query(User).filter(User.telegram_id.in_(list(counts.keys()) or [0])).all()
+        users.sort(key=lambda u:(-counts.get(u.telegram_id,0),u.telegram_id))
+        users=users[:LEADERBOARD_LIMIT]
+        entries=[f'{i}. {user_display_name(u)} — {counts.get(u.telegram_id,0):,} رفرال' for i,u in enumerate(users,1)]
+    else:
+        users = session.query(User).order_by(getattr(User, field).desc(), User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
+        entries = [f'{i}. {user_display_name(u)} — {int(getattr(u, field) or 0):,}' for i, u in enumerate(users, 1)]
     return _render_leaderboard_page(title, entries, page)
 
 
@@ -6686,6 +7033,7 @@ async def leaderboard_button(update, context):
 async def text_router(update, context):
     if not update.message or not update.message.text: return
     if await handle_jail_memory_text(update, context): return
+    if await handle_friend_text(update, context): return
     if await handle_gift_text(update, context): return
     if await handle_points_text(update, context): return
     if await handle_bank_text(update, context): return
@@ -6697,6 +7045,7 @@ async def text_router(update, context):
         await collect_fox_points(update,context); return
     if text in {"روبام","روبام!","روباش","روباش!"}: await roobam_command(update,context); return
     if text in {"گردونه", "چرخ شانس", "🎡 گردونه", "🎡 چرخ شانس"}: await wheel_command(update,context); return
+    if text in {"دوست روبی","فرند روب","دوست روباهیو","فرند روبی","friends"}: await friends_command(update,context); return
     if text in {"لیدر برد","لیدربرد","leaderboard","Leaderboard"}: await leaderboard_command(update,context); return
     if text in {"شهر روبی","شهر روباهیو","شهر روباه","🦊 شهر روبی"}: await city_command(update,context); return
     if text in {"شهردار روبی","شهردار","🦁 شهردار روبی"}: await city_mayor_command(update,context); return
@@ -6741,7 +7090,7 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?|رفرال|زیرمجموعه(?:\s+گیری)?)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?|رفرال|زیرمجموعه(?:\s+گیری)?)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
@@ -6755,6 +7104,7 @@ async def persian_slash_router(update, context):
         elif cmd=="شکار": await hunt_command(update,context)
         elif cmd=="یخچال": await fridge_command(update,context)
         elif cmd in {"روبام","روباش"}: await roobam_command(update,context)
+        elif cmd in {"دوست روبی","دوست","فرند روب"}: await friends_command(update,context)
         elif cmd in {"شهردار روبی","شهردار"}: await city_mayor_command(update,context)
         elif cmd in {"شهر روبی","شهر"}: await city_command(update,context)
         else: await leaderboard_command(update,context)
@@ -6819,15 +7169,19 @@ def main():
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|rest):\d+$"))
     app.add_handler(CallbackQueryHandler(jail_button,pattern=r"^jail:(memory|pay):\d+$"))
     app.add_handler(CallbackQueryHandler(smuggling_button,pattern=r"^smuggle:(plus|minus|all|confirm):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(friend_decision_button,pattern=r"^friend(?:accept|reject):\d+$"))
+    app.add_handler(CallbackQueryHandler(friend_request_button,pattern=r"^friend:(?:home|add|view|points|msg):\d+(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(leaderboard_button,pattern=r"^lb:"))
     app.add_handler(CallbackQueryHandler(city_donate_button,pattern=r"^citydonate:-?\d+$"))
+    app.add_handler(CallbackQueryHandler(city_top_donors_button,pattern=r"^citytop:-?\d+$"))
+    app.add_handler(CallbackQueryHandler(city_back_button,pattern=r"^cityback:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_mayor_candidate_button,pattern=r"^citymayor:cand:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_mayor_vote_button,pattern=r"^citymayor:vote:-?\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(admin_football_callback,pattern=r"^admin:(football(:.*)?|back)$"))
     app.add_handler(CallbackQueryHandler(football_predict_match_button,pattern=r"^fbpred:match:\d+$"))
     app.add_handler(CallbackQueryHandler(football_predict_pick_button,pattern=r"^fbpred:pick:\d+:(home|draw|away)$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
-    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
