@@ -186,6 +186,7 @@ class GiftCode(Base):
     created_by = Column(BigInteger, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     active = Column(Integer, nullable=False, default=1)
+    expires_at = Column(DateTime(timezone=True), nullable=True)   # None = بدون محدودیت زمانی
 
 class GiftCodeRedemption(Base):
     __tablename__ = 'gift_code_redemptions'
@@ -452,6 +453,10 @@ def init_db():
             for name, definition in hunt_additions.items():
                 if name not in hunt_cols:
                     conn.execute(text(f'ALTER TABLE fox_hunts ADD COLUMN {name} {definition}'))
+        if 'gift_codes' in inspector.get_table_names():
+            gcode_cols = {c['name'] for c in inspector.get_columns('gift_codes')}
+            if 'expires_at' not in gcode_cols:
+                conn.execute(text(f'ALTER TABLE gift_codes ADD COLUMN expires_at {DT_SQL_TYPE}'))
         if 'gift_orders' in inspector.get_table_names():
             gift_cols = {c['name'] for c in inspector.get_columns('gift_orders')}
             gift_additions = {
