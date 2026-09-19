@@ -176,6 +176,24 @@ class Friendship(Base):
     last_action_user2_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+class GiftCode(Base):
+    __tablename__ = 'gift_codes'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String, nullable=False, unique=True, index=True)
+    reward = Column(Integer, nullable=False, default=0)
+    max_uses = Column(Integer, nullable=False, default=1)
+    used_count = Column(Integer, nullable=False, default=0)
+    created_by = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    active = Column(Integer, nullable=False, default=1)
+
+class GiftCodeRedemption(Base):
+    __tablename__ = 'gift_code_redemptions'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code_id = Column(Integer, ForeignKey('gift_codes.id'), nullable=False)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    redeemed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class CityDonation(Base):
     __tablename__ = 'city_donations'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -362,6 +380,8 @@ class Referral(Base):
 
 def init_db():
     Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_gift_code_user ON gift_code_redemptions(code_id, user_id)"))
     inspector = inspect(engine)
     cols = {c['name'] for c in inspector.get_columns('users')}
     injured_cols = {c['name'] for c in inspector.get_columns('injured_foxes')}

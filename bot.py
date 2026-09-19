@@ -21,7 +21,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, GiftCode, GiftCodeRedemption, get_session, init_db
 )
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
@@ -1211,6 +1211,13 @@ def ruby_cooldown_remaining(user):
     remaining = RUBY_COOLDOWN_SECONDS - (now_utc()-last).total_seconds()
     return max(0, int(remaining))
 
+def profile_buttons(ids, names_by_id=None):
+    names_by_id = names_by_id or {}
+    rows=[]
+    for uid in ids:
+        rows.append([InlineKeyboardButton(f"👤 {names_by_id.get(uid, str(uid))}", url=f"tg://user?id={uid}")])
+    return rows
+
 def ruby_table_keyboard(table_id):
     return InlineKeyboardMarkup([[InlineKeyboardButton("🎮 شرکت کردن در بازی",callback_data=f"rjoin:{table_id}")]])
 
@@ -1237,7 +1244,7 @@ def render_rps_panel(tid,name,pot_line,ids,names_by_id,state,extra=""):
           f"{extra_block}"
           f"🔁 راند {state.get('round',1)} از {RPS_TOTAL_ROUNDS}\n\n"+"\n".join(lines)+wait_line+
           f"\n\n⏱ هر بازیکن {RPS_ROUND_TIMEOUT_SECONDS} ثانیه وقت داره انتخاب کنه؛ اگه ننداخت بازنده‌ی راند می‌شه.")
-    return text,rps_keyboard(tid)
+    kb=rps_keyboard(tid); kb.inline_keyboard.extend(profile_buttons(ids,names_by_id)); return text,kb
 
 def xo_keyboard(tid,board):
     rows=[]
@@ -1255,7 +1262,7 @@ def render_xo_panel(tid,name,pot_line,ids,names_by_id,state):
     lines=[f"{state['symbols'].get(str(uid),'?')} — {names_by_id.get(uid,str(uid))}" for uid in ids]
     text=(f"🕹 {name}\n\n🎮 بازی در جریانه!{pot_line}\n\n"+"\n".join(lines)+
           f"\n\n▶️ نوبت: {names_by_id.get(turn_id,str(turn_id))} ({turn_symbol})\n⏱ زمان باقی‌مانده نوبت: {ruby_turn_remaining(state)} ثانیه")
-    return text,xo_keyboard(tid,state['board'])
+    kb=xo_keyboard(tid,state['board']); kb.inline_keyboard.extend(profile_buttons(ids,names_by_id)); return text,kb
 
 def ruby_turn_remaining(state):
     raw=state.get('turn_started_at')
@@ -1328,7 +1335,7 @@ def render_rabbit_panel(tid,name,pot_line,ids,names_by_id,state):
             "روی خونه‌ها بزن تا خرگوش پیدا کنی؛ هرکی پنجه🐾 رو پیدا کنه می‌بازه!\n\n"
             f"▶️ نوبت: {names_by_id.get(turn_id,str(turn_id))}\n⏱ زمان باقی‌مانده نوبت: {ruby_turn_remaining(state)} ثانیه"
         )
-    return text, rabbit_keyboard(tid, state)
+    kb=rabbit_keyboard(tid,state); kb.inline_keyboard.extend(profile_buttons(ids,names_by_id)); return text,kb
 
 
 # ---------- بازی دوتایی‌ها 🃏 ----------
@@ -1381,7 +1388,7 @@ def render_pairs_panel(tid, name, pot_line, ids, names_by_id, state, extra=""):
         f"⏱ زمان باقی‌مانده نوبت: {remaining} ثانیه"
         + (f"\n\n{extra}" if extra else "")
     )
-    return text,pairs_keyboard(tid,state)
+    kb=pairs_keyboard(tid,state); kb.inline_keyboard.extend(profile_buttons(ids,names_by_id)); return text,kb
 
 async def _pairs_refresh(context, tid, token):
     session=get_session()
@@ -1681,9 +1688,16 @@ async def ruby_setup_back(update,context):
     except Exception: return
     if q.from_user.id!=owner:
         await q.answer('⛔ این پنل برای کاربر دیگری است.',show_alert=True); return
-    context.user_data.pop('ruby_setup',None)
+    setup=context.user_data.pop('ruby_setup',{})
+    key=setup.get('key','')
     await q.answer()
-    try: await q.message.edit_text('🕹 انتخاب بازی روبی لغو شد.',reply_markup=None)
+    if key.startswith('cz_'):
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton('🎰 گردونه شانس',callback_data=f'rg:cz_wheel:{owner}')],[InlineKeyboardButton('🎲 تاس',callback_data=f'rg:cz_dice:{owner}')],[InlineKeyboardButton('🐇 خرگوش خور',callback_data=f'rg:cz_rabbit:{owner}')],[InlineKeyboardButton('🃏 بازی دوتایی‌ها',callback_data=f'rg:cz_pairs:{owner}')]])
+        text='🃏 کازینو روبی🦊\n\n❗️ قمار مورد نظر را انتخاب کن:'
+    else:
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton('🧩 بازی روبی دوز XO',callback_data=f'rg:xo:{owner}')],[InlineKeyboardButton('🔫 بازی روبی سنگ کاغذ قیچی',callback_data=f'rg:rps:{owner}')],[InlineKeyboardButton('🎯 بازی روبی دارت',callback_data=f'rg:darts:{owner}')],[InlineKeyboardButton('🏀 بازی روبی بسکتبال',callback_data=f'rg:basketball:{owner}')],[InlineKeyboardButton('🎳 بازی روبی بولینگ',callback_data=f'rg:bowling:{owner}')]])
+        text='🕹 بازی‌های روبی🦊\n\n❗️ بازی مورد نظر را انتخاب کن:'
+    try: await q.message.edit_text(text,reply_markup=kb)
     except Exception: pass
 
 async def handle_ruby_entry_text(update,context):
@@ -4275,6 +4289,7 @@ def apply_bank_interest(account, session):
 
 def bank_keyboard(account):
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton('👤 مشاهده حساب تلگرام',url=f'tg://user?id={account.user_id}')],
         [InlineKeyboardButton('➖ برداشت',callback_data=f'bank:withdraw:{account.user_id}'), InlineKeyboardButton('➕ واریز',callback_data=f'bank:deposit:{account.user_id}')],
         [InlineKeyboardButton('💳 کارت به کارت روبی🦊',callback_data=f'bank:transfer:{account.user_id}'), InlineKeyboardButton('📃 تراکنش‌ها',callback_data=f'bank:transactions:{account.user_id}')],
         [InlineKeyboardButton('➿ تغییر حساب روبی',callback_data=f'bank:change:{account.user_id}')],
@@ -5535,6 +5550,7 @@ def admin_main_keyboard():
         [InlineKeyboardButton("📣 پیام همگانی", callback_data="admin:broadcast")],
         [InlineKeyboardButton("🦊 افزودن/کسر روب‌پوینت", callback_data="admin:addpoints")],
         [InlineKeyboardButton("🎁 هدیه روب‌پوینت به همه", callback_data="admin:giftall")],
+        [InlineKeyboardButton("🎟 ساخت کد هدیه", callback_data="admin:giftcode")],
         [InlineKeyboardButton("⭐ تنظیم سطح", callback_data="admin:setlevel")],
         [InlineKeyboardButton("🦊 تنظیم روب‌پوینت", callback_data="admin:setfoxpoints")],
         [InlineKeyboardButton("⚽ پیش‌بینی فوتبال", callback_data="admin:football")],
@@ -5581,6 +5597,9 @@ async def admin_callback(update, context):
     elif action == "giftall":
         context.user_data["admin_action"]="giftall"
         await q.message.reply_text("🎁 چند روب‌پوینت به همه‌ی کاربرا هدیه داده بشه؟\nفقط عدد بفرست (مثلاً 500). برای کسر از همه، عدد منفی بفرست.")
+    elif action == "giftcode":
+        context.user_data["admin_action"]="giftcode"
+        await q.message.reply_text("🎟 ساخت کد هدیه\n\nفرمت: کد | جایزه روب‌پوینت | حداکثر تعداد استفاده\nمثال: FOX100 | 100 | 50\nهر حساب فقط یک‌بار می‌تواند هر کد را استفاده کند.")
     elif action == "setlevel": context.user_data["admin_action"]="setlevel"; await q.message.reply_text("⭐ فرمت: آیدی عددی کاربر + سطح")
     elif action == "setfoxpoints": context.user_data["admin_action"]="setfoxpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی کاربر + مقدار روب‌پوینت")
     elif action == "banmenu":
@@ -5649,6 +5668,27 @@ async def admin_text(update, context):
             gift_text = f"📢 اطلاعیه پشتیبانی\n\n🦊 {abs(amount):,} روب‌پوینت از حساب همه‌ی کاربرا کسر شد."
         ok, fail = await broadcast_to_users(context.bot, user_ids, gift_text)
         await update.message.reply_text(f"✅ روب‌پوینت {count} کاربر آپدیت شد.\n📨 اطلاع‌رسانی موفق: {ok}\n❌ ناموفق (بلاک/حذف حساب): {fail}", **reply_kwargs(update.message)); return
+    if action == "giftcode":
+        parts=[x.strip() for x in text.split('|')]
+        if len(parts)!=3:
+            await update.message.reply_text("❌ فرمت اشتباهه. نمونه: FOX100 | 100 | 50", **reply_kwargs(update.message)); return
+        code=parts[0].upper()
+        if not re.fullmatch(r"[A-Z0-9_-]{3,50}", code):
+            await update.message.reply_text("❌ کد فقط از حروف انگلیسی، عدد، _ یا - و بین ۳ تا ۵۰ کاراکتر باشد.", **reply_kwargs(update.message)); return
+        try:
+            reward=int(parts[1].replace(',','').replace('،','').strip()); max_uses=int(parts[2].replace(',','').replace('،','').strip())
+        except Exception:
+            await update.message.reply_text("❌ جایزه و تعداد استفاده باید عدد باشند.", **reply_kwargs(update.message)); return
+        if reward<=0 or max_uses<=0:
+            await update.message.reply_text("❌ جایزه و تعداد استفاده باید بیشتر از صفر باشند.", **reply_kwargs(update.message)); return
+        session=get_session()
+        try:
+            if session.query(GiftCode).filter(GiftCode.code==code).first():
+                await update.message.reply_text("❌ این کد قبلاً ساخته شده.", **reply_kwargs(update.message)); return
+            gc=GiftCode(code=code,reward=reward,max_uses=max_uses,used_count=0,created_by=update.effective_user.id,active=1,created_at=now_utc())
+            session.add(gc); session.commit()
+        finally: session.close()
+        await update.message.reply_text(f"✅ کد هدیه ساخته شد!\n\n🎟 کد: {code}\n🎁 جایزه: {reward:,} روب‌پوینت\n👥 ظرفیت: {max_uses:,} نفر\n🔒 هر حساب فقط یک‌بار", **reply_kwargs(update.message)); return
     if action == "football_add_match":
         await football_add_match_text(update, context); return
     if action.startswith("ban:"):
@@ -6097,8 +6137,17 @@ def friends_panel_text(session, user):
 async def resolve_friend_target(bot, raw):
     raw=raw.strip().lstrip('@')
     if raw.isdigit():
-        try: return await bot.get_chat(int(raw))
-        except Exception: return None
+        session=get_session()
+        try:
+            return session.get(User, int(raw))
+        finally: session.close()
+    username=raw.lower()
+    session=get_session()
+    try:
+        target=session.query(User).filter(__import__('sqlalchemy').func.lower(User.username)==username).first()
+        if target: return target
+    finally: session.close()
+    # fallback برای حساب‌هایی که در دیتابیس نیستند ولی تلگرام آنها را قابل resolve می‌کند.
     try: return await bot.get_chat('@'+raw)
     except Exception: return None
 
@@ -6138,8 +6187,23 @@ async def friend_request_button(update,context):
             rank=ranking_position(session,'fox_points',f.fox_points or 0); left=friend_action_left(fs,owner)
             text=(f"🦊 دوست روباهیو\n\n👤 {user_display_name(f)}\n" + (f"🪪 شناسه کاربری: @{f.username}" if f.username else f"🪪 آیدی عددی: {f.telegram_id}") + f"\n🌍 رتبه جهانی: #{rank}\n💰 روب‌پوینت: {int(f.fox_points or 0):,} 🪙\n\n" + (f"⏳ تعامل بعدی با این دوست: {format_duration(left)}" if left else '✅ می‌تونی با این دوست تعامل کنی.'))
         finally: session.close()
-        kb=InlineKeyboardMarkup([[InlineKeyboardButton('💰 ارسال روب‌پوینت',callback_data=f'friend:points:{owner}:{fid}')],[InlineKeyboardButton('💬 پیام',callback_data=f'friend:msg:{owner}:{fid}')],[InlineKeyboardButton('🔙 دوستان',callback_data=f'friend:home:{owner}')]])
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton('💰 ارسال روب‌پوینت',callback_data=f'friend:points:{owner}:{fid}')],[InlineKeyboardButton('💬 پیام',callback_data=f'friend:msg:{owner}:{fid}')],[InlineKeyboardButton('🗑 حذف از دوستان',callback_data=f'friend:remove:{owner}:{fid}')],[InlineKeyboardButton('🔙 دوستان',callback_data=f'friend:home:{owner}')]])
         await q.answer(); await q.message.edit_text(text,reply_markup=kb); return
+    if action=='remove' and len(parts)==4:
+        fid=int(parts[3]); session=get_session()
+        try:
+            fs=get_friendship(session,owner,fid)
+            if not fs:
+                await q.answer('❌ این کاربر در لیست دوستانت نیست.',show_alert=True); return
+            session.delete(fs); session.commit()
+        finally: session.close()
+        await q.answer('🗑 دوست حذف شد.')
+        # رندر مجدد پنل با session تازه
+        session=get_session()
+        try:
+            u=session.get(User,owner); text,friends=friends_panel_text(session,u)
+        finally: session.close()
+        await q.message.edit_text(text,reply_markup=friends_keyboard(owner,friends)); return
     if action in ('points','msg') and len(parts)==4:
         fid=int(parts[3]); context.user_data['friend_action']={'owner':owner,'friend_id':fid,'type':action,'message_id':q.message.message_id}
         await q.answer()
@@ -6161,9 +6225,14 @@ async def handle_friend_text(update,context):
             if len(friends)>=FRIEND_LIMIT:
                 await update.message.reply_text('❌ ظرفیت دوستانت پر شده؛ حداکثر ۳ دوست.',**reply_kwargs(update.message)); return True
             target_chat=await resolve_friend_target(context.bot,text)
-            if not target_chat or getattr(target_chat,'type',None)!='private':
-                await update.message.reply_text('❌ کاربر پیدا نشد. آیدی عددی یا @username معتبر بفرست.',**reply_kwargs(update.message)); return True
-            tid=target_chat.id
+            if not target_chat:
+                await update.message.reply_text('❌ کاربر پیدا نشد. اول مطمئن شو کاربر ربات را استارت کرده و آیدی عددی یا @username درست است.',**reply_kwargs(update.message)); return True
+            if isinstance(target_chat, User):
+                tid=target_chat.telegram_id
+            else:
+                if getattr(target_chat,'type',None)!='private':
+                    await update.message.reply_text('❌ این شناسه مربوط به یک کاربر خصوصی نیست.',**reply_kwargs(update.message)); return True
+                tid=target_chat.id
             if tid==owner:
                 await update.message.reply_text('❌ نمی‌تونی خودت رو دوست اضافه کنی.',**reply_kwargs(update.message)); return True
             target=get_or_create_user(session,target_chat)
@@ -6253,8 +6322,10 @@ async def friend_decision_button(update,context):
 
 # ---------- شهر روبی ----------
 
-CITY_BASE_REQ = {'points': 150, 'rescued': 5, 'hunts': 10, 'treasury': 100_000}
-CITY_REQ_GROWTH = 1.5       # ضریب رشد هدف روب‌روب/روباه‌زخمی/شکار در هر ارتقا
+CITY_BASE_REQ = {'points': 150, 'rescued': 5, 'hunts': 10, 'treasury': 100}
+CITY_REQ_GROWTH = 1.5     # روب‌روب؛ مثل قبل
+CITY_RESCUED_GROWTH = 2   # روباه زخمی در هر ارتقا ۲ برابر
+CITY_HUNT_GROWTH = 2      # شکار در هر ارتقا ۲ برابر
 CITY_TREASURY_GROWTH = 3    # دارایی خزانه در هر سطح ۳ برابر می‌شود
 CITY_MAX_LEVEL = 10         # آخرین سطح شهر ۱۰ است
 CITY_CLAIM_COOLDOWN_BONUS = 10  # ثانیه؛ باف «روب روب سریع‌تر»
@@ -6269,13 +6340,13 @@ CITY_MAYOR_CANDIDACY_WINDOW_SECONDS = 24 * 3600  # مهلت ثبت‌نام کا
 CITY_MAYOR_VOTING_SECONDS = 5 * 3600           # رای‌گیری حداکثر 5 ساعت طول می‌کشه
 
 def city_requirements(level):
-    """هدف لازم برای رفتن از `level` فعلی به سطح بعدی."""
-    idx = max(0, (level or 1) - 1)
-    mult = CITY_REQ_GROWTH ** idx
+    """نیازمندی رفتن از سطح فعلی به سطح بعدی؛ شهر حداکثر سطح ۱۰ دارد."""
+    level = max(1, int(level or 1))
+    idx = level - 1
     return {
-        'points': int(round(CITY_BASE_REQ['points'] * mult)),
-        'rescued': int(round(CITY_BASE_REQ['rescued'] * mult)),
-        'hunts': int(round(CITY_BASE_REQ['hunts'] * mult)),
+        'points': int(round(CITY_BASE_REQ['points'] * (CITY_REQ_GROWTH ** idx))),
+        'rescued': int(round(CITY_BASE_REQ['rescued'] * (CITY_RESCUED_GROWTH ** idx))),
+        'hunts': int(round(CITY_BASE_REQ['hunts'] * (CITY_HUNT_GROWTH ** idx))),
         'treasury': int(CITY_BASE_REQ['treasury'] * (CITY_TREASURY_GROWTH ** idx)),
     }
 
@@ -6438,9 +6509,12 @@ async def city_top_donors_button(update, context):
                 lines.append(f"{i}. {name} — 🪙 {total:,} روب‌پوینت")
                 lines.append("")
         text='\n'.join(lines)
+        donor_names={uid:user_display_name(session.get(User,uid)) if session.get(User,uid) else str(uid) for uid,_ in ordered}
     finally: session.close()
+    kb_rows=profile_buttons([uid for uid,_ in ordered], donor_names)
+    kb_rows.append([InlineKeyboardButton("🔙 بازگشت به شهر",callback_data=f"cityback:{chat_id}")])
     await q.answer()
-    try: await q.message.edit_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به شهر",callback_data=f"cityback:{chat_id}")]]))
+    try: await q.message.edit_text(text,reply_markup=InlineKeyboardMarkup(kb_rows))
     except Exception: pass
 
 async def city_back_button(update, context):
@@ -6953,6 +7027,16 @@ def build_leaderboard_text(session, field, title, page=1):
     return _render_leaderboard_page(title, entries, page)
 
 
+def leaderboard_profile_ids(session, field, page):
+    if field == 'referral_count':
+        counts=dict(session.query(Referral.referrer_id,__import__('sqlalchemy').func.count(Referral.id)).filter(Referral.status=='approved').group_by(Referral.referrer_id).all())
+        users=session.query(User).filter(User.telegram_id.in_(list(counts.keys()) or [0])).all()
+        users.sort(key=lambda u:(-counts.get(u.telegram_id,0),u.telegram_id))
+    else:
+        users=session.query(User).order_by(getattr(User,field).desc(),User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
+    start=(page-1)*LEADERBOARD_PAGE_SIZE
+    return users[start:start+LEADERBOARD_PAGE_SIZE]
+
 def leaderboard_page_keyboard(kind, field, page, total_pages, back_data):
     nav = []
     if page > 1:
@@ -7023,17 +7107,73 @@ async def leaderboard_button(update, context):
         session = get_session()
         try:
             text, page, total_pages = build_leaderboard_text(session, field, LEADERBOARD_CATEGORY_MAP[field], page)
+            profile_users = leaderboard_profile_ids(session, field, page)
         finally:
             session.close()
         kb = leaderboard_page_keyboard("cat", field, page, total_pages, "lb:global")
+        for u in profile_users:
+            kb.inline_keyboard.insert(-1, [InlineKeyboardButton(f"👤 {user_display_name(u)}", url=f"tg://user?id={u.telegram_id}")])
         try: await q.message.edit_text(text, reply_markup=kb)
         except Exception: pass
         return
+
+GIFT_CODE_PANEL_TEXT = ("🎁 کد هدیه\n\n❗ اگر کد جایزه یا هدیه دارید، دکمه زیر را بزنید و کد را با ریپلای روی پنل بفرستید.\n"
+                       "└─ هر کد فقط یک‌بار برای هر حساب قابل استفاده است.\n"
+                       "└─ برای انصراف دکمه زیر را بزنید")
+
+async def gift_code_command(update, context):
+    if not await require_membership(update, context): return
+    context.user_data.pop('gift_code_flow',None)
+    await update.message.reply_text(GIFT_CODE_PANEL_TEXT, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🎟 ورود کد',callback_data='giftcode:enter')],[InlineKeyboardButton('❌ انصراف',callback_data='giftcode:cancel')]]), **reply_kwargs(update.message))
+
+async def gift_code_button(update, context):
+    q=update.callback_query
+    if q.from_user.id != getattr(q.message,'from_user',q.from_user).id and False: return
+    action=q.data.split(':')[1]
+    await q.answer()
+    if action=='cancel':
+        context.user_data.pop('gift_code_flow',None)
+        await q.message.edit_text('❌ ورود کد هدیه لغو شد.')
+        return
+    context.user_data['gift_code_flow']={'panel_chat_id':q.message.chat_id,'panel_message_id':q.message.message_id,'user_id':q.from_user.id}
+    await q.message.edit_text("🎁 ورود کد\n\n❗ کد را روی همین پنل ریپلای کنید.\n└─ فقط ریپلای خود شما روی همین پنل حساب می‌شود؛\n└─ برای انصراف دکمه زیر را بزنید.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('❌ انصراف',callback_data='giftcode:cancel')]]))
+
+async def handle_gift_code_text(update, context):
+    flow=context.user_data.get('gift_code_flow')
+    if not flow or not update.message or not update.message.text: return False
+    if update.effective_user.id != flow.get('user_id'): return False
+    reply=update.message.reply_to_message
+    if not reply or reply.message_id != flow.get('panel_message_id') or reply.chat_id != flow.get('panel_chat_id'):
+        return False
+    code=update.message.text.strip().upper()
+    session=get_session()
+    try:
+        user=get_or_create_user(session,update.effective_user)
+        gc=session.query(GiftCode).filter(GiftCode.code==code,GiftCode.active==1).first()
+        if not gc:
+            await update.message.reply_text('❌ این کد هدیه معتبر نیست یا غیرفعال شده.',**reply_kwargs(update.message)); return True
+        used=session.query(GiftCodeRedemption).filter(GiftCodeRedemption.code_id==gc.id,GiftCodeRedemption.user_id==user.telegram_id).first()
+        if used:
+            await update.message.reply_text('❌ این کد را قبلاً برای همین حساب استفاده کرده‌ای.',**reply_kwargs(update.message)); return True
+        if gc.used_count >= gc.max_uses:
+            gc.active=0; session.commit()
+            await update.message.reply_text('❌ ظرفیت استفاده از این کد تمام شده.',**reply_kwargs(update.message)); return True
+        user.fox_points=(user.fox_points or 0)+gc.reward
+        gc.used_count += 1
+        if gc.used_count >= gc.max_uses: gc.active=0
+        session.add(GiftCodeRedemption(code_id=gc.id,user_id=user.telegram_id,redeemed_at=now_utc()))
+        session.commit()
+        remaining=max(0,gc.max_uses-gc.used_count)
+    finally: session.close()
+    context.user_data.pop('gift_code_flow',None)
+    await update.message.reply_text(f'🎉 کد هدیه با موفقیت ثبت شد!\n\n🎁 جایزه: {gc.reward:,} روب‌پوینت\n💰 موجودی جدید: {int(user.fox_points):,} روب‌پوینت\n👥 ظرفیت باقی‌مانده کد: {remaining:,}',**reply_kwargs(update.message))
+    return True
 
 async def text_router(update, context):
     if not update.message or not update.message.text: return
     if await handle_jail_memory_text(update, context): return
     if await handle_friend_text(update, context): return
+    if await handle_gift_code_text(update, context): return
     if await handle_gift_text(update, context): return
     if await handle_points_text(update, context): return
     if await handle_bank_text(update, context): return
@@ -7046,6 +7186,7 @@ async def text_router(update, context):
     if text in {"روبام","روبام!","روباش","روباش!"}: await roobam_command(update,context); return
     if text in {"گردونه", "چرخ شانس", "🎡 گردونه", "🎡 چرخ شانس"}: await wheel_command(update,context); return
     if text in {"دوست روبی","فرند روب","دوست روباهیو","فرند روبی","friends"}: await friends_command(update,context); return
+    if text in {"کد هدیه","کد جایزه","gift code","giftcode"}: await gift_code_command(update,context); return
     if text in {"لیدر برد","لیدربرد","leaderboard","Leaderboard"}: await leaderboard_command(update,context); return
     if text in {"شهر روبی","شهر روباهیو","شهر روباه","🦊 شهر روبی"}: await city_command(update,context); return
     if text in {"شهردار روبی","شهردار","🦁 شهردار روبی"}: await city_mayor_command(update,context); return
@@ -7105,6 +7246,7 @@ async def persian_slash_router(update, context):
         elif cmd=="یخچال": await fridge_command(update,context)
         elif cmd in {"روبام","روباش"}: await roobam_command(update,context)
         elif cmd in {"دوست روبی","دوست","فرند روب"}: await friends_command(update,context)
+        elif cmd in {"کد هدیه","کد جایزه","giftcode"}: await gift_code_command(update,context)
         elif cmd in {"شهردار روبی","شهردار"}: await city_mayor_command(update,context)
         elif cmd in {"شهر روبی","شهر"}: await city_command(update,context)
         else: await leaderboard_command(update,context)
@@ -7139,7 +7281,7 @@ def main():
     app.add_handler(CallbackQueryHandler(jail_callback_gate), group=-20)
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|giftall|setlevel|setfoxpoints|banmenu|backup)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setfoxpoints|banmenu|backup)$"))
     app.add_handler(CallbackQueryHandler(admin_banset_callback,pattern=r"^admin:banset:(?:1|7|30|permanent|unban)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
@@ -7151,6 +7293,7 @@ def main():
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit|cz_pairs):\d+:\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_setup_back,pattern=r"^rubysetup:back:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_dice_bet_select,pattern=r"^rdicebet:\d+:\d+:\d+:(odd|even|high|low)$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_rps_choice,pattern=r"^rrps:\d+:(rock|paper|scissors)$"))
@@ -7160,7 +7303,8 @@ def main():
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
-    app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change):\d+$"))
+    app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change|back):\d+$"))
+    app.add_handler(CallbackQueryHandler(gift_code_button,pattern=r"^giftcode:(enter|cancel)$"))
     app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|opt|qty|qtyok|backshop|backopt|tiers|backtiers|notext|noop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(points_button,pattern=r"^points:(?:shop|pick|backshop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
@@ -7170,7 +7314,7 @@ def main():
     app.add_handler(CallbackQueryHandler(jail_button,pattern=r"^jail:(memory|pay):\d+$"))
     app.add_handler(CallbackQueryHandler(smuggling_button,pattern=r"^smuggle:(plus|minus|all|confirm):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(friend_decision_button,pattern=r"^friend(?:accept|reject):\d+$"))
-    app.add_handler(CallbackQueryHandler(friend_request_button,pattern=r"^friend:(?:home|add|view|points|msg):\d+(?::\d+)?$"))
+    app.add_handler(CallbackQueryHandler(friend_request_button,pattern=r"^friend:(?:home|add|view|points|msg|remove):\d+(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(leaderboard_button,pattern=r"^lb:"))
     app.add_handler(CallbackQueryHandler(city_donate_button,pattern=r"^citydonate:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_top_donors_button,pattern=r"^citytop:-?\d+$"))
