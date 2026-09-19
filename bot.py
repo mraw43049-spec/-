@@ -6115,10 +6115,24 @@ def friend_list(session, uid):
         if u: out.append(u)
     return out
 
+def friend_incoming(uid):
+    """درخواست‌های دوستیِ در انتظار برای کاربر (حداکثر ۵ تا)."""
+    session=get_session()
+    try:
+        rows=session.query(FriendRequest).filter(FriendRequest.receiver_id==uid,FriendRequest.status=='pending').order_by(FriendRequest.id).limit(5).all()
+        out=[]
+        for r in rows:
+            s=session.get(User,r.sender_id)
+            out.append((r.id, user_display_name(s) if s else str(r.sender_id)))
+        return out
+    finally: session.close()
+
 def friends_keyboard(uid, friends=None):
     rows=[]
     for f in (friends or []):
         rows.append([InlineKeyboardButton(f"🦊 {user_display_name(f)}",callback_data=f"friend:view:{uid}:{f.telegram_id}")])
+    for rid,name in friend_incoming(uid):
+        rows.append([InlineKeyboardButton(f"✅ قبول {name}",callback_data=f"friendaccept:{rid}"),InlineKeyboardButton("❌ رد",callback_data=f"friendreject:{rid}")])
     if len(friends or []) < FRIEND_LIMIT:
         rows.append([InlineKeyboardButton("➕ افزودن دوست",callback_data=f"friend:add:{uid}")])
     rows.append([InlineKeyboardButton("🔄 تازه‌سازی",callback_data=f"friend:home:{uid}")])
@@ -6132,24 +6146,46 @@ def friends_panel_text(session, user):
     for i,f in enumerate(friends,1):
         rank=ranking_position(session,'fox_points',f.fox_points or 0)
         lines += [f"{i}. {user_display_name(f)}",f"🪪 شناسه کاربری: @{f.username}" if f.username else f"🪪 آیدی عددی: {f.telegram_id}",f"🌍 رتبه جهانی روب‌پوینت: #{rank}",f"💰 روب‌پوینت: {int(f.fox_points or 0):,} 🪙",""]
+    incoming=friend_incoming(user.telegram_id)
+    if incoming:
+        lines += ["📩 درخواست‌های دوستیِ منتظر تأیید:"] + [f"• {name}" for _,name in incoming] + [""]
     return '\n'.join(lines), friends
 
+_FA_DIGITS = str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789')
+
+class TgIdentity:
+    """یک شیء ساده شبیه telegram.User (id/username/first_name) تا get_or_create_user
+    هم با کاربر دیتابیس و هم با Chat تلگرام کار کند. (باگ قبلی: مدل دیتابیس .id نداشت و
+    get_or_create_user با AttributeError می‌ترکید و هیچ پیامی برنمی‌گشت.)"""
+    def __init__(self, id, username=None, first_name=None):
+        self.id=id; self.username=username; self.first_name=first_name
+
+def clean_friend_input(raw):
+    s=(raw or '').strip().translate(_FA_DIGITS)
+    s=re.sub(r'^(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me)/','',s,flags=re.I)
+    return s.strip().lstrip('@').strip()
+
 async def resolve_friend_target(bot, raw):
-    raw=raw.strip().lstrip('@')
+    """آیدی عددی یا یوزرنیم → TgIdentity (یا None اگر پیدا نشد)."""
+    from sqlalchemy import func as sa_func
+    raw=clean_friend_input(raw)
     if raw.isdigit():
-        session=get_session()
-        try:
-            return session.get(User, int(raw))
-        finally: session.close()
-    username=raw.lower()
+        if len(raw)>15: return None
+    elif not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{3,31}',raw):
+        return None
     session=get_session()
     try:
-        target=session.query(User).filter(__import__('sqlalchemy').func.lower(User.username)==username).first()
-        if target: return target
+        if raw.isdigit():
+            u=session.get(User,int(raw))
+        else:
+            u=session.query(User).filter(sa_func.lower(User.username)==raw.lower()).first()
+        if u: return TgIdentity(u.telegram_id,u.username,u.first_name)
     finally: session.close()
-    # fallback برای حساب‌هایی که در دیتابیس نیستند ولی تلگرام آنها را قابل resolve می‌کند.
-    try: return await bot.get_chat('@'+raw)
+    # کاربری که در دیتابیس نیست: فقط اگر تلگرام او را resolve کند (یعنی با ربات تعامل داشته).
+    try: chat=await bot.get_chat(int(raw) if raw.isdigit() else '@'+raw)
     except Exception: return None
+    if getattr(chat,'type',None)!='private': return None
+    return TgIdentity(chat.id,getattr(chat,'username',None),getattr(chat,'first_name',None))
 
 async def friends_command(update,context):
     if not await require_membership(update,context): return
@@ -6210,50 +6246,85 @@ async def friend_request_button(update,context):
         prompt='💰 مقدار روب‌پوینت را بفرست:' if action=='points' else '💬 پیام کوتاهت را بفرست:'
         await q.message.edit_text(prompt+'\n\n🔙 برای لغو بنویس: لغو',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'friend:view:{owner}:{fid}')]]))
 
+async def friend_add_from_text(update,context,owner):
+    """کاربر آیدی/یوزرنیم دوستش را فرستاده؛ درخواست را می‌سازد و به PV طرف مقابل می‌فرستد."""
+    msg=update.message
+    reply=lambda t: msg.reply_text(t,**reply_kwargs(msg))
+    text=(msg.text or '').strip()
+    if text=='لغو':
+        context.user_data.pop('friend_add_owner',None); await friends_command(update,context); return True
+    cleaned=clean_friend_input(text)
+    # متنی که شکل آیدی/یوزرنیم ندارد (مثلاً فارسی یا چندکلمه‌ای) یعنی کاربر دستور دیگری داده؛
+    # حالت افزودن دوست را ببند و اجازه بده بقیه‌ی هندلرها کارشان را بکنند.
+    if not cleaned or ' ' in cleaned or not cleaned.isascii():
+        context.user_data.pop('friend_add_owner',None); return False
+
+    target_tg=await resolve_friend_target(context.bot,cleaned)
+    if not target_tg:
+        await reply('❌ کاربر پیدا نشد.\nمطمئن شو دوستت ربات را استارت کرده و آیدی عددی یا @username درست است.\n\nدوباره بفرست یا بنویس: لغو'); return True
+    tid=target_tg.id
+    if tid==owner:
+        await reply('❌ نمی‌تونی خودت رو دوست اضافه کنی.\n\nآیدی دیگری بفرست یا بنویس: لغو'); return True
+
+    problem=None; rid=None; target_existed=True
+    session=get_session()
+    try:
+        me=get_or_create_user(session,update.effective_user); sender_name=user_display_name(me)
+        target_existed = session.get(User,tid) is not None
+        target=get_or_create_user(session,target_tg); target_name=user_display_name(target)
+        if len(friend_list(session,owner))>=FRIEND_LIMIT:
+            problem=f'❌ ظرفیت دوستانت پر شده؛ حداکثر {FRIEND_LIMIT} دوست.'
+        elif get_friendship(session,owner,tid):
+            problem='ℹ️ این کاربر از قبل دوستته.'
+        elif len(friend_list(session,tid))>=FRIEND_LIMIT:
+            problem='❌ ظرفیت دوستان اون کاربر پره.'
+        elif session.query(FriendRequest).filter(FriendRequest.sender_id==owner,FriendRequest.receiver_id==tid,FriendRequest.status=='pending').first():
+            problem='⏳ درخواست دوستی قبلاً ارسال شده؛ منتظر جواب اون کاربر باش.'
+        elif session.query(FriendRequest).filter(FriendRequest.sender_id==tid,FriendRequest.receiver_id==owner,FriendRequest.status=='pending').first():
+            problem='📩 اون کاربر قبلاً برای تو درخواست فرستاده؛ از پنل «دوست روبی» همون رو قبول کن.'
+        else:
+            req=FriendRequest(sender_id=owner,receiver_id=tid,status='pending',created_at=now_utc())
+            session.add(req); session.commit(); rid=req.id
+    finally: session.close()
+
+    if problem:
+        context.user_data.pop('friend_add_owner',None)
+        await reply(problem); return True
+
+    # درخواست باید داخل خود ربات (پیوی) برای طرف مقابل برود.
+    kb=InlineKeyboardMarkup([[InlineKeyboardButton('✅ قبول درخواست',callback_data=f'friendaccept:{rid}'),InlineKeyboardButton('❌ رد درخواست',callback_data=f'friendreject:{rid}')]])
+    try:
+        await context.bot.send_message(tid,f'🦊 {sender_name} می‌خواد باهات دوست بشه!\n\nبا قبول درخواست، هر دوتون در لیست دوستان هم قرار می‌گیرید.',reply_markup=kb)
+    except Exception as e:
+        logger.warning('friend request DM to %s failed: %s',tid,e)
+        s2=get_session()
+        try:
+            r=s2.get(FriendRequest,rid)
+            if r: s2.delete(r); s2.commit()
+            if not target_existed:   # کاربر ساختگیِ بی‌استفاده در دیتابیس نماند
+                u=s2.get(User,tid)
+                if u: s2.delete(u); s2.commit()
+        finally: s2.close()
+        context.user_data.pop('friend_add_owner',None)
+        await reply('❌ درخواست ارسال نشد؛ این کاربر هنوز ربات را استارت نکرده یا ربات را بلاک کرده.\nبهش بگو اول ربات را در پیوی استارت کند، بعد دوباره امتحان کن.'); return True
+
+    context.user_data.pop('friend_add_owner',None)
+    await reply(f'📨 درخواست دوستی برای {target_name} ارسال شد.\nوقتی قبول یا رد کند، همین‌جا داخل ربات بهت خبر می‌دهم.')
+    return True
+
 async def handle_friend_text(update,context):
     # افزودن دوست
     owner=context.user_data.get('friend_add_owner')
     if owner:
-        text=update.message.text.strip()
-        if text=='لغو':
-            context.user_data.pop('friend_add_owner',None); await friends_command(update,context); return True
-        context.user_data.pop('friend_add_owner',None)
-        if update.effective_user.id!=owner: return True
-        session=get_session()
+        if update.effective_user.id!=owner:
+            context.user_data.pop('friend_add_owner',None); return False
         try:
-            me=get_or_create_user(session,update.effective_user); friends=friend_list(session,owner)
-            if len(friends)>=FRIEND_LIMIT:
-                await update.message.reply_text('❌ ظرفیت دوستانت پر شده؛ حداکثر ۳ دوست.',**reply_kwargs(update.message)); return True
-            target_chat=await resolve_friend_target(context.bot,text)
-            if not target_chat:
-                await update.message.reply_text('❌ کاربر پیدا نشد. اول مطمئن شو کاربر ربات را استارت کرده و آیدی عددی یا @username درست است.',**reply_kwargs(update.message)); return True
-            if isinstance(target_chat, User):
-                tid=target_chat.telegram_id
-            else:
-                if getattr(target_chat,'type',None)!='private':
-                    await update.message.reply_text('❌ این شناسه مربوط به یک کاربر خصوصی نیست.',**reply_kwargs(update.message)); return True
-                tid=target_chat.id
-            if tid==owner:
-                await update.message.reply_text('❌ نمی‌تونی خودت رو دوست اضافه کنی.',**reply_kwargs(update.message)); return True
-            target=get_or_create_user(session,target_chat)
-            if get_friendship(session,owner,tid):
-                await update.message.reply_text('ℹ️ این کاربر از قبل دوستته.',**reply_kwargs(update.message)); return True
-            if len(friend_list(session,tid))>=FRIEND_LIMIT:
-                await update.message.reply_text('❌ ظرفیت دوستان اون کاربر پره.',**reply_kwargs(update.message)); return True
-            pending=session.query(FriendRequest).filter(FriendRequest.sender_id==owner,FriendRequest.receiver_id==tid,FriendRequest.status=='pending').first()
-            if pending:
-                await update.message.reply_text('⏳ درخواست دوستی قبلاً ارسال شده.',**reply_kwargs(update.message)); return True
-            reverse=session.query(FriendRequest).filter(FriendRequest.sender_id==tid,FriendRequest.receiver_id==owner,FriendRequest.status=='pending').first()
-            if reverse:
-                await update.message.reply_text('📩 اون کاربر قبلاً برای تو درخواست فرستاده؛ اول همون رو قبول کن.',**reply_kwargs(update.message)); return True
-            req=FriendRequest(sender_id=owner,receiver_id=tid,status='pending',created_at=now_utc()); session.add(req); session.commit(); rid=req.id
-            sender_name=user_display_name(me)
-        finally: session.close()
-        await update.message.reply_text(f'📨 درخواست دوستی برای {user_display_name(target)} ارسال شد.',**reply_kwargs(update.message))
-        try:
-            await context.bot.send_message(tid,f'🦊 {sender_name} می‌خواد باهات دوست بشه!\n\nبا قبول درخواست، هر دوتون در لیست دوستان هم قرار می‌گیرید.',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('✅ قبول درخواست',callback_data=f'friendaccept:{rid}')],[InlineKeyboardButton('❌ رد درخواست',callback_data=f'friendreject:{rid}')]]))
-        except Exception: pass
-        return True
+            return await friend_add_from_text(update,context,owner)
+        except Exception:
+            logger.exception('friend add failed')
+            context.user_data.pop('friend_add_owner',None)
+            await update.message.reply_text('⚠️ مشکلی پیش آمد؛ دوباره از پنل دوست روبی امتحان کن.',**reply_kwargs(update.message)); return True
+
     action=context.user_data.get('friend_action')
     if not action: return False
     text=update.message.text.strip()
@@ -6298,27 +6369,32 @@ async def friend_decision_button(update,context):
         req=session.get(FriendRequest,rid)
         if not req or req.status!='pending' or req.receiver_id!=q.from_user.id:
             await q.answer('❌ این درخواست دیگر فعال نیست.',show_alert=True); return
-        sender= session.get(User,req.sender_id); receiver=session.get(User,req.receiver_id)
-        if len(friend_list(session,req.receiver_id))>=FRIEND_LIMIT:
-            await q.answer('❌ ظرفیت دوستانت پر شده.',show_alert=True); return
+        # همه‌ی مقادیر لازم را قبل از commit/close بخوان (expire_on_commit → DetachedInstanceError).
+        sender_id=req.sender_id; receiver_id=req.receiver_id
+        sender=session.get(User,sender_id); receiver=session.get(User,receiver_id)
+        sender_name=user_display_name(sender) if sender else str(sender_id)
+        receiver_name=user_display_name(receiver) if receiver else str(receiver_id)
         if accept:
-            if len(friend_list(session,req.sender_id))>=FRIEND_LIMIT:
-                await q.answer('❌ ظرفیت دوستان فرستنده پر شده.',show_alert=True); return
-            a,b=friendship_pair(req.sender_id,req.receiver_id)
-            session.add(Friendship(user1_id=a,user2_id=b,created_at=now_utc()))
-            req.status='accepted'; req.decided_at=now_utc(); session.commit(); sender_name=user_display_name(sender); receiver_name=user_display_name(receiver)
+            if get_friendship(session,sender_id,receiver_id) is None:
+                if len(friend_list(session,receiver_id))>=FRIEND_LIMIT:
+                    await q.answer('❌ ظرفیت دوستانت پر شده.',show_alert=True); return
+                if len(friend_list(session,sender_id))>=FRIEND_LIMIT:
+                    await q.answer('❌ ظرفیت دوستان فرستنده پر شده.',show_alert=True); return
+                a,b=friendship_pair(sender_id,receiver_id)
+                session.add(Friendship(user1_id=a,user2_id=b,created_at=now_utc()))
+            req.status='accepted'
         else:
-            req.status='rejected'; req.decided_at=now_utc(); session.commit(); sender_name=user_display_name(sender); receiver_name=user_display_name(receiver)
+            req.status='rejected'   # رد کردن به ظرفیت ربطی ندارد
+        req.decided_at=now_utc(); session.commit()
     finally: session.close()
     await q.answer('✅ درخواست قبول شد!' if accept else '❌ درخواست رد شد.')
-    try: await q.message.edit_text('✅ دوست شدین! حالا هر دو نفر در لیست دوستان همدیگه هستید.' if accept else '❌ درخواست دوستی رد شد.')
+    try: await q.message.edit_text(f'✅ دوست شدین! حالا تو و {sender_name} در لیست دوستان همدیگه هستید.' if accept else f'❌ درخواست دوستی {sender_name} رد شد.')
     except Exception: pass
-    if accept:
-        try: await context.bot.send_message(req.sender_id,f'🎉 {receiver_name} درخواست دوستی‌ات رو قبول کرد؛ حالا هر دو در لیست دوستان هم هستید.')
-        except Exception: pass
-    else:
-        try: await context.bot.send_message(req.sender_id,f'ℹ️ {receiver_name} درخواست دوستی رو رد کرد.')
-        except Exception: pass
+    # اطلاع به درخواست‌دهنده داخل خود ربات (پیوی)
+    note=(f'🎉 {receiver_name} درخواست دوستی‌ات رو قبول کرد؛ حالا هر دو در لیست دوستان هم هستید.\nاز «دوست روبی» می‌تونی ببینیش.'
+          if accept else f'ℹ️ {receiver_name} درخواست دوستی‌ات رو رد کرد.')
+    try: await context.bot.send_message(sender_id,note)
+    except Exception as e: logger.warning('friend decision DM to %s failed: %s',sender_id,e)
 
 # ---------- شهر روبی ----------
 
