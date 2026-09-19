@@ -215,6 +215,7 @@ class BankAccount(Base):
     balance = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_interest_at = Column(DateTime(timezone=True), nullable=True)
+    last_card_transfer_at = Column(DateTime(timezone=True), nullable=True)
 
 class BankTransaction(Base):
     __tablename__ = 'bank_transactions'
@@ -338,6 +339,7 @@ def init_db():
     inspector = inspect(engine)
     cols = {c['name'] for c in inspector.get_columns('users')}
     injured_cols = {c['name'] for c in inspector.get_columns('injured_foxes')}
+    bank_cols = {c['name'] for c in inspector.get_columns('bank_accounts')}
     additions = {
         'total_earned': 'INTEGER NOT NULL DEFAULT 0',
         'fox_name': "VARCHAR DEFAULT 'مکار'",
@@ -392,6 +394,8 @@ def init_db():
                 added_user_cols.add(name)
         if 'attempt_log' not in injured_cols:
             conn.execute(text("ALTER TABLE injured_foxes ADD COLUMN attempt_log VARCHAR"))
+        if 'last_card_transfer_at' not in bank_cols:
+            conn.execute(text(f'ALTER TABLE bank_accounts ADD COLUMN last_card_transfer_at {DT_SQL_TYPE}'))
         if 'fox_hunts' in inspector.get_table_names():
             hunt_cols = {c['name'] for c in inspector.get_columns('fox_hunts')}
             hunt_additions = {

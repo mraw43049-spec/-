@@ -51,6 +51,8 @@ FOX_CLAIM_COOLDOWN = 5 * 60
 HUNT_COOLDOWN = 15 * 60
 HUNT_DECISION_TIMEOUT = 120
 TRANSFER_COOLDOWN = 60
+BANK_CARD_TRANSFER_COOLDOWN = 5 * 60
+BANK_CARD_TRANSFER_FEE_RATE = 0.05
 TRANSFER_MAX = 500_000
 WHEEL_COOLDOWN = 24 * 60 * 60
 WHEEL_REWARDS = [100, 250, 350, 450, 0, 500, 750, 1000]
@@ -1136,14 +1138,16 @@ async def casino_command(update, context):
         [InlineKeyboardButton("🎰 گردونه شانس",callback_data=f"rg:cz_wheel:{owner_id}")],
         [InlineKeyboardButton("🎲 تاس",callback_data=f"rg:cz_dice:{owner_id}")],
         [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
+        [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
     ])
-    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 گردونه شانس\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 گردونه شانس\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 30 خانه · 15 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
     "xo":("🧩 بازی روبی دوز XO",2,2,True),"rps":("🔫 بازی روبی سنگ کاغذ قیچی",2,2,True),
     "darts":("🎯 بازی روبی دارت",2,4,True),"basketball":("🏀 بازی روبی بسکتبال",2,3,True),"bowling":("🎳 بازی روبی بولینگ",2,4,True),
     "cz_wheel":("🎰 گردونه شانس",1,3,True),"cz_dice":("🎲 تاس",1,2,True),"cz_rabbit":("🐇 خرگوش خور",2,2,True),
+    "cz_pairs":("🃏 بازی دوتایی‌ها",2,2,True),
 }
 CASINO_UNLOCK_LEVEL = 5
 
@@ -1291,6 +1295,277 @@ def render_rabbit_panel(tid,name,pot_line,ids,names_by_id,state):
             f"▶️ نوبت: {names_by_id.get(turn_id,str(turn_id))}"
         )
     return text, rabbit_keyboard(tid, state)
+
+
+# ---------- بازی دوتایی‌ها 🃏 ----------
+PAIRS_TOTAL_CELLS = 30
+PAIRS_TOTAL_PAIRS = 15
+PAIRS_TURN_SECONDS = 60
+PAIRS_MISMATCH_REVEAL_SECONDS = 1.2
+PAIRS_SYMBOLS = ["🍒","🍋","🍇","🍉","🍊","🥝","🍎","🍓","🍌","🥥","🍍","🥕","🌟","💎","🦊"]
+
+def pairs_keyboard(tid, state):
+    deck = state.get("deck", [])
+    matched = set(state.get("matched", []))
+    opened = set(state.get("open", []))
+    rows=[]
+    for r in range(5):
+        row=[]
+        for c in range(6):
+            i=r*6+c
+            label=deck[i] if i in matched or i in opened else "❔"
+            row.append(InlineKeyboardButton(label, callback_data=f"rpairs:{tid}:{i}"))
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+def pairs_remaining_seconds(state):
+    raw=state.get("turn_started_at")
+    if not raw:
+        return PAIRS_TURN_SECONDS
+    try:
+        started=datetime.fromisoformat(raw)
+        if started.tzinfo is None:
+            started=started.replace(tzinfo=timezone.utc)
+        elapsed=(now_utc()-started).total_seconds()
+        return max(0, int(PAIRS_TURN_SECONDS-elapsed))
+    except Exception:
+        return PAIRS_TURN_SECONDS
+
+def render_pairs_panel(tid, name, pot_line, ids, names_by_id, state, extra=""):
+    turn=state.get("turn")
+    scores=state.get("scores",{})
+    remaining=pairs_remaining_seconds(state)
+    matched=len(state.get("matched",[]))
+    score_lines="\n".join(
+        f"{i+1}️⃣ {names_by_id.get(uid,str(uid))} — {scores.get(str(uid),0)} جفت"
+        for i,uid in enumerate(ids)
+    )
+    text=(
+        f"🃏 {name}\n\n🎮 بازی دوتایی‌ها در جریانه!{pot_line}\n"
+        f"🧩 خانه‌ها: {matched}/{PAIRS_TOTAL_CELLS} باز شده\n\n"
+        f"{score_lines}\n\n▶️ نوبت: {names_by_id.get(turn,str(turn))}\n"
+        f"⏱ زمان باقی‌مانده نوبت: {remaining} ثانیه"
+        + (f"\n\n{extra}" if extra else "")
+    )
+    return text,pairs_keyboard(tid,state)
+
+async def _pairs_refresh(context, tid, token):
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active' or t.game_type!='cz_pairs':
+            return
+        state=json.loads(t.state or '{}')
+        if state.get("turn_token")!=token:
+            return
+        ids=[int(x) for x in (t.players or '').split(',') if x]
+        players=[session.get(User,i) for i in ids]
+        names={u.telegram_id:user_display_name(u) for u in players if u}
+        text,kb=render_pairs_panel(t.id,RUBY_GAME_CONFIG['cz_pairs'][0],
+            f"\n🏆 جایزه میز: {t.pot:,} روب‌پوینت" if t.entry_amount>0 else "",
+            ids,names,state)
+        chat_id=t.chat_id; message_id=t.message_id
+    finally:
+        session.close()
+    try:
+        await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+    except Exception:
+        pass
+    if context.job_queue:
+        left=pairs_remaining_seconds(state)
+        if left>0:
+            context.job_queue.run_once(_pairs_refresh,min(5,left),data={"tid":tid,"token":token})
+
+async def pairs_turn_timeout(context):
+    data=context.job.data
+    tid=int(data["tid"]); token=data["token"]
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active' or t.game_type!='cz_pairs':
+            return
+        state=json.loads(t.state or '{}')
+        if state.get("turn_token")!=token or state.get("lock"):
+            return
+        left=pairs_remaining_seconds(state)
+        if left>0:
+            if context.job_queue:
+                context.job_queue.run_once(pairs_turn_timeout,left,data=data)
+            return
+        ids=[int(x) for x in (t.players or '').split(',') if x]
+        current=state.get("turn")
+        other=[uid for uid in ids if uid!=current][0]
+        state["turn"]=other
+        state["turn_started_at"]=now_utc().isoformat()
+        state["turn_token"]=f"{tid}-{other}-{int(now_utc().timestamp()*1000)}"
+        t.state=json.dumps(state)
+        players=[session.get(User,i) for i in ids]
+        names={u.telegram_id:user_display_name(u) for u in players if u}
+        chat_id=t.chat_id; message_id=t.message_id; newtoken=state["turn_token"]
+        pot=t.pot; entry=t.entry_amount
+        session.commit()
+    finally:
+        session.close()
+    text,kb=render_pairs_panel(tid,RUBY_GAME_CONFIG['cz_pairs'][0],
+        f"\n🏆 جایزه میز: {pot:,} روب‌پوینت" if entry>0 else "",ids,names,state,
+        extra=f"⏰ نوبت {names.get(current,str(current))} تمام شد؛ نوبت {names.get(other,str(other))} است.")
+    try:
+        await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+    except Exception:
+        pass
+    if context.job_queue:
+        context.job_queue.run_once(pairs_turn_timeout,PAIRS_TURN_SECONDS,data={"tid":tid,"token":newtoken})
+        context.job_queue.run_once(_pairs_refresh,1,data={"tid":tid,"token":newtoken})
+
+async def pairs_mismatch_next_turn(context):
+    data=context.job.data
+    tid=int(data["tid"]); token=data["token"]
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active' or t.game_type!='cz_pairs':
+            return
+        state=json.loads(t.state or '{}')
+        if state.get("turn_token")!=token or not state.get("lock"):
+            return
+        ids=[int(x) for x in (t.players or '').split(',') if x]
+        current=state.get("turn")
+        other=[uid for uid in ids if uid!=current][0]
+        state["open"]=[]
+        state["lock"]=False
+        state["turn"]=other
+        state["turn_started_at"]=now_utc().isoformat()
+        state["turn_token"]=f"{tid}-{other}-{int(now_utc().timestamp()*1000)}"
+        t.state=json.dumps(state)
+        players=[session.get(User,i) for i in ids]
+        names={u.telegram_id:user_display_name(u) for u in players if u}
+        chat_id=t.chat_id; message_id=t.message_id; newtoken=state["turn_token"]
+        pot=t.pot; entry=t.entry_amount
+        session.commit()
+    finally:
+        session.close()
+    text,kb=render_pairs_panel(tid,RUBY_GAME_CONFIG['cz_pairs'][0],
+        f"\n🏆 جایزه میز: {pot:,} روب‌پوینت" if entry>0 else "",ids,names,state,
+        extra=f"❌ جفت نشد؛ نوبت {names.get(other,str(other))} است.")
+    try:
+        await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+    except Exception:
+        pass
+    if context.job_queue:
+        context.job_queue.run_once(pairs_turn_timeout,PAIRS_TURN_SECONDS,data={"tid":tid,"token":newtoken})
+        context.job_queue.run_once(_pairs_refresh,1,data={"tid":tid,"token":newtoken})
+
+async def ruby_pairs_move(update,context):
+    q=update.callback_query
+    try:
+        _,tid_s,cell_s=q.data.split(":"); tid=int(tid_s); cell=int(cell_s)
+    except Exception:
+        return
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active' or t.game_type!='cz_pairs':
+            await q.answer("بازی فعال نیست.",show_alert=True); return
+        ids=[int(x) for x in (t.players or '').split(',') if x]
+        uid=q.from_user.id
+        if uid not in ids:
+            await q.answer("تو بازیکن این میز نیستی.",show_alert=True); return
+        state=json.loads(t.state or '{}')
+        if state.get("turn")!=uid:
+            await q.answer("⏳ نوبت تو نیست.",show_alert=True); return
+        if state.get("lock"):
+            await q.answer("⏳ نتیجه این دو کارت در حال نمایش است.",show_alert=True); return
+        if pairs_remaining_seconds(state)<=0:
+            await q.answer("⏰ زمان این نوبت تمام شده؛ صبر کن تا نوبت بعدی شروع شود.",show_alert=True); return
+        deck=state.get("deck",[])
+        matched=set(state.get("matched",[]))
+        opened=list(state.get("open",[]))
+        if cell in matched or cell in opened:
+            await q.answer("این خانه قابل انتخاب نیست.",show_alert=True); return
+        opened.append(cell)
+        state["open"]=opened
+        extra=""
+        finished=False
+        winner_ids=[]
+        if len(opened)==2:
+            a,b=opened
+            if deck[a]==deck[b]:
+                matched.update(opened)
+                state["matched"]=list(sorted(matched))
+                state["open"]=[]
+                state.setdefault("scores",{})
+                state["scores"][str(uid)]=state["scores"].get(str(uid),0)+1
+                extra=f"🎯 {deck[a]} جفت شد! +1 جفت برای {user_display_name(session.get(User,uid))}"
+                if len(matched)>=PAIRS_TOTAL_CELLS:
+                    finished=True
+                    t.status='finished'
+                    best=max(state["scores"].values())
+                    winner_ids=[int(k) for k,v in state["scores"].items() if v==best]
+                    if t.pot>0 and winner_ids:
+                        share=t.pot//len(winner_ids)
+                        for wid in winner_ids:
+                            u=session.get(User,wid)
+                            if u: u.fox_points=(u.fox_points or 0)+share
+                    state["turn_token"]=None
+                else:
+                    other=[x for x in ids if x!=uid][0]
+                    state["turn"]=other
+                    state["turn_started_at"]=now_utc().isoformat()
+                    state["turn_token"]=f"{tid}-{other}-{int(now_utc().timestamp()*1000)}"
+            else:
+                state["lock"]=True
+                extra=f"❌ {deck[a]} و {deck[b]} جفت نبودند."
+        t.state=json.dumps(state)
+        players=[session.get(User,i) for i in ids]
+        names={u.telegram_id:user_display_name(u) for u in players if u}
+        chat_id=t.chat_id; message_id=t.message_id
+        state_snapshot=state.copy()
+        pot=t.pot or 0; entry=t.entry_amount
+        newtoken=state.get("turn_token")
+        session.commit()
+    finally:
+        session.close()
+
+    await q.answer()
+    pot_line=f"\n🏆 جایزه میز: {pot:,} روب‌پوینت" if entry>0 else ""
+    if finished:
+        score_lines="\n".join(f"👤 {names.get(uid,str(uid))} — {state_snapshot['scores'].get(str(uid),0)} جفت" for uid in ids)
+        if len(winner_ids)==1:
+            result=(f"🏆 {names.get(winner_ids[0],str(winner_ids[0]))} برنده شد و {pot:,} روب‌پوینت گرفت! 🎉"
+                    if pot>0 else f"🏆 {names.get(winner_ids[0],str(winner_ids[0]))} برنده شد! 🎉")
+        else:
+            share=pot//len(winner_ids) if winner_ids else 0
+            result=f"🤝 مساوی شد؛ {', '.join(names.get(x,str(x)) for x in winner_ids)} برنده شدند."
+            if pot>0: result+=f" هر نفر {share:,} روب‌پوینت گرفت."
+        text=f"🃏 {RUBY_GAME_CONFIG['cz_pairs'][0]}\n\n🏁 بازی تمام شد!\n\n{score_lines}\n\n{result}"
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=None)
+        except Exception:
+            pass
+        return
+
+    text,kb=render_pairs_panel(tid,RUBY_GAME_CONFIG['cz_pairs'][0],pot_line,ids,names,state_snapshot,extra=extra)
+    try:
+        await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+    except Exception:
+        pass
+    if state_snapshot.get("lock"):
+        if context.job_queue:
+            context.job_queue.run_once(pairs_mismatch_next_turn,PAIRS_MISMATCH_REVEAL_SECONDS,
+                                       data={"tid":tid,"token":state_snapshot["turn_token"]})
+    elif newtoken and context.job_queue:
+        context.job_queue.run_once(pairs_turn_timeout,PAIRS_TURN_SECONDS,data={"tid":tid,"token":newtoken})
+        context.job_queue.run_once(_pairs_refresh,1,data={"tid":tid,"token":newtoken})
+
+def create_pairs_state(ids):
+    deck=[]
+    for symbol in PAIRS_SYMBOLS:
+        deck.extend([symbol,symbol])
+    random.shuffle(deck)
+    starter=ids[0]
+    token=f"starter-{starter}-{int(now_utc().timestamp()*1000)}"
+    return {"deck":deck,"matched":[],"open":[],"scores":{str(uid):0 for uid in ids},
+            "turn":starter,"turn_started_at":now_utc().isoformat(),"turn_token":token,"lock":False}
 
 async def ruby_game_select(update,context):
     q=update.callback_query
@@ -1552,6 +1827,8 @@ async def ruby_join_table(update,context):
                 t.state=json.dumps({"board":[""]*9,"turn":ids[0],"symbols":{str(ids[0]):"X",str(ids[1]):"O"}})
             elif game_type=='cz_rabbit':
                 t.state=json.dumps({"phase":"plant","paws":{},"revealed":[]})
+            elif game_type=='cz_pairs':
+                t.state=json.dumps(create_pairs_state(ids))
             elif game_type=='cz_dice':
                 st=json.loads(t.state or '{}'); bets=st.get('bets',{})
                 creator_bet=bets.get(str(ids[0]))
@@ -1589,6 +1866,14 @@ async def ruby_join_table(update,context):
             state=json.loads(state_raw or '{}')
             text,kb=render_rabbit_panel(tid_,name,pot_line,ids,names_by_id,state)
             await q.message.edit_text(text,reply_markup=kb)
+        elif game_type=='cz_pairs':
+            state=json.loads(state_raw or '{}')
+            text,kb=render_pairs_panel(tid_,name,pot_line,ids,names_by_id,state)
+            await q.message.edit_text(text,reply_markup=kb)
+            if context.job_queue:
+                token=state.get('turn_token')
+                context.job_queue.run_once(pairs_turn_timeout,PAIRS_TURN_SECONDS,data={'tid':tid_,'token':token})
+                context.job_queue.run_once(_pairs_refresh,1,data={'tid':tid_,'token':token})
     else:
         await q.message.edit_text(f"🕹 {name}\n\n"+'\n'.join(f"{i+1}️⃣ بازیکن : {user_display_name(u) if u else '…'}" for i,u in enumerate(players))+"\n\n⏳ منتظر بازیکن بعدی…",reply_markup=ruby_table_keyboard(tid))
 
@@ -2863,11 +3148,38 @@ async def handle_bank_text(update, context):
             if len(parts)!=2: raise ValueError
             amount=parse_amount(parts[0]); dest=parts[1]
             target=session.get(BankAccount,dest)
-            if not target or target.user_id==user.telegram_id or amount<=0 or user.fox_points<amount: raise ValueError
+            if not target or target.user_id==user.telegram_id or amount<=0:
+                raise ValueError
+            left=seconds_left(account.last_card_transfer_at, BANK_CARD_TRANSFER_COOLDOWN)
+            if left:
+                await update.message.reply_text(
+                    f'⏳ کارت به کارت بعدی {format_duration(left)} دیگر فعال می‌شود.',
+                    **reply_kwargs(update.message)
+                )
+                return True
+            fee=max(1, int(amount * BANK_CARD_TRANSFER_FEE_RATE))
+            total=amount+fee
+            if account.balance < total:
+                await update.message.reply_text(
+                    f'❌ موجودی بانک کافی نیست.\n💰 مبلغ انتقال: {amount:,}\n💳 کارمزد 5٪: {fee:,}\n📌 مجموع برداشت: {total:,} روب‌پوینت',
+                    **reply_kwargs(update.message)
+                )
+                return True
             target_user=session.get(User,target.user_id)
-            context.user_data['pending_bank_transfer']={'dest':dest,'amount':amount,'target_user_id':target.user_id}
-            kb=InlineKeyboardMarkup([[InlineKeyboardButton('✅ بله',callback_data=f'bankconfirm:yes:{user.telegram_id}'),InlineKeyboardButton('❌ خیر',callback_data=f'bankconfirm:no:{user.telegram_id}')]])
-            msg=(f'🦊 کارت به کارت روبی 💳\n\n❓ آیا از انتقال اطمینان دارید؟\n\n💰 مبلغ: {amount:,} روب‌پوینت\n💳 حساب مقصد: {dest}\n👤 گیرنده: {user_display_name(target_user)}')
+            context.user_data['pending_bank_transfer']={
+                'dest':dest,'amount':amount,'fee':fee,'total':total,
+                'target_user_id':target.user_id
+            }
+            kb=InlineKeyboardMarkup([[
+                InlineKeyboardButton('✅ بله',callback_data=f'bankconfirm:yes:{user.telegram_id}'),
+                InlineKeyboardButton('❌ خیر',callback_data=f'bankconfirm:no:{user.telegram_id}')
+            ]])
+            msg=(f'🦊 کارت به کارت روبی 💳\n\n❓ آیا از انتقال اطمینان دارید؟\n\n'
+                 f'💰 مبلغ دریافتی گیرنده: {amount:,} روب‌پوینت\n'
+                 f'💳 کارمزد 5٪: {fee:,} روب‌پوینت\n'
+                 f'📤 مجموع کسر از بانک: {total:,} روب‌پوینت\n'
+                 f'💳 حساب مقصد: {dest}\n👤 گیرنده: {user_display_name(target_user)}\n'
+                 f'⏱ محدودیت: هر 5 دقیقه یک کارت به کارت')
             await update.message.reply_text(msg,reply_markup=kb,**reply_kwargs(update.message)); return True
     except Exception:
         session.rollback(); msg='❌ فرمت یا موجودی/حساب مقصد نادرست است.'
@@ -3858,7 +4170,8 @@ async def injured_fox_button(update, context):
 
 BANK_OPEN_COST = 5000
 BANK_CHANGE_COST = 3000
-BANK_INTEREST_RATE = 0.07
+BANK_INTEREST_RATE = 0.03
+BANK_INTEREST_INTERVAL_SECONDS = 12 * 60 * 60
 
 def ensure_bank(session, user):
     account = session.query(BankAccount).filter(BankAccount.user_id == user.telegram_id).first()
@@ -3870,24 +4183,31 @@ def ensure_bank(session, user):
         for _ in range(20):
             number = ''.join(str(secrets.randbelow(10)) for _ in range(12))
             if not session.get(BankAccount, number): break
-        account = BankAccount(account_number=number, user_id=user.telegram_id, balance=0, last_interest_at=now_utc())
+        account = BankAccount(account_number=number, user_id=user.telegram_id, balance=0, last_interest_at=now_utc(), last_card_transfer_at=None)
         session.add(account)
         session.flush()
         session.add(BankTransaction(account_number=number, direction='fee', amount=BANK_OPEN_COST, description='افتتاح شعبه بانک'))
     return account, True
 
 def apply_bank_interest(account, session):
-    # سود 7 درصد روزانه، حداکثر یک بار در هر 24 ساعت.
+    # سود 3 درصد به ازای هر 12 ساعت کامل؛ اگر چند بازه گذشته باشد، سود مرکب اعمال می‌شود.
     now = now_utc()
     if not account.last_interest_at:
-        account.last_interest_at = now; return 0
+        account.last_interest_at = now
+        return 0
     elapsed=(now-aware(account.last_interest_at)).total_seconds()
-    if elapsed < 86400 or account.balance <= 0: return 0
-    days=int(elapsed//86400)
-    gain=int(account.balance*((1+BANK_INTEREST_RATE)**days-1))
+    if elapsed < BANK_INTEREST_INTERVAL_SECONDS or account.balance <= 0:
+        return 0
+    periods=int(elapsed//BANK_INTEREST_INTERVAL_SECONDS)
+    gain=int(account.balance*((1+BANK_INTEREST_RATE)**periods-1))
     if gain>0:
         account.balance += gain
-        session.add(BankTransaction(account_number=account.account_number,direction='interest',amount=gain,description='سود بانکی'))
+        session.add(BankTransaction(
+            account_number=account.account_number,
+            direction='interest',
+            amount=gain,
+            description=f'سود بانکی {periods} بازه 12 ساعته'
+        ))
     account.last_interest_at=now
     return gain
 
@@ -3899,7 +4219,7 @@ def bank_keyboard(account):
     ])
 
 def bank_text(user, account):
-    return (f'🦊 بانک روبی 🏦\n\n💳 شماره حساب : {account.account_number}\n👤 به نام : {user_display_name(user)}\n\n💰 موجودی حساب : {account.balance:,} 🪙\n\n🤑 سود بانکی\n┘─ 🛍 درصد سود : 7%\n┘─ 📥 مبلغ واریزی : محاسبه روزانه بر اساس موجودی\n┘─ ⏳ زمان واریز : هر 24 ساعت\n\n❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.')
+    return (f'🦊 بانک روبی 🏦\n\n💳 شماره حساب : {account.account_number}\n👤 به نام : {user_display_name(user)}\n\n💰 موجودی حساب : {account.balance:,} 🪙\n\n🤑 سود بانکی\n┘─ 🛍 درصد سود : 3%\n┘─ 📥 مبلغ واریزی : بر اساس موجودی بانک\n┘─ ⏳ زمان واریز : هر 12 ساعت\n\n❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.')
 
 def parse_amount(raw):
     trans=str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
@@ -3940,14 +4260,14 @@ async def bank_button(update,context):
         apply_bank_interest(account,session); session.commit()
         if action=='withdraw':
             kb=InlineKeyboardMarkup([[InlineKeyboardButton('25٪',callback_data=f'bank:w:{uid}:25'),InlineKeyboardButton('50٪',callback_data=f'bank:w:{uid}:50')],[InlineKeyboardButton('75٪',callback_data=f'bank:w:{uid}:75'),InlineKeyboardButton('100٪',callback_data=f'bank:w:{uid}:100')]])
-            await q.answer(); await q.message.reply_text(bank_text(user,account)+'\n\n➖ درصد برداشت را انتخاب کن:',reply_markup=kb); return
+            await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n➖ درصد برداشت را انتخاب کن:',reply_markup=kb); return
         if action=='w': return
-        if action=='deposit': context.user_data['bank_action']='deposit'; await q.answer(); await q.message.reply_text(bank_text(user,account)+'\n\n➕ مبلغ واریز را در جواب همین پنل بفرست.\nمثال: 50k / 50کا / 50میل / 50م / 50m'); return
-        if action=='transfer': context.user_data['bank_action']='transfer'; await q.answer(); await q.message.reply_text('🦊 کارت به کارت روبی 💳\n\n🔺 مبلغ و شماره حساب مقصد را در جواب همین پنل بفرست.\nمثال: 500 123456789000'); return
+        if action=='deposit': context.user_data['bank_action']='deposit'; await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n➕ مبلغ واریز را در جواب همین پنل بفرست.\nمثال: 50k / 50کا / 50میل / 50م / 50m'); return
+        if action=='transfer': context.user_data['bank_action']='transfer'; await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n🦊 کارت به کارت روبی 💳\n\n🔺 مبلغ و شماره حساب مقصد را در جواب همین پنل بفرست.\nمثال: 500 123456789000\n\n⏱ هر 5 دقیقه یک‌بار · کارمزد 5٪'); return
         if action=='transactions':
             rows=session.query(BankTransaction).filter(BankTransaction.account_number==account.account_number).order_by(BankTransaction.id.desc()).limit(10).all()
             txt='📃 آخرین تراکنش‌ها\n\n' + ('\n'.join(f"{r.created_at:%Y-%m-%d %H:%M} | {('به حساب ' + str(r.counterparty_user_id)) if r.direction in ('card_out','card_transfer_out') else ('از حساب ' + str(r.counterparty_user_id)) if r.counterparty_user_id else r.description or r.direction} | {r.amount:,} 🪙" for r in rows[:3]) if rows else 'تراکنشی ثبت نشده است.')
-            await q.answer(); await q.message.reply_text(txt); return
+            await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n'+txt,reply_markup=bank_keyboard(account)); return
         if action=='change':
             if user.fox_points < BANK_CHANGE_COST: await q.answer('❌ 3,000 روب‌پوینت لازم داری.',show_alert=True); return
             import secrets
@@ -3975,16 +4295,30 @@ async def bank_transfer_confirm(update, context):
     session=get_session()
     try:
         user=session.get(User,uid); account=session.query(BankAccount).filter(BankAccount.user_id==uid).first()
-        dest=pending['dest']; amount=int(pending['amount']); target=session.get(BankAccount,dest)
-        if not user or not account or not target or target.user_id==uid or account.balance<amount:
-            await q.answer("❌ موجودی حساب یا حساب مقصد نامعتبر است.",show_alert=True); return
+        dest=pending['dest']; amount=int(pending['amount']); fee=int(pending.get('fee', max(1,int(amount*BANK_CARD_TRANSFER_FEE_RATE))))
+        total=int(pending.get('total', amount+fee)); target=session.get(BankAccount,dest)
+        if not user or not account or not target or target.user_id==uid:
+            await q.answer("❌ حساب مبدأ یا مقصد نامعتبر است.",show_alert=True); return
+        left=seconds_left(account.last_card_transfer_at, BANK_CARD_TRANSFER_COOLDOWN)
+        if left:
+            await q.answer(f"⏳ کارت به کارت بعدی {format_duration(left)} دیگر فعال می‌شود.",show_alert=True); return
+        if account.balance<total:
+            await q.answer("❌ موجودی بانک برای مبلغ + کارمزد کافی نیست.",show_alert=True); return
         target_user=session.get(User,target.user_id)
-        account.balance-=amount; target.balance+=amount
-        session.add(BankTransaction(account_number=account.account_number,counterparty_account=dest,counterparty_user_id=target.user_id,direction='card_out',amount=amount,description='کارت به کارت'))
+        account.balance-=total
+        target.balance+=amount
+        account.last_card_transfer_at=now_utc()
+        session.add(BankTransaction(account_number=account.account_number,counterparty_account=dest,counterparty_user_id=target.user_id,direction='card_out',amount=amount,description=f'کارت به کارت (کارمزد 5٪: {fee:,})'))
+        session.add(BankTransaction(account_number=account.account_number,direction='fee',amount=fee,description='کارمزد 5٪ کارت به کارت'))
         session.add(BankTransaction(account_number=dest,counterparty_account=account.account_number,counterparty_user_id=uid,direction='card_in',amount=amount,description='کارت به کارت'))
         session.commit(); context.user_data.pop('pending_bank_transfer',None)
         await q.answer("✅ کارت به کارت انجام شد!")
-        await q.message.edit_text(f"✅ {amount:,} روب‌پوینت با موفقیت کارت به کارت شد.\n💳 حساب مقصد: {dest}\n👤 گیرنده: {user_display_name(target_user)}\n🏦 موجودی جدید بانک: {account.balance:,}")
+        await q.message.edit_text(
+            f"✅ {amount:,} روب‌پوینت با موفقیت کارت به کارت شد.\n"
+            f"💳 کارمزد 5٪: {fee:,}\n📤 مجموع کسرشده: {total:,}\n"
+            f"💳 حساب مقصد: {dest}\n👤 گیرنده: {user_display_name(target_user)}\n"
+            f"🏦 موجودی جدید بانک: {account.balance:,}\n⏱ کارت به کارت بعدی: 5 دقیقه دیگر"
+        )
         await notify_user_private(context.bot, target_user.telegram_id, f"💳 {amount:,} روب‌پوینت به حساب روبی شما واریز شد.\n👤 فرستنده: {user_display_name(user)}\n💳 حساب شما: {dest}")
     finally: session.close()
 
@@ -6464,14 +6798,15 @@ def main():
     app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|feed|upgrade):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
     app.add_handler(CallbackQueryHandler(referral_admin_button,pattern=r"^ref:(approve|reject):\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit):\d+:\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs):\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit|cz_pairs):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_dice_bet_select,pattern=r"^rdicebet:\d+:\d+:\d+:(odd|even|high|low)$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_rps_choice,pattern=r"^rrps:\d+:(rock|paper|scissors)$"))
     app.add_handler(CallbackQueryHandler(ruby_xo_move,pattern=r"^rxo:\d+:[0-8]$"))
     app.add_handler(CallbackQueryHandler(ruby_rabbit_choice,pattern=r"^rrabbit:\d+:(?:[0-9]|1[0-9])$"))
+    app.add_handler(CallbackQueryHandler(ruby_pairs_move,pattern=r"^rpairs:\d+:(?:[0-9]|1[0-9]|2[0-9])$"))
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
