@@ -138,6 +138,8 @@ class GroupChat(Base):
     city_election_votes = Column(String, nullable=True, default='')           # "رای‌دهنده:کاندید" با کاما جدا شده
     city_election_candidacy_ends_at = Column(DateTime(timezone=True), nullable=True)  # مهلت ثبت‌نام کاندیدها
     city_election_voting_ends_at = Column(DateTime(timezone=True), nullable=True)     # مهلت رای‌گیری (حداکثر 5 ساعت)
+    # ---------- ناظر هوشمند گروه (پیش‌فرض خاموش؛ ادمین گروه روشنش می‌کند) ----------
+    ai_mod = Column(Integer, nullable=False, default=0)
 
 
 
@@ -521,6 +523,7 @@ def init_db():
                 'city_hunt_total': 'INTEGER NOT NULL DEFAULT 0',
                 'city_treasury': 'INTEGER NOT NULL DEFAULT 0',
                 'city_donors': "VARCHAR DEFAULT ''",
+                'ai_mod': 'INTEGER NOT NULL DEFAULT 0',
             }
             for name, definition in gc_additions.items():
                 if name not in gc_cols:
