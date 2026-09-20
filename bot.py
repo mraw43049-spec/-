@@ -24,6 +24,7 @@ from database import (
     FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, GiftCode, GiftCodeRedemption, get_session, init_db
 )
 import ai_service as ai
+import fox_brain as brain
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
     fox_production_interval, fox_production_per_second, fox_rank, fox_upgrade_cost, fox_storage_capacity, get_level_for_points,
@@ -898,10 +899,10 @@ GUIDE_TOPICS = [
 ]
 
 
-if ai.AI_ENABLED:
+if ai.AI_ENABLED or brain.ENABLED:
     GUIDE_TOPICS += [
-        ("🤖 هوش مصنوعی روباهیو", "تو پیوی ربات هر چی خواستی بنویس تا روباه جواب بده. تو گروه با «روباهیو ...»، منشن ربات یا ریپلای روی جواب‌های روباه باهاش حرف بزن. «راهنما <سوالت>» جواب دقیق درباره‌ی ربات می‌ده."),
-        ("🛡 مدیریت هوشمند گروه", "ادمین گروه با «مدیریت هوشمند روشن» فعالش می‌کنه؛ پیام‌های واضحاً توهین‌آمیز یا تبلیغاتی حذف می‌شن. ربات باید ادمین با دسترسی حذف پیام باشه."),
+        ("🤖 گفتگو با روباه", "تو پیوی ربات هر چی خواستی بنویس تا روباه جواب بده. تو گروه با «روباهیو ...»، منشن ربات یا ریپلای روی جواب‌های روباه باهاش حرف بزن. «راهنما <سوالت>» جواب سوال درباره‌ی ربات رو از راهنما پیدا می‌کنه."),
+        ("🛡 مدیریت هوشمند گروه", "ادمین گروه با «مدیریت هوشمند روشن» فعالش می‌کنه؛ فحش و توهین واضح، تبلیغ لینک دعوت/کانال و پیام‌های تکراری حذف می‌شن. بررسی کاملاً روی خود ربات انجام می‌شه. ربات باید ادمین با دسترسی حذف پیام باشه."),
         ("📰 اخبار شهر", "تو گروه بنویس «اخبار شهر» تا یه خبر بامزه از وضعیت شهر روبی گروهت بگیری."),
     ]
 
@@ -7637,7 +7638,7 @@ from telegram import ChatPermissions
 
 AI_REPLY_IDS = OrderedDict()      # (chat_id, message_id) پیام‌هایی که جواب هوش مصنوعی بودند (برای ادامه‌ی گفتگو با ریپلای)
 AI_PREFIX_RE = re.compile(r'^(?:روباهیو|روباه\s*جون|روباه\s*جان|روبی\s*جون|روبی\s*جان)[\s،,:؛!؟]+(.+)$', re.S)
-AI_GUIDE_RE = re.compile(r'^راهنما[\s،,:؛]+(.+)$', re.S)
+AI_GUIDE_RE = re.compile(r'^راهنما(?:[\s،,:؛]+(.+))?$', re.S)
 AI_MAX_PROMPT_CHARS = 800
 
 
@@ -7675,6 +7676,77 @@ def build_ai_knowledge():
     return "\n".join(lines)
 
 
+
+_GUIDE_KEYWORDS = {
+    'روب روب': ['روب روب', 'هور هور', 'عو عو', 'روب پوینت', 'روبپوینت', 'پوینت', 'امتیاز', 'جمع کردن', 'سکه', 'درآمد', 'پول در بیارم'],
+    'شکار': ['شکار', 'هانت'],
+    'روباه / روبی': ['روباه', 'پنل روباه', 'ارتقا روباه', 'تغییر نام', 'اسم روباه', 'نام روباه', 'روباه من', 'تولید روب'],
+    'بازی روبی': ['بازی روبی', 'بازی های روبی', 'میز بازی', 'دوز', 'سنگ کاغذ', 'دارت', 'بسکتبال', 'بولینگ', 'xo'],
+    'بانک': ['بانک', 'افتتاح', 'سود', 'حساب بانکی', 'کارت به کارت', 'کارت', 'واریز'],
+    'کازینو': ['کازینو', 'قمار', 'میز کازینو', 'قمارهای روبی'],
+    'روبام': ['روبام', 'روباش', 'پروفایل', 'مشخصات', 'حساب من'],
+    'لیدر برد': ['لیدر برد', 'لیدربرد', 'رتبه', 'رتبه بندی', 'برترین', 'جدول'],
+    'گردونه': ['گردونه', 'چرخ شانس', 'جایزه روزانه', 'گردونه روزانه'],
+    'قاچاق': ['قاچاق', 'قاچاقچی'],
+    'زندان': ['زندان', 'حبس', 'جریمه', 'زندانی', 'اسپم'],
+    'افزودن ربات': ['افزودن ربات', 'اضافه کردن ربات', 'ربات به گروه', 'ادد', 'حداقل عضو', 'ربات رو بیارم', 'بیارم گروه', 'اضافه کنم به گروه', 'ربات رو اضافه', 'ادد کنم'],
+    'گفتگو با روباه': ['گفتگو', 'چت با روباه', 'باهات حرف', 'حرف زدن با روباه'],
+    'مدیریت هوشمند': ['مدیریت هوشمند', 'ناظر', 'حذف پیام', 'فحش', 'توهین', 'تبلیغ', 'ضد اسپم', 'ضداسپم', 'مدیریت گروه'],
+    'اخبار شهر': ['اخبار شهر', 'خبر شهر', 'خبرنگار'],
+}
+
+
+def build_guide_entries():
+    """آیتم‌های راهنمای جستجوپذیر برای مغز قانون‌محور (فقط حقایق تأییدشده‌ی همین کد)."""
+    entries = []
+    for title, desc in GUIDE_TOPICS:
+        kws = []
+        for key, words in _GUIDE_KEYWORDS.items():
+            if key in title:
+                kws = words
+                break
+        if not kws:   # موضوعی که کلید دستی ندارد: کلمه‌های خود عنوان
+            kws = [w for w in re.split(r'[/\s]+', re.sub(r'[^\w\s/]', ' ', title)) if len(w) >= 4]
+        entries.append({'title': title, 'answer': desc, 'keywords': kws})
+    extra = [
+        ("🎰 اسلات", ['اسلات', 'slot', 'جکپات', 'گردونه شانس', 'اسلات ماشین'],
+         f"از لول {CASINO_UNLOCK_LEVEL}؛ ۱ تا ۳ نفر. تک‌نفره مقابل خانه‌ست (امتیاز بالا جایزه می‌گیره، 7️⃣7️⃣7️⃣ جکپاته). دو نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ی میزه و اگه امتیازها برابر بشه قرعه‌کشی می‌شه. «کازینو روبی» رو بنویس."),
+        ("🎲 تاس", ['تاس', 'dice', 'فرد', 'زوج', 'بزرگترین عدد', 'کوچکترین عدد'],
+         f"از لول {CASINO_UNLOCK_LEVEL}؛ ۱ یا ۲ نفر. تک‌نفره شرط فرد/زوج (ضریب ۱٫۹). دونفره سازنده‌ی میز قانون «بزرگ‌ترین عدد برنده» یا «کوچک‌ترین عدد برنده» رو انتخاب می‌کنه و برای هر دو نفر یکسانه؛ اگه دو عدد برابر بشه مبلغ ورودی برمی‌گرده."),
+        ("🐇 خرگوش‌خور", ['خرگوش', 'خرگوش خور', 'پنجه', 'rabbit'],
+         f"از لول {CASINO_UNLOCK_LEVEL}؛ ۲ نفر، ۲۰ خونه. هر نفر مخفیانه یه خونه رو پنجه‌ش انتخاب می‌کنه و هرکس خونه‌ی پنجه 🐾 رو باز کنه می‌بازه."),
+        ("🃏 دوتایی‌ها", ['دوتایی', 'دوتایی ها', 'جفت', 'حافظه', 'pairs', 'کارت‌های جفت'],
+         f"از لول {CASINO_UNLOCK_LEVEL}؛ ۲ نفر، ۱۶ خونه (۸ جفت)؛ هر نوبت {PAIRS_TURN_SECONDS} ثانیه. هرکس جفت بیشتری پیدا کنه برنده‌ست."),
+        ("🎟 شرط‌بندی کازینو", ['ورودی', 'مبلغ ورودی', 'حداکثر ورودی', 'جایزه میز', 'مبلغ شرط', 'شرط'],
+         f"مبلغ ورودی هر نفر حداکثر {RUBY_MAX_ENTRY:,} روب‌پوینت. میز ۶۰ ثانیه برای پیوستن فرصت داره و هر کاربر هر {RUBY_COOLDOWN_SECONDS} ثانیه فقط یک میز جدید می‌سازه یا وارد میز می‌شه."),
+        ("🏦 بانک روبی (جزئیات)", ['سود بانک', 'کارمزد', 'کارت به کارت', 'انتقال به کارت', 'افتتاح حساب', 'سپرده'],
+         f"از لول ۴؛ افتتاح حساب {BANK_OPEN_COST:,} روب‌پوینت، سود {int(BANK_INTEREST_RATE * 100)}٪ هر ۱۲ ساعت. کارت‌به‌کارت {int(BANK_CARD_TRANSFER_FEE_RATE * 100)}٪ کارمزد داره و هر {BANK_CARD_TRANSFER_COOLDOWN // 60} دقیقه یک‌بار ممکنه."),
+        ("💸 انتقال روب‌پوینت", ['انتقال', 'انتقال روب پوینت', 'بفرستم', 'ارسال پوینت', 'پوینت بفرستم', 'روب پوینت بفرستم', 'پول بفرستم', 'هدیه بدم', 'پوینت بدم', 'روب پوینت بدم', 'به دوستم پوینت'],
+         "روی پیام گیرنده ریپلای کن و بنویس «انتقال روب پوینت 50» (مقدار دلخواه)."),
+        ("🧊 یخچال روبی", ['یخچال', 'یخچال روبی', 'خوراکی', 'غذا'],
+         f"از لول {FRIDGE_UNLOCK_LEVEL} فعال می‌شه؛ «یخچال روبی» رو بنویس."),
+        ("🏭 کارخونه روبی", ['کارخونه', 'کارخانه', 'کارخونه روبی', 'تولید'],
+         f"از لول {FACTORY_UNLOCK_LEVEL} فعال می‌شه؛ «کارخونه روبی» یا «کارخونه» رو بنویس."),
+        ("🦁 شهر روبی", ['شهر', 'شهر روبی', 'شهردار', 'شهردار روبی', 'انتخابات', 'دونیت', 'خزانه', 'سطح شهر'],
+         f"تو گروه «شهر روبی» رو بنویس. شهر تا سطح {CITY_MAX_LEVEL} بالا می‌ره (با روب‌روب، نجات روباه زخمی، شکار و دونیت به خزانه). از سطح {CITY_MAYOR_UNLOCK_LEVEL} انتخابات شهرداری داره («شهردار روبی») و هر دوره‌ی شهردار {CITY_MAYOR_TERM_SECONDS // 86400} روزه. «اخبار شهر» هم یه خبر بامزه از وضعیت شهر می‌ده."),
+        ("👥 دوست روبی", ['دوست روبی', 'دوست', 'دوستان', 'فرند', 'درخواست دوستی', 'دوست اضافه', 'افزودن دوست'],
+         f"«دوست روبی» رو بنویس و ➕ افزودن دوست رو بزن، بعد آیدی عددی یا @یوزرنیم دوستت رو بفرست. حداکثر {FRIEND_LIMIT} دوست؛ درخواست به پیوی ربات دوستت می‌ره و اون قبول یا رد می‌کنه؛ نتیجه هم تو پیوی ربات به تو خبر داده می‌شه. با دوستات می‌تونی روب‌پوینت و پیام بفرستی و رتبه‌شون رو ببینی."),
+        ("🎁 کد هدیه", ['کد هدیه', 'کد جایزه', 'گیفت کد', 'gift code', 'کد', 'جایزه'],
+         "«کد هدیه» رو بنویس، 🎟 ورود کد رو بزن و کد رو روی همون پنل ریپلای کن. هر کد برای هر حساب فقط یک‌بار قابل استفاده‌ست؛ ظرفیت و مهلت داره."),
+        ("🔗 رفرال", ['رفرال', 'زیرمجموعه', 'دعوت', 'لینک دعوت', 'دعوت دوست'],
+         "«رفرال» رو بنویس تا لینک اختصاصی‌ت رو بگیری؛ با دعوت دوستان پاداش می‌گیری."),
+        ("🛍 شاپ روبی", ['شاپ', 'فروشگاه', 'خرید', 'شاپ روبی'],
+         "«شاپ روبی» رو بنویس تا فروشگاه باز بشه."),
+        ("⚽ پیش‌بینی فوتبال", ['پیش بینی', 'پیشبینی', 'فوتبال', 'بازی فوتبال', 'مسابقه'],
+         "«پیش بینی» رو بنویس تا لیست بازی‌های فعال رو ببینی و نتیجه‌ها رو پیش‌بینی کنی."),
+        ("🔼 لول و سطح", ['لول', 'سطح', 'لول آپ', 'چطور لول', 'چجوری لول', 'ارتقا سطح', 'آنلاک', 'باز میشه', 'از چه لولی'],
+         f"با روب روب، شکار و فعالیت‌های دیگه لول می‌گیری. شکار از لول ۲، روباه و بازی‌ها از لول ۳، بانک از لول ۴، کازینو از لول {CASINO_UNLOCK_LEVEL}، قاچاق از لول ۸، یخچال از لول {FRIDGE_UNLOCK_LEVEL}، کارخونه از لول {FACTORY_UNLOCK_LEVEL}."),
+    ]
+    for title, kws, answer in extra:
+        entries.append({'title': title, 'answer': answer, 'keywords': kws})
+    return entries
+
+
 def ai_extract_prompt(update, context):
     """اگه پیام مخاطبِ هوش مصنوعیه (mode, prompt) برمی‌گردونه، وگرنه None."""
     msg = update.message; chat = update.effective_chat
@@ -7683,7 +7755,7 @@ def ai_extract_prompt(update, context):
         return None
     m = AI_GUIDE_RE.match(text)
     if m:
-        return 'guide', m.group(1).strip()[:AI_MAX_PROMPT_CHARS]
+        return 'guide', (m.group(1) or '').strip()[:AI_MAX_PROMPT_CHARS]
     if chat.type == 'private':
         return 'chat', text[:AI_MAX_PROMPT_CHARS]
     bu = (getattr(context.bot, 'username', None) or '').lower()
@@ -7701,8 +7773,8 @@ def ai_extract_prompt(update, context):
 
 
 async def ai_chat_entry(update, context):
-    """از انتهای text_router صدا زده می‌شود؛ اگه پیام مخاطب هوش مصنوعی بود True برمی‌گردونه."""
-    if not ai.AI_ENABLED or not update.message or not update.effective_chat or not update.effective_user:
+    """از انتهای text_router صدا زده می‌شود؛ اگه پیام مخاطب روباه بود True برمی‌گردونه."""
+    if not (ai.AI_ENABLED or brain.ENABLED) or not update.message or not update.effective_chat or not update.effective_user:
         return False
     if context.user_data.get('ai_skip_msg') == update.message.message_id:
         return False       # این پیام ورودی یک فرم ادمین بوده
@@ -7711,52 +7783,51 @@ async def ai_chat_entry(update, context):
         return False
     context.application.create_task(ai_chat_run(update, context, *trig), update=update)
     return True
-
-
 async def ai_chat_run(update, context, mode, prompt):
+    """جواب می‌دهد: اگه AI_API_KEY تنظیم باشه اول از هوش مصنوعی خارجی، وگرنه (یا در صورت خطا) از مغز قانون‌محور."""
     msg = update.message; chat = update.effective_chat; tg_user = update.effective_user
     try:
         if not await require_membership(update, context):
             return
-        ok, reason, wait = ai.user_gate(tg_user.id)
-        if not ok:
-            if reason == 'daily':
-                await msg.reply_text("🦊 امروز خیلی باهم حرف زدیم و صدام دراومد! فردا دوباره بیا، قول می‌دم سرحال باشم.", **reply_kwargs(msg))
-            elif chat.type == 'private':
-                await msg.reply_text(f"🦊 یه لحظه صبر کن؛ {wait} ثانیه‌ی دیگه بپرس.", **reply_kwargs(msg))
-            return
-        if not ai.budget_ok('chat'):
-            await msg.reply_text("🦊 امروز مغزم از بس فکر کردن داغ شد؛ فردا دوباره امتحان کن.", **reply_kwargs(msg))
-            return
-        ai.user_note(tg_user.id); ai.budget_note('chat')
-        try: await context.bot.send_chat_action(chat.id, 'typing')
-        except Exception: pass
         session = get_session()
         try:
             u = get_or_create_user(session, tg_user)
-            ctx_line = f"اسم: {user_display_name(u)}؛ لول: {u.level}؛ اسم روباهش: {u.fox_name or 'مکار'}"
+            ctx_dict = {'name': user_display_name(u), 'level': u.level, 'fox': u.fox_name or 'مکار'}
         finally:
             session.close()
-        key = f"{chat.id}:{tg_user.id}"
-        hist = ai.history_get(key)
-        answer = await ai.complete(
-            ai.build_system(mode, ctx_line), hist + [{'role': 'user', 'content': prompt}],
-            max_tokens=350 if mode == 'chat' else 450, temperature=0.8 if mode == 'chat' else 0.3)
+        answer = None
+        if ai.AI_ENABLED:
+            ok, reason, wait = ai.user_gate(tg_user.id)
+            if not ok and reason == 'cooldown':
+                if chat.type == 'private':
+                    await msg.reply_text(f"🦊 یه لحظه صبر کن؛ {wait} ثانیه‌ی دیگه بپرس.", **reply_kwargs(msg))
+                return
+            if ok and ai.budget_ok('chat'):
+                ai.user_note(tg_user.id); ai.budget_note('chat')
+                try: await context.bot.send_chat_action(chat.id, 'typing')
+                except Exception: pass
+                ctx_line = f"اسم: {ctx_dict['name']}؛ لول: {ctx_dict['level']}؛ اسم روباهش: {ctx_dict['fox']}"
+                key = f"{chat.id}:{tg_user.id}"
+                raw = await ai.complete(
+                    ai.build_system(mode, ctx_line), ai.history_get(key) + [{'role': 'user', 'content': prompt or 'راهنما'}],
+                    max_tokens=350 if mode == 'chat' else 450, temperature=0.8 if mode == 'chat' else 0.3)
+                if raw:
+                    answer = ai.clean_output(raw)
+                    if answer:
+                        ai.history_add(key, prompt, answer)
+            # سقف روزانه پر شده یا API خطا داد → بی‌سروصدا به مغز قانون‌محور برمی‌گردیم
         if not answer:
-            await msg.reply_text("🦊 الان مغزم قفل کرده؛ چند لحظه‌ی دیگه دوباره بپرس.", **reply_kwargs(msg))
-            return
-        answer = ai.clean_output(answer)
+            if not brain.ENABLED or not brain.gate(tg_user.id):
+                return
+            answer = brain.reply(mode, prompt, ctx_dict)
         if not answer:
             return
-        ai.history_add(key, prompt, answer)
         sent = await msg.reply_text(answer, **reply_kwargs(msg))
         AI_REPLY_IDS[(chat.id, sent.message_id)] = 1
         while len(AI_REPLY_IDS) > 3000:
             AI_REPLY_IDS.popitem(last=False)
     except Exception:
-        logger.exception('ai chat failed')
-
-
+        logger.exception('fox chat failed')
 # ── ناظر هوشمند گروه ──
 _AI_MOD_CACHE = {}       # chat_id → (روشن؟، زمان)
 _AI_ADMIN_CACHE = {}     # (chat_id, user_id) → (ادمین؟، زمان)
@@ -7797,38 +7868,27 @@ async def ai_is_chat_admin(bot, chat_id, user_id, use_cache=True):
 
 
 async def ai_moderation_handler(update, context):
-    """روی هر پیام متنی گروه؛ فقط اگه ناظر هوشمند روشن باشه کار می‌کنه و هیچ‌وقت جلوی بقیه‌ی هندلرها رو نمی‌گیره."""
-    if not ai.AI_ENABLED:
+    """روی هر پیام متنی گروه؛ فقط اگه ناظر هوشمند روشن باشه کار می‌کنه و هیچ‌وقت جلوی بقیه‌ی هندلرها رو نمی‌گیره.
+    بررسی کاملاً محلیه (بدون هیچ سرویس خارجی) و لحظه‌ایه."""
+    if not brain.ENABLED:
         return
     msg = update.message; chat = update.effective_chat; user = update.effective_user
     if not msg or not msg.text or not chat or chat.type not in ('group', 'supergroup') or not user or user.is_bot:
         return
     if user.id in ADMIN_IDS or not ai_mod_enabled(chat.id):
         return
-    text = msg.text.strip()
-    if len(text) < 4 or text in FOX_CLAIM_ALIASES or not re.search(r'[^\W\d_]', text):
+    verdict = brain.moderate(msg.text, chat.id, user.id)
+    if not verdict:
         return
-    context.application.create_task(ai_moderation_run(update, context, text), update=update)
-
-
-async def ai_moderation_run(update, context, text):
+    context.application.create_task(ai_moderation_run(update, context, verdict[0]), update=update)
+async def ai_moderation_run(update, context, kind):
     try:
         msg = update.message; chat = update.effective_chat; user = update.effective_user
         if await ai_is_chat_admin(context.bot, chat.id, user.id):
             return
-        if not ai.mod_gate(chat.id, user.id):
-            return
-        verdict = await ai.classify(text)
-        if not verdict:
-            return
-        v, s = verdict
-        if v == 'none' or s < 2:
-            return
-        await ai_apply_violation(context, msg, chat, user, v)
+        await ai_apply_violation(context, msg, chat, user, kind)
     except Exception:
-        logger.exception('ai moderation failed')
-
-
+        logger.exception('moderation failed')
 async def ai_apply_violation(context, msg, chat, user, v):
     key = (chat.id, user.id); now = _time.time()
     strikes = [t for t in _AI_STRIKES.get(key, []) if now - t < 86400] + [now]
@@ -7873,8 +7933,8 @@ async def ai_mod_command(update, context):
         return
     if user.id not in ADMIN_IDS and not await ai_is_chat_admin(context.bot, chat.id, user.id, use_cache=False):
         await msg.reply_text("⛔ فقط ادمین‌های گروه می‌تونن مدیریت هوشمند رو تنظیم کنن.", **reply_kwargs(msg)); return
-    if not ai.AI_ENABLED:
-        await msg.reply_text("ℹ️ هوش مصنوعی روی این ربات فعال نیست.", **reply_kwargs(msg)); return
+    if not brain.ENABLED:
+        await msg.reply_text("ℹ️ مدیریت هوشمند روی این ربات فعال نیست.", **reply_kwargs(msg)); return
     text = re.sub(r'\s+', ' ', (msg.text or '').strip())
     want = 1 if text.endswith('روشن') else 0 if text.endswith('خاموش') else None
     if want is not None:
@@ -7898,8 +7958,9 @@ async def ai_mod_command(update, context):
             pass
         await msg.reply_text(
             "🛡 مدیریت هوشمند روشن شد!\n\n"
-            "• پیام‌های متنی گروه برای تشخیص توهین، نفرت‌پراکنی و تبلیغات به سرویس هوش مصنوعی فرستاده می‌شن (ذخیره نمی‌شن).\n"
-            f"• فقط تخلف واضح حذف می‌شه. سومین تخلف در ۲۴ ساعت = {AI_MUTE_MINUTES} دقیقه سکوت.\n"
+            "• پیام‌های متنی گروه روی خود ربات بررسی می‌شن (به هیچ سرویس بیرونی فرستاده و ذخیره نمی‌شن).\n"
+            "• حذف می‌شه: فحش و توهین واضح، تبلیغ لینک دعوت/کانال/شماره‌ی فروش، و پیام تکراری پشت‌سرهم.\n"
+            f"• سومین تخلف در ۲۴ ساعت = {AI_MUTE_MINUTES} دقیقه سکوت.\n"
             "• ادمین‌های گروه بررسی نمی‌شن.\n"
             "• برای خاموش کردن: «مدیریت هوشمند خاموش»" + note, **reply_kwargs(msg))
     elif want == 0:
@@ -7927,6 +7988,7 @@ def ai_city_facts(session, row):
         'claims': int(row.city_claim_total or 0), 'rescued': int(row.city_rescued_total or 0),
         'hunts': int(row.city_hunt_total or 0), 'treasury': int(row.city_treasury or 0),
         'mayor': (row.city_mayor_name if row.city_mayor_id else None) or row.city_owner_name, 'donors': donors, 'need': None,
+        'max_level': CITY_MAX_LEVEL,
     }
     if level < CITY_MAX_LEVEL:
         req = city_requirements(level)
@@ -7961,14 +8023,13 @@ async def city_news_command(update, context):
         await msg.reply_text("📰 اخبار شهر فقط مخصوص گروه‌هاست؛ این دستور رو تو یه گروه بفرست.", **reply_kwargs(msg)); return
     if not await require_membership(update, context):
         return
-    if not ai.AI_ENABLED:
-        await msg.reply_text("ℹ️ اخبار شهر به هوش مصنوعی نیاز داره و روی این ربات فعال نیست.", **reply_kwargs(msg)); return
-    cached = _AI_NEWS_CACHE.get(chat.id)
-    if cached and _time.time() - cached[0] < AI_NEWS_CACHE_SECONDS:
-        await msg.reply_text(cached[1] + "\n\n🕓 این خبر چند لحظه پیشه؛ اخبار شهر هر ۲ ساعت تازه می‌شه.", **reply_kwargs(msg)); return
+    if not (ai.AI_ENABLED or brain.ENABLED):
+        await msg.reply_text("ℹ️ اخبار شهر روی این ربات فعال نیست.", **reply_kwargs(msg)); return
+    last = _AI_NEWS_CACHE.get(chat.id)
+    if last and _time.time() - last[0] < 60:
+        await msg.reply_text("⏳ خبرنگار هنوز داره خبر جمع می‌کنه؛ یه دقیقه‌ی دیگه بپرس.", **reply_kwargs(msg)); return
+    _AI_NEWS_CACHE[chat.id] = (_time.time(), '')
     context.application.create_task(city_news_run(update, context), update=update)
-
-
 async def city_news_run(update, context):
     msg = update.message; chat = update.effective_chat
     try:
@@ -7981,40 +8042,37 @@ async def city_news_run(update, context):
         finally:
             session.close()
         text = None
-        if ai.budget_ok('news'):
+        if ai.AI_ENABLED and ai.budget_ok('news'):
             ai.budget_note('news')
             try: await context.bot.send_chat_action(chat.id, 'typing')
             except Exception: pass
             raw = await ai.complete(ai.NEWS_SYSTEM, [{'role': 'user', 'content': "اطلاعات شهر:\n" + ai_city_facts_text(facts)}],
                                     max_tokens=300, temperature=0.8)
-            text = ai.clean_output(raw or '', 700)
-        if text:
-            text = f"📰 اخبار شهر روبی\n\n{text}"
-        else:
-            text = ai_city_news_fallback(facts)
-        _AI_NEWS_CACHE[chat.id] = (_time.time(), text)
+            cleaned = ai.clean_output(raw or '', 700)
+            text = f"📰 اخبار شهر روبی\n\n{cleaned}" if cleaned else None
+        if not text:
+            text = brain.city_news(facts)
         await msg.reply_text(text, **reply_kwargs(msg))
     except Exception:
         logger.exception('city news failed')
-
-
 async def ai_city_levelup_news(context, chat_id, title, level):
     """بعد از تبریک ارتقای شهر، یک خبر کوتاه و بامزه هم (در پس‌زمینه) می‌فرستد."""
     try:
-        if not (ai.AI_ENABLED and ai.budget_ok('news')):
-            return
-        ai.budget_note('news')
-        raw = await ai.complete(
-            ai.NEWS_SYSTEM,
-            [{'role': 'user', 'content': f"خبر فوری: شهر «{title}» تازه به سطح {level} از {CITY_MAX_LEVEL} ارتقا پیدا کرد. یه خبر کوتاه و شاد برای اهالی شهر بنویس."}],
-            max_tokens=150, temperature=0.9, timeout=20.0)
-        text = ai.clean_output(raw or '', 400)
+        text = None
+        if ai.AI_ENABLED and ai.budget_ok('news'):
+            ai.budget_note('news')
+            raw = await ai.complete(
+                ai.NEWS_SYSTEM,
+                [{'role': 'user', 'content': f"خبر فوری: شهر «{title}» تازه به سطح {level} از {CITY_MAX_LEVEL} ارتقا پیدا کرد. یه خبر کوتاه و شاد برای اهالی شهر بنویس."}],
+                max_tokens=150, temperature=0.9, timeout=20.0)
+            cleaned = ai.clean_output(raw or '', 400)
+            text = ("📰 " + cleaned) if cleaned else None
+        if not text and brain.ENABLED:
+            text = brain.levelup_news(title, level)
         if text:
-            await context.bot.send_message(chat_id, "📰 " + text)
+            await context.bot.send_message(chat_id, text)
     except Exception:
         logger.exception('city level-up news failed')
-
-
 # ── ابزار ادمین ──
 async def ai_admin_command(update, context):
     """«وضعیت هوش مصنوعی» / «تست هوش مصنوعی» — فقط ادمین‌های ربات (ADMIN_IDS)."""
@@ -8022,30 +8080,33 @@ async def ai_admin_command(update, context):
     if not admin_only(update.effective_user.id):
         return
     key = ai.AI_API_KEY
-    masked = ('…' + key[-4:]) if key else 'تنظیم نشده ❌'
+    masked = ('…' + key[-4:]) if key else 'تنظیم نشده'
     snap = ai.usage_snapshot()
     lines = [
-        "🤖 وضعیت هوش مصنوعی", "",
-        f"• فعال: {'بله ✅' if ai.AI_ENABLED else 'خیر ❌'}",
-        f"• provider: {ai.AI_PROVIDER}", f"• مدل: {ai.AI_MODEL or 'تنظیم نشده ❌'}", f"• آدرس: {ai.AI_BASE_URL}",
-        f"• کلید API: {masked}", "",
-        "📊 مصرف امروز (ساعت UTC):",
-        *[f"  - {b}: {snap['budgets'].get(b, 0)} از {lim}" for b, lim in snap['limits'].items()],
-        f"• کاربرهای فعال امروز: {snap['users_today']}", f"• گروه‌های دارای ناظر فعال امروز: {snap['mod_chats_today']}",
+        "🤖 وضعیت روباهیو", "",
+        f"🧠 مغز قانون‌محور (رایگان، داخل خود ربات): {'فعال ✅' if brain.ENABLED else 'خاموش ❌'}",
+        "   گفتگو، «راهنما ...»، مدیریت هوشمند گروه و اخبار شهر", "",
+        f"🌐 هوش مصنوعی خارجی (اختیاری): {'فعال ✅' if ai.AI_ENABLED else 'غیرفعال ⚪️ (AI_API_KEY تنظیم نشده)'}",
     ]
+    if ai.AI_ENABLED or key:
+        lines += [f"   provider: {ai.AI_PROVIDER} | مدل: {ai.AI_MODEL or '—'} | کلید: {masked}",
+                  "   مصرف امروز: " + "، ".join(f"{b} {snap['budgets'].get(b, 0)}/{lim}" for b, lim in snap['limits'].items())]
     if ai.LAST_ERROR:
-        lines += ["", f"⚠️ آخرین خطا: {ai.LAST_ERROR}"]
+        lines += ["", f"⚠️ آخرین خطای API: {ai.LAST_ERROR}"]
     if (msg.text or '').strip().startswith('تست'):
         if not ai.AI_ENABLED:
-            lines += ["", "برای تست اول AI_API_KEY (و اگه provider=openai بود AI_MODEL) رو تو Variables بذار."]
+            ctx = {'name': 'ادمین', 'level': 1, 'fox': 'مکار'}
+            lines += ["", "🧪 تست مغز قانون‌محور:",
+                      f"• گفتگو («سلام»): {brain.chat_reply('سلام', ctx)}",
+                      f"• راهنما («بانک»): {brain.guide_answer('بانک')[:160].replace(chr(10), ' ')}…",
+                      f"• ناظر (لینک دعوت): {brain.moderate_text('عضو کانال ما شو t.me/+abc') or 'تشخیص داده نشد ❌'}",
+                      f"• تعداد موضوع‌های راهنما: {len(brain.guide_titles())}"]
             await msg.reply_text("\n".join(lines), **reply_kwargs(msg)); return
-        await msg.reply_text("⏳ دارم یه پیام تست به API می‌فرستم...", **reply_kwargs(msg))
+        await msg.reply_text("\n".join(lines) + "\n\n⏳ دارم یه پیام تست به API می‌فرستم...", **reply_kwargs(msg))
         context.application.create_task(ai_admin_selftest(update, context), update=update)
         return
-    lines += ["", "برای تست اتصال بنویس: تست هوش مصنوعی"]
+    lines += ["", "برای تست بنویس: تست هوش مصنوعی"]
     await msg.reply_text("\n".join(lines), **reply_kwargs(msg))
-
-
 async def ai_admin_selftest(update, context):
     msg = update.message
     try:
@@ -8162,7 +8223,9 @@ def main():
     if not BOT_TOKEN: raise RuntimeError('BOT_TOKEN is missing. Add BOT_TOKEN in Railway Variables.')
     init_db()
     ai.set_knowledge(build_ai_knowledge())
-    logger.info("AI: %s", f"فعال ✅ ({ai.AI_PROVIDER} / {ai.AI_MODEL})" if ai.AI_ENABLED else "غیرفعال (AI_API_KEY تنظیم نشده)")
+    brain.set_guide(build_guide_entries())
+    logger.info("مغز قانون‌محور: %s | هوش مصنوعی خارجی: %s", "فعال" if brain.ENABLED else "خاموش",
+                f"فعال ({ai.AI_PROVIDER} / {ai.AI_MODEL})" if ai.AI_ENABLED else "غیرفعال (AI_API_KEY تنظیم نشده)")
     app=ApplicationBuilder().token(BOT_TOKEN).build()
     if app.job_queue is None:
         raise RuntimeError("JobQueue is unavailable. Install python-telegram-bot[job-queue].")
