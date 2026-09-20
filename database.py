@@ -203,6 +203,18 @@ class FoxKnowledge(Base):
     file_id = Column(String, nullable=True)
     file_unique_id = Column(String, nullable=True)
 
+class FoxMoodSong(Base):
+    """آهنگ‌هایی که پشتیبانی برای «روباهیو حال» اضافه می‌کنه؛ هر آهنگ یک یا چند حال (happy,calm,sad,energy,love,rage) داره."""
+    __tablename__ = 'fox_mood_songs'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    moods = Column(String, nullable=False)          # مثلاً "happy,energy"
+    media_type = Column(String, nullable=False)     # audio | document
+    file_id = Column(String, nullable=False)
+    file_unique_id = Column(String, nullable=True)
+    title = Column(String, nullable=True)
+    created_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class GiftCodeRedemption(Base):
     __tablename__ = 'gift_code_redemptions'
     id = Column(Integer, primary_key=True, autoincrement=True)

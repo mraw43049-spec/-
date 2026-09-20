@@ -21,7 +21,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, GiftCode, GiftCodeRedemption, FoxKnowledge, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, get_session, init_db
 )
 import ai_service as ai
 import fox_brain as brain
@@ -7889,7 +7889,10 @@ async def fox_teach_media_caption(update, context):
         return
     if not fox_extract_media(msg):
         return
-    await fox_teach_media(update, context, msg, (msg.caption or '').strip())
+    cap = (msg.caption or '').strip()
+    if MOOD_ADD_RE.match(cap):          # «آهنگ حال: شاد» → آهنگِ «روباهیو حال»
+        await fox_mood_song_add(update, context, msg, cap); return
+    await fox_teach_media(update, context, msg, cap)
 
 
 async def send_fox_media(msg, entry, ctx):
@@ -7975,6 +7978,305 @@ async def fox_teach_command(update, context):
     load_custom_entries()
     await reply(f"✅ یاد گرفتم! (شماره {rid})\n\n🔑 کلیدها: {'، '.join(keys)}\n💬 جواب: {answer[:200]}\n\n"
                 "تست کن: یکی از کلیدها رو تو پیوی برام بنویس. برای حذف: فراموش کن " + str(rid))
+
+
+# ── «روباهیو حال»: ۵ سوال ۳گزینه‌ای → آهنگِ متناسب با حال (آهنگ‌ها رو پشتیبانی اضافه می‌کنه) ──
+FOX_MOODS = {
+    'happy': ('😄', 'شاد'), 'calm': ('😌', 'آروم'), 'sad': ('😢', 'غمگین'),
+    'energy': ('⚡', 'پرانرژی'), 'love': ('💕', 'عاشقانه'), 'rage': ('😤', 'عصبی'),
+}
+FOX_MOOD_WORDS = {brain.normalize(k): v for k, v in {
+    'شاد': 'happy', 'خوشحال': 'happy', 'آروم': 'calm', 'آرام': 'calm', 'ریلکس': 'calm',
+    'غمگین': 'sad', 'دلتنگ': 'sad', 'ناراحت': 'sad', 'پرانرژی': 'energy', 'انرژی': 'energy', 'هیجانی': 'energy',
+    'عاشقانه': 'love', 'عاشق': 'love', 'عصبی': 'rage', 'خشمگین': 'rage', 'شاکی': 'rage',
+}.items()}
+# اگه برای یه حال آهنگی نبود، از نزدیک‌ترین حال‌ها انتخاب می‌شه
+FOX_MOOD_NEAR = {
+    'happy': ['energy', 'love', 'calm', 'rage', 'sad'], 'calm': ['love', 'sad', 'happy', 'energy', 'rage'],
+    'sad': ['calm', 'love', 'rage', 'happy', 'energy'], 'energy': ['happy', 'rage', 'love', 'calm', 'sad'],
+    'love': ['calm', 'happy', 'sad', 'energy', 'rage'], 'rage': ['energy', 'sad', 'calm', 'happy', 'love'],
+}
+MOOD_ADD_RE = re.compile(r'^(?:یاد\s*بگیر\s+)?آهنگ\s+حال[\s:：]+(?P<m>.+)$', re.S)
+MOOD_LIST_RE = re.compile(r'^لیست\s+آهنگ\s+حال$')
+MOOD_DEL_RE = re.compile(r'^حذف\s+آهنگ\s+حال[\s:：]+(\d+)$')
+MOOD_START_RE = re.compile(r'^(?:(?:روباهیو|روباه جون|روباه|روبی)\s+)?(?P<x>حال|حالم|حال من|حال و هوا|حال و هوام|حالمو خوب کن|حال منو خوب کن)$')
+MOOD_USAGE = (
+    "🎶 اضافه کردن آهنگ برای «روباهیو حال» (فقط ادمین، تو پیوی):\n\n"
+    "آهنگ رو بفرست و تو کپشنش بنویس:\nآهنگ حال: شاد\n"
+    "یا روی آهنگ ریپلای کن و بنویس: آهنگ حال: آروم، عاشقانه\n\n"
+    "حال‌ها: شاد، آروم، غمگین، پرانرژی، عاشقانه، عصبی (می‌تونی چندتا رو با ویرگول بنویسی)\n"
+    "لیست: لیست آهنگ حال   |   حذف: حذف آهنگ حال <شماره>"
+)
+
+# H/C/S/E/L/R = شاد/آروم/غمگین/پرانرژی/عاشقانه/عصبی
+_H, _C, _S, _E, _L, _R = 'happy', 'calm', 'sad', 'energy', 'love', 'rage'
+FOX_MOOD_QUESTIONS = [
+    ("امروز چطور بود؟", (("عالی بود 😄", _H), ("معمولی و آروم 😌", _C), ("سنگین و خسته‌کننده 😔", _S))),
+    ("الان دلت چی می‌خواد؟", (("رقصیدن و انرژی گرفتن 💃", _E), ("یه گوشه‌ی آروم با چای ☕", _C), ("یه بغل گرم 🫂", _L))),
+    ("اگه حالت یه هوا بود کدوم بود؟", (("آفتابی ☀️", _H), ("بارونی 🌧", _S), ("طوفانی ⛈", _R))),
+    ("الان بیشتر به کدوم نزدیکی؟", (("دلم گرفته 💔", _S), ("سرشار از انرژیم ⚡", _E), ("عاشقانه‌ام 💕", _L))),
+    ("یه جمعه‌ی خالی رو چطور می‌گذرونی؟", (("با رفیقا می‌رم بیرون 🎉", _H), ("لم می‌دم و فیلم می‌بینم 🎬", _C), ("می‌دوم و ورزش سنگین می‌کنم 🏃", _E))),
+    ("ذهنت الان شبیه چیه؟", (("یه دریای آروم 🌊", _C), ("یه آتشفشان 🌋", _R), ("یه بالن رنگی 🎈", _H))),
+    ("کدوم جمله بیشتر به دلت می‌شینه؟", (("دلم برای یکی تنگ شده 🥺", _S), ("دلم یه عشق تازه می‌خواد 💘", _L), ("دلم می‌خواد داد بزنم 😤", _R))),
+    ("صبح‌ت چطور شروع شد؟", (("با لبخند ☺️", _H), ("با خستگی 😴", _S), ("با یه دنیا کار و شلوغی 🏃‍♂️", _E))),
+    ("الان تو ماشین بودی چی می‌خواستی؟", (("صدا تا آخر بلند 🔊", _E), ("شیشه پایین و آروم 🌬", _C), ("تنها و غرق فکر 🌙", _S))),
+    ("یه کلمه برای الانت؟", (("سرخوش 🥳", _H), ("بی‌حوصله 😑", _R), ("دلتنگ 🍂", _S))),
+    ("اگه الان کسی کنارت بود؟", (("می‌خندوندمش 😆", _H), ("دستش رو می‌گرفتم 🤝", _L), ("ساکت کنارش می‌نشستم 🕊", _C))),
+    ("با کدوم رنگ بیشتر حال می‌کنی؟", (("نارنجی و زرد 🟠", _H), ("آبی و سبز 🔵", _C), ("قرمز و مشکی ⚫", _R))),
+    ("شب‌ها ذهنت پیش چیه؟", (("فکر و خیالای زیاد 💭", _S), ("برنامه‌های فردا 📝", _E), ("خیال‌بافی درباره‌ی یه آدم خاص 💫", _L))),
+    ("الان بدنت چی می‌خواد؟", (("تکون خوردن و ورزش 🏋️", _E), ("یه چرت آروم 🛌", _C), ("مشت زدن به کیسه‌ی بوکس 🥊", _R))),
+    ("کدوم موقعیت رو انتخاب می‌کنی؟", (("یه پارتی شلوغ 🎊", _E), ("یه کافه‌ی خلوت ☕", _C), ("یه شب‌نشینی دو نفره 🕯", _L))),
+    ("اگه احساست یه فیلم بود؟", (("کمدی 🎭", _H), ("درام غمگین 😢", _S), ("اکشن پرهیجان 💥", _E))),
+    ("الان بیشتر چی کم داری؟", (("آرامش 🧘", _C), ("یه آدم که درکم کنه 🥲", _S), ("یه ماجراجویی تازه 🚀", _E))),
+    ("کدوم شعار مال توئه؟", (("زندگی قشنگه 🌈", _H), ("هیچی مهم نیست 🙃", _R), ("عشق همه‌چیزه ❤️", _L))),
+    ("آخرین بار کِی از ته دل خندیدی؟", (("همین امروز 😂", _H), ("خیلی وقته 😶", _S), ("حوصله‌ی خندیدن ندارم 😒", _R))),
+    ("اگه یه سفر می‌رفتی کجا بود؟", (("کوه و طبیعت 🏔", _C), ("شهربازی و ماجراجویی 🎢", _E), ("یه شهر عاشقانه مثل پاریس 🗼", _L))),
+    ("حالت با کدوم غذا جوره؟", (("پیتزا و خنده 🍕", _H), ("سوپ داغ و آروم 🍲", _C), ("شکلات تلخ و دلتنگی 🍫", _S))),
+    ("الان گوشیت چی نشون می‌ده؟", (("پر از پیام و شلوغی 📱", _E), ("هیچ پیامی از اون آدم 😞", _S), ("یه پیام قشنگ 💌", _L))),
+    ("کدوم کار رو ترجیح می‌دی؟", (("یه مسابقه‌ی سخت 🏆", _E), ("نقاشی یا کتاب خوندن 📚", _C), ("گفتن حرفای نگفته‌ی دلم 🗣", _R))),
+    ("الان به چی نیاز داری؟", (("یه دل‌گرمی 🌷", _L), ("یه شارژ انرژی مثبت 🔋", _E), ("یه گریه‌ی درست‌حسابی 😭", _S))),
+    ("کدوم صحنه رو بیشتر دوست داری؟", (("غروب کنار دریا 🌅", _C), ("وسط یه کنسرت شلوغ 🎤", _E), ("قدم زدن زیر بارون ☔", _S))),
+    ("الان دوست داری چیکار کنی؟", (("برقصم 🕺", _H), ("بخوابم 😴", _C), ("همه‌چیز رو بشکنم 💢", _R))),
+    ("یه روز کامل مال خودته:", (("پر از شوخی و بازی 🎮", _H), ("یه روز کاملاً عاشقانه ❤️‍🔥", _L), ("یه روز فقط استراحت 🛋", _C))),
+    ("الان قلبت چطوره؟", (("سبک و شاد 🎈", _H), ("سنگین و پر 🪨", _S), ("تند و پرشور 🥁", _E))),
+    ("دلت کدوم رو می‌خواد؟", (("یه قهوه‌ی تلخ و فکر 🌒", _S), ("یه خاطره‌ی خوب 📷", _L), ("یه شروع تازه 🌱", _H))),
+    ("اگه حالت یه ترانه بود؟", (("تند و ریتمی 🥁", _E), ("ملایم و پیانویی 🎹", _C), ("پر از فریاد و گیتار 🎸", _R))),
+]
+FOX_MOOD_PER_GAME = 5
+_MOOD_START_AT = {}          # user_id → زمان آخرین شروع (ضداسپم)
+_MOOD_DONE = OrderedDict()   # (chat_id, message_id) → 1  (جلوگیری از دوبار فرستادن آهنگ با دوبل‌تپ)
+_MOOD_LAST_SONG = {}         # user_id → id آخرین آهنگی که گرفته (تا پشت‌سرهم تکراری نیاد)
+
+
+def mood_today():
+    """شماره‌ی روز (به وقت ایران)؛ سوال‌ها هر روز عوض می‌شن."""
+    return (datetime.now(timezone.utc) + timedelta(hours=3, minutes=30)).date().toordinal()
+
+
+def _mood_order(cycle, n, per, slots):
+    order = list(range(n)); random.Random(cycle).shuffle(order)
+    if cycle > 0 and slots >= 3:
+        prev = list(range(n)); random.Random(cycle - 1).shuffle(prev)
+        prev_last = set(prev[(slots - 1) * per: slots * per])
+        bad = [i for i in range(per) if order[i] in prev_last]
+        spare = [j for j in range(per, (slots - 1) * per) if order[j] not in prev_last]
+        for i, j in zip(bad, spare):
+            order[i], order[j] = order[j], order[i]
+    return order
+
+
+def mood_questions_for(eday):
+    """۵ سوال امروز. سوال‌ها به‌صورت چرخه‌ی چندروزه پخش می‌شن: تو یه چرخه هیچ سوالی تکرار نمی‌شه و دو روز پشت‌سرهم هم سوال مشترک ندارن."""
+    n = len(FOX_MOOD_QUESTIONS); per = FOX_MOOD_PER_GAME
+    slots = max(1, n // per)
+    order = _mood_order(eday // slots, n, per, slots)
+    s = eday % slots
+    return [FOX_MOOD_QUESTIONS[i] for i in order[s * per:(s + 1) * per]]
+
+
+def mood_result(qs, picks):
+    """پرتکرارترین حال بین جواب‌ها؛ اگه مساوی شد حالِ جواب‌های آخرتر برنده‌ست."""
+    tally = {}; last = {}
+    for j, ch in enumerate(picks):
+        mk = qs[j][1][int(ch)][1]
+        tally[mk] = tally.get(mk, 0) + 1; last[mk] = j
+    top = max(tally.values())
+    return max([k for k, v in tally.items() if v == top], key=lambda k: last[k])
+
+
+def mood_question_view(uid, eday, picks):
+    qs = mood_questions_for(eday); step = len(picks); q = qs[step]
+    text = (f"🦊 حالت رو بهم بگو تا آهنگ مخصوص خودت رو پیدا کنم!\n\n"
+            f"❓ سوال {step + 1} از {len(qs)}:\n{q[0]}")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=f"md:{uid}:{eday}:{picks}:{k}")]
+                               for k, (label, _) in enumerate(q[1])])
+    return text, kb
+
+
+def mood_pick_song(mood, uid):
+    """آهنگی که به حال کاربر می‌خوره؛ اگه برای این حال آهنگی نبود از نزدیک‌ترین حال‌ها. None = هیچ آهنگی تو ربات نیست."""
+    session = get_session()
+    try:
+        songs = [{'id': r.id, 'moods': set(x for x in (r.moods or '').split(',') if x), 'media_type': r.media_type,
+                  'file_id': r.file_id, 'title': r.title or ''} for r in session.query(FoxMoodSong).all()]
+    finally:
+        session.close()
+    if not songs:
+        return None
+    pool = []
+    for mk in [mood] + FOX_MOOD_NEAR.get(mood, []):
+        pool = [x for x in songs if mk in x['moods']]
+        if pool:
+            break
+    pool = pool or songs
+    if len(pool) > 1 and uid in _MOOD_LAST_SONG:
+        pool = [x for x in pool if x['id'] != _MOOD_LAST_SONG[uid]] or pool
+    song = random.choice(pool)
+    _MOOD_LAST_SONG[uid] = song['id']
+    while len(_MOOD_LAST_SONG) > 5000:
+        _MOOD_LAST_SONG.pop(next(iter(_MOOD_LAST_SONG)))
+    return song
+
+
+def mood_is_start(text, chat_type):
+    """«روباهیو حال» (تو گروه حتماً با اسم روباه؛ تو پیوی «حال» هم کافیه)."""
+    n = brain.normalize(text)
+    m = MOOD_START_RE.match(n)
+    if not m:
+        return False
+    return chat_type == 'private' or n != m.group('x')
+
+
+async def mood_start(update, context):
+    msg = update.message; user = update.effective_user
+    if not await require_membership(update, context):
+        return
+    now = _time.time()
+    if now - _MOOD_START_AT.get(user.id, 0) < 15:
+        return
+    _MOOD_START_AT[user.id] = now
+    if len(_MOOD_START_AT) > 5000:
+        for k in sorted(_MOOD_START_AT, key=_MOOD_START_AT.get)[:2000]:
+            _MOOD_START_AT.pop(k, None)
+    session = get_session()
+    try:
+        has_songs = session.query(FoxMoodSong).count() > 0
+    finally:
+        session.close()
+    if not has_songs:
+        await msg.reply_text("🦊 هنوز پشتیبانی آهنگی برای این بخش اضافه نکرده؛ یه کم دیگه دوباره بیا 🎶", **reply_kwargs(msg)); return
+    text, kb = mood_question_view(user.id, mood_today(), '')
+    sent = await msg.reply_text(text, reply_markup=kb, **reply_kwargs(msg))
+    AI_REPLY_IDS[(update.effective_chat.id, sent.message_id)] = 1
+
+
+async def mood_button(update, context):
+    q = update.callback_query
+    m = re.fullmatch(r"md:(\d+):(\d+):([0-2]{0,4}):([0-2])", q.data or "")
+    if not m:
+        await q.answer(); return
+    uid, eday, picks, k = int(m.group(1)), int(m.group(2)), m.group(3), m.group(4)
+    if q.from_user.id != uid:
+        await q.answer("⛔️ این سوال‌ها برای یکی دیگه‌ست؛ خودت بنویس «روباهیو حال» 🦊", show_alert=True); return
+    qs = mood_questions_for(eday)
+    if len(picks) >= len(qs):
+        await q.answer(); return
+    picks += k
+    if len(picks) < len(qs):
+        text, kb = mood_question_view(uid, eday, picks)
+        await q.answer()
+        try:
+            await q.edit_message_text(text, reply_markup=kb)
+        except BadRequest:
+            pass
+        return
+    # جواب پنجم: آهنگ رو پیدا کن و بفرست
+    key = (q.message.chat_id, q.message.message_id)
+    if key in _MOOD_DONE:
+        await q.answer(); return
+    _MOOD_DONE[key] = 1
+    while len(_MOOD_DONE) > 3000:
+        _MOOD_DONE.popitem(last=False)
+    mood = mood_result(qs, picks)
+    emoji, label = FOX_MOODS[mood]
+    song = mood_pick_song(mood, uid)
+    if not song:
+        await q.answer()
+        try: await q.edit_message_text("🦊 هنوز آهنگی تو ربات نیست؛ به پشتیبانی بگو اضافه کنه 🎶")
+        except BadRequest: pass
+        return
+    await q.answer("🎶 دارم آهنگت رو پیدا می‌کنم...")
+    try:
+        await q.edit_message_text(f"🦊 حالت شد: {emoji} {label}\n🎶 این آهنگ رو برات انتخاب کردم 👇")
+    except BadRequest:
+        pass
+    caption = (f"🎵 {song['title']}\n\n" if song['title'] else "") + f"{emoji} حالت: {label}\nامیدوارم این حالتو خوب کنه🦊🥰"
+    try:
+        send = context.bot.send_audio if song['media_type'] == 'audio' else context.bot.send_document
+        sent = await send(q.message.chat_id, song['file_id'], caption=caption[:1000], reply_to_message_id=q.message.message_id)
+        AI_REPLY_IDS[(q.message.chat_id, sent.message_id)] = 1
+    except Exception:
+        logger.exception('mood song send failed (id=%s)', song.get('id'))
+        try: await q.edit_message_text("😅 نتونستم آهنگ رو بفرستم؛ به پشتیبانی بگو دوباره اضافه‌ش کنه.")
+        except BadRequest: pass
+
+
+async def fox_mood_song_add(update, context, media_msg, text):
+    """ادمین: آهنگ حال: شاد، آروم (کپشنِ آهنگ یا ریپلای روی آهنگ)."""
+    msg = update.message
+    reply = lambda t: msg.reply_text(t, **reply_kwargs(msg))
+    m = MOOD_ADD_RE.match((text or '').strip())
+    info = fox_extract_media(media_msg)
+    if not m:
+        await reply("❌ فرمت اشتباهه.\n\n" + MOOD_USAGE); return
+    if not info:
+        await reply("❌ باید روی یه آهنگ ریپلای کنی، یا آهنگ رو با کپشن «آهنگ حال: شاد» بفرستی.\n\n" + MOOD_USAGE); return
+    kind, file_id, unique_id, mime = info
+    if not (kind == 'audio' or (kind == 'document' and (mime or '').lower().startswith('audio/'))):
+        await reply("❌ این آهنگ (فایل صوتی) نیست. آهنگ رو به‌صورت Music یا فایل mp3 بفرست."); return
+    moods = []
+    body = m.group('m').replace('پر انرژی', 'پرانرژی')
+    for w in re.split(r'[،,\s]+', body):
+        if not w:
+            continue
+        mk = FOX_MOOD_WORDS.get(brain.normalize(w))
+        if not mk:
+            await reply(f"❌ «{w}» حال نیست. حال‌های درست: " + "، ".join(v[1] for v in FOX_MOODS.values())); return
+        if mk not in moods:
+            moods.append(mk)
+    if not moods:
+        await reply("❌ حال رو بنویس.\n\n" + MOOD_USAGE); return
+    a = getattr(media_msg, 'audio', None); d = getattr(media_msg, 'document', None)
+    if a is not None:
+        title = ' - '.join(x for x in ((a.performer or '').strip(), (a.title or '').strip()) if x) or (a.file_name or '')
+    else:
+        title = (getattr(d, 'file_name', '') or '')
+    title = re.sub(r'\.(mp3|m4a|ogg|wav|flac)$', '', title, flags=re.I)[:100]
+    session = get_session()
+    try:
+        row = session.query(FoxMoodSong).filter(FoxMoodSong.file_unique_id == unique_id).first() if unique_id else None
+        if row:      # همین آهنگ قبلاً اضافه شده → حال‌های جدید بهش اضافه می‌شه
+            old = [x for x in (row.moods or '').split(',') if x]
+            row.moods = ','.join(old + [x for x in moods if x not in old]); rid = row.id
+        else:
+            row = FoxMoodSong(moods=','.join(moods), media_type='audio' if kind == 'audio' else 'document', file_id=file_id,
+                              file_unique_id=unique_id, title=title, created_by=update.effective_user.id)
+            session.add(row)
+        session.commit(); rid = row.id
+        total = session.query(FoxMoodSong).count()
+    finally:
+        session.close()
+    await reply(f"✅ 🎵 آهنگ اضافه شد! (شماره {rid})\n" + (f"📀 {title}\n" if title else "")
+                + "🎭 حال: " + "، ".join(f"{FOX_MOODS[x][0]} {FOX_MOODS[x][1]}" for x in moods)
+                + f"\n\n📚 مجموع آهنگ‌ها: {total}\nحذف: حذف آهنگ حال {rid}")
+
+
+async def fox_mood_admin_command(update, context):
+    """لیست آهنگ حال  /  حذف آهنگ حال <شماره>  /  آهنگ حال: شاد (ریپلای روی آهنگ)"""
+    msg = update.message; text = re.sub(r'\s+', ' ', (msg.text or '').strip())
+    reply = lambda t: msg.reply_text(t, **reply_kwargs(msg))
+    if MOOD_LIST_RE.match(text):
+        session = get_session()
+        try:
+            rows = [(r.id, r.title or 'بدون نام', [x for x in (r.moods or '').split(',') if x]) for r in session.query(FoxMoodSong).order_by(FoxMoodSong.id).all()]
+        finally:
+            session.close()
+        if not rows:
+            await reply("🎶 هنوز آهنگی برای «روباهیو حال» اضافه نشده.\n\n" + MOOD_USAGE); return
+        lines = [f"{i}) 🎵 {t}\n    🎭 " + "، ".join(f"{FOX_MOODS[x][0]}{FOX_MOODS[x][1]}" for x in ms if x in FOX_MOODS) for i, t, ms in rows[-40:]]
+        await reply(f"🎶 آهنگ‌های حال ({len(rows)} تا؛ آخرین ۴۰ تا):\n\n" + "\n\n".join(lines) + "\n\nحذف: حذف آهنگ حال <شماره>"); return
+    m = MOOD_DEL_RE.match(text)
+    if m:
+        session = get_session()
+        try:
+            row = session.get(FoxMoodSong, int(m.group(1)))
+            if not row:
+                await reply("❌ همچین شماره‌ای پیدا نشد. «لیست آهنگ حال» رو ببین."); return
+            session.delete(row); session.commit()
+        finally:
+            session.close()
+        await reply("🗑 آهنگ حذف شد."); return
+    await fox_mood_song_add(update, context, msg.reply_to_message, text)
 
 
 def ai_extract_prompt(update, context):
@@ -8431,6 +8733,13 @@ async def text_router(update, context):
     if m:
         context.user_data["transfer_amount"] = m.group(1)
         await transfer_command(update, context); return
+    # «روباهیو حال» → ۵ سوال و آهنگ مناسب حال کاربر
+    if mood_is_start(text, update.effective_chat.type):
+        await mood_start(update, context); return
+    # مدیریت آهنگ‌های «روباهیو حال» (فقط ادمین، فقط پیوی)
+    if update.effective_chat.type == "private" and admin_only(update.effective_user.id) and (
+            MOOD_ADD_RE.match(text) or MOOD_LIST_RE.match(re.sub(r"\s+", " ", text)) or MOOD_DEL_RE.match(re.sub(r"\s+", " ", text))):
+        await fox_mood_admin_command(update, context); return
     # آموزش دستی به روباه (فقط ادمین، فقط پیوی)
     if update.effective_chat.type == "private" and admin_only(update.effective_user.id) and (
             FOX_TEACH_RE.match(text) or FOX_FORGET_RE.match(text) or re.sub(r"\s+", " ", text) == "لیست یادگیری"):
@@ -8540,6 +8849,7 @@ def main():
     app.add_handler(CallbackQueryHandler(friend_decision_button,pattern=r"^friend(?:accept|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(friend_request_button,pattern=r"^friend:(?:home|add|view|points|msg|remove):\d+(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(leaderboard_button,pattern=r"^lb:"))
+    app.add_handler(CallbackQueryHandler(mood_button,pattern=r"^md:\d+:\d+:[0-2]{0,4}:[0-2]$"))
     app.add_handler(CallbackQueryHandler(city_donate_button,pattern=r"^citydonate:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_top_donors_button,pattern=r"^citytop:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_back_button,pattern=r"^cityback:-?\d+$"))
@@ -8560,7 +8870,7 @@ def main():
     # ادمین تو پیوی فایل (آهنگ/ویدیو/گیف/استیکر/...) رو با کپشن «یاد بگیر ...» می‌فرسته → به روباه یاد داده می‌شه
     app.add_handler(MessageHandler(
         (filters.AUDIO | filters.VIDEO | filters.ANIMATION | filters.Sticker.ALL | filters.VOICE | filters.PHOTO | filters.Document.ALL)
-        & filters.ChatType.PRIVATE & filters.User(user_id=list(ADMIN_IDS)) & filters.CaptionRegex(r"^\s*یاد\s*بگیر"),
+        & filters.ChatType.PRIVATE & filters.User(user_id=list(ADMIN_IDS)) & filters.CaptionRegex(r"^\s*(?:یاد\s*بگیر|آهنگ\s+حال)"),
         fox_teach_media_caption), group=4)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,ai_moderation_handler),group=5)
     if app.job_queue:
