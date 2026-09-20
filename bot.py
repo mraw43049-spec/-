@@ -21,7 +21,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, GiftCode, GiftCodeRedemption, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, GiftCode, GiftCodeRedemption, FoxKnowledge, get_session, init_db
 )
 import ai_service as ai
 import fox_brain as brain
@@ -7747,6 +7747,236 @@ def build_guide_entries():
     return entries
 
 
+# ── آموزش دستی به روباه (فقط ادمین‌های ربات، فقط پیوی) ──
+FOX_TEACH_MAX = 300
+FOX_TEACH_RE = re.compile(r'^یاد\s*بگیر[\s:：]+(.+)$', re.S)
+FOX_FORGET_RE = re.compile(r'^فراموش\s*کن[\s:：]+(\d+)$')
+
+# مدیا: نوع → (ایموجی، اسم فارسی، متد reply_* پیام)
+FOX_MEDIA = {
+    'audio': ('🎵', 'آهنگ', 'reply_audio'),
+    'video': ('🎬', 'ویدیو', 'reply_video'),
+    'animation': ('🎞', 'گیف', 'reply_animation'),
+    'sticker': ('😎', 'استیکر', 'reply_sticker'),
+    'voice': ('🎙', 'ویس', 'reply_voice'),
+    'photo': ('🖼', 'عکس', 'reply_photo'),
+    'document': ('📎', 'فایل', 'reply_document'),
+}
+# کلمه‌ای که ادمین تو دستور می‌نویسه → نوع
+FOX_MEDIA_WORDS = {
+    'آهنگ': 'audio', 'موزیک': 'audio', 'music': 'audio',
+    'ویدیو': 'video', 'ویدئو': 'video', 'فیلم': 'video', 'video': 'video',
+    'گیف': 'animation', 'جیف': 'animation', 'gif': 'animation',
+    'استیکر': 'sticker', 'sticker': 'sticker',
+    'ویس': 'voice', 'voice': 'voice',
+    'عکس': 'photo', 'photo': 'photo',
+    'فایل': 'document',
+}
+# «یاد بگیر: کلید۱، کلید۲»  یا  «یاد بگیر آهنگ: کلید۱، کلید۲ | کپشن اختیاری»  (نوع فقط وقتی حساب می‌شه که بعدش «:» بیاد)
+FOX_TEACH_MEDIA_RE = re.compile(
+    r'^یاد\s*بگیر(?:\s+(?P<t>' + '|'.join(sorted(map(re.escape, FOX_MEDIA_WORDS), key=len, reverse=True)) + r')(?=\s*[:：]))?[\s:：]+(?P<body>.+)$',
+    re.S | re.I)
+# اگه روشن باشه (FOX_MEDIA_DIRECT=1) تو گروه‌ها هم وقتی کل پیام دقیقاً یه کلیدِ مدیا باشه (بدون صدا زدن روباه) جواب می‌ده
+FOX_MEDIA_DIRECT = os.getenv('FOX_MEDIA_DIRECT', '0').strip().lower() in ('1', 'true', 'yes', 'on')
+FOX_TEACH_USAGE = (
+    "📎 یاد دادن مدیا:\n\n"
+    "۱) فایل (آهنگ/ویدیو/گیف) رو بفرست و تو کپشنش بنویس:\n"
+    "یاد بگیر آهنگ: کلید۱، کلید۲\n\n"
+    "۲) یا رو هر فایل/استیکری (فوروارد هم جواب می‌ده) ریپلای کن و بنویس:\n"
+    "یاد بگیر استیکر: کلید۱، کلید۲\n\n"
+    "نوع‌ها: آهنگ، ویدیو، گیف، استیکر، ویس، عکس، فایل (نوشتنش اختیاریه؛ خودم تشخیص می‌دم).\n"
+    "کپشن اختیاری: یاد بگیر گیف: خنده، هه | اینم از خنده 😂"
+)
+
+
+def fox_extract_media(m):
+    """(نوع، file_id، file_unique_id، mime) از یک پیام تلگرام، یا None اگه مدیا نداشت."""
+    if not m:
+        return None
+    if getattr(m, 'sticker', None):
+        x = m.sticker; return 'sticker', x.file_id, x.file_unique_id, ''
+    if getattr(m, 'animation', None):
+        x = m.animation; return 'animation', x.file_id, x.file_unique_id, x.mime_type or ''
+    if getattr(m, 'video', None):
+        x = m.video; return 'video', x.file_id, x.file_unique_id, x.mime_type or ''
+    if getattr(m, 'audio', None):
+        x = m.audio; return 'audio', x.file_id, x.file_unique_id, x.mime_type or ''
+    if getattr(m, 'voice', None):
+        x = m.voice; return 'voice', x.file_id, x.file_unique_id, x.mime_type or ''
+    if getattr(m, 'photo', None):
+        x = m.photo[-1]; return 'photo', x.file_id, x.file_unique_id, 'image/jpeg'
+    if getattr(m, 'document', None):
+        x = m.document; return 'document', x.file_id, x.file_unique_id, x.mime_type or ''
+    return None
+
+
+def fox_media_kind_ok(want, kind, mime):
+    """آیا نوعی که ادمین نوشته (want) با فایل واقعی (kind) جوره؟ (mp3/mp4 که «به‌صورت فایل» فرستاده شده هم قبوله)"""
+    if not want or want == kind:
+        return True
+    prefix = {'audio': 'audio/', 'video': 'video/', 'photo': 'image/'}.get(want)
+    return kind == 'document' and bool(prefix) and (mime or '').lower().startswith(prefix)
+
+
+def load_custom_entries():
+    """پاسخ‌های دستی را از دیتابیس می‌خواند و به مغز می‌دهد. تعداد را برمی‌گرداند."""
+    session = get_session()
+    try:
+        rows = session.query(FoxKnowledge).order_by(FoxKnowledge.id).all()
+        entries = [{'id': r.id, 'keywords': [k for k in (r.keywords or '').split('\n') if k.strip()], 'answer': r.answer,
+                    'media_type': getattr(r, 'media_type', None), 'file_id': getattr(r, 'file_id', None)} for r in rows]
+    except Exception:
+        logger.exception('load custom knowledge failed')
+        entries = []
+    finally:
+        session.close()
+    brain.set_custom(entries)
+    return len(entries)
+
+
+def fox_split_keys(keys_raw):
+    keys = []
+    for k in re.split(r'[،,\n]', keys_raw):
+        k = re.sub(r'\s+', ' ', k).strip()
+        if k and k not in keys:
+            keys.append(k)
+    return keys
+
+
+async def fox_teach_media(update, context, media_msg, text):
+    """مدیا (آهنگ/ویدیو/گیف/استیکر/...) رو با کلیدها ذخیره می‌کنه. media_msg = پیامی که فایل توشه؛ text = متن دستور «یاد بگیر ...»."""
+    msg = update.message
+    reply = lambda t: msg.reply_text(t, **reply_kwargs(msg))
+    m = FOX_TEACH_MEDIA_RE.match((text or '').strip())
+    info = fox_extract_media(media_msg)
+    if not m or not info:
+        await reply("❌ فرمت اشتباهه.\n\n" + FOX_TEACH_USAGE); return
+    kind, file_id, unique_id, mime = info
+    want = FOX_MEDIA_WORDS.get((m.group('t') or '').lower()) if m.group('t') else None
+    if not fox_media_kind_ok(want, kind, mime):
+        await reply(f"❌ این فایل «{FOX_MEDIA[kind][1]}» هست، نه «{FOX_MEDIA[want][1]}». "
+                    f"نوع رو درست بنویس یا بدون نوع بنویس: یاد بگیر: کلید"); return
+    body = m.group('body').strip()
+    sep = re.search(r'\s*(?:\||=>|⇒|＝>)\s*', body)
+    keys_raw, caption = (body[:sep.start()], body[sep.end():].strip()) if sep else (body, '')
+    keys = fox_split_keys(keys_raw)
+    caption = caption.replace('\u2063', '').replace('\u2064', '')
+    if not keys or any(len(k) < 2 or len(k) > 40 for k in keys):
+        await reply("❌ هر کلید باید بین ۲ تا ۴۰ حرف باشه (چند کلید رو با ویرگول جدا کن).\n\n" + FOX_TEACH_USAGE); return
+    if len(caption) > 1000:
+        await reply("❌ کپشن نباید بیشتر از ۱۰۰۰ حرف باشه."); return
+    session = get_session()
+    try:
+        if session.query(FoxKnowledge).count() >= FOX_TEACH_MAX:
+            await reply(f"❌ ظرفیت پر شده ({FOX_TEACH_MAX} مورد). با «فراموش کن <شماره>» چندتا رو پاک کن."); return
+        row = FoxKnowledge(keywords='\n'.join(keys), answer=caption, created_by=update.effective_user.id,
+                           media_type=kind, file_id=file_id, file_unique_id=unique_id)
+        session.add(row); session.commit(); rid = row.id
+    finally:
+        session.close()
+    load_custom_entries()
+    emoji, label, _ = FOX_MEDIA[kind]
+    await reply(f"✅ {emoji} {label} رو یاد گرفتم! (شماره {rid})\n\n🔑 کلیدها: {'، '.join(keys)}\n"
+                + (f"💬 کپشن: {caption[:200]}\n" if caption else "")
+                + "\nتست کن: یکی از کلیدها رو تو پیوی برام بنویس. برای حذف: فراموش کن " + str(rid)
+                + "\n(چند فایل برای یه کلید بدی، هر بار یکیشون تصادفی میاد.)")
+
+
+async def fox_teach_media_caption(update, context):
+    """ادمین یه فایل با کپشن «یاد بگیر ...» تو پیوی فرستاده."""
+    msg = update.message
+    if not msg or not update.effective_user or not admin_only(update.effective_user.id):
+        return
+    if not fox_extract_media(msg):
+        return
+    await fox_teach_media(update, context, msg, (msg.caption or '').strip())
+
+
+async def send_fox_media(msg, entry, ctx):
+    """مدیای یادگرفته‌شده را به‌صورت ریپلای می‌فرستد و پیام ارسال‌شده را برمی‌گرداند."""
+    info = FOX_MEDIA.get(entry.get('media_type'))
+    if not info or not entry.get('file_id'):
+        return None
+    cap = (brain.format_answer(entry.get('answer') or '', ctx) or '')[:1000] or None
+    fn = getattr(msg, info[2])
+    if entry['media_type'] == 'sticker':      # استیکر کپشن نداره → کپشن (اگه بود) جدا میاد
+        sent = await fn(entry['file_id'], **reply_kwargs(msg))
+        if cap:
+            await msg.reply_text(cap, **reply_kwargs(msg))
+        return sent
+    return await fn(entry['file_id'], caption=cap, **reply_kwargs(msg))
+
+
+async def fox_teach_command(update, context):
+    """یاد بگیر: کلید۱، کلید۲ | جواب  /  یاد بگیر آهنگ|ویدیو|گیف|استیکر: کلید (ریپلای روی فایل)  /  فراموش کن <شماره>  /  لیست یادگیری"""
+    msg = update.message
+    text = (msg.text or '').strip()
+    reply = lambda t: msg.reply_text(t, **reply_kwargs(msg))
+    if re.sub(r'\s+', ' ', text) == 'لیست یادگیری':
+        session = get_session()
+        try:
+            rows = session.query(FoxKnowledge).order_by(FoxKnowledge.id).all()
+            items = [(r.id, (r.keywords or '').replace('\n', '، '), r.answer or '', getattr(r, 'media_type', None) if getattr(r, 'file_id', None) else None) for r in rows]
+        finally:
+            session.close()
+        if not items:
+            await reply("📚 هنوز چیزی یاد نگرفتم.\n\nبنویس:\nیاد بگیر: کلید۱، کلید۲ | جواب\n\n" + FOX_TEACH_USAGE); return
+        lines = []
+        for i, k, a, mt in items[-40:]:
+            if mt in FOX_MEDIA:
+                em, label, _ = FOX_MEDIA[mt]
+                tail = f"{em} {label}" + (f" — {a[:40].replace(chr(10), ' ')}{'…' if len(a) > 40 else ''}" if a else "")
+            else:
+                tail = f"💬 {a[:60].replace(chr(10), ' ')}{'…' if len(a) > 60 else ''}"
+            lines.append(f"{i}) 🔑 {k}\n    {tail}")
+        await reply(f"📚 یادگرفته‌ها ({len(items)} مورد؛ آخرین ۴۰ تا):\n\n" + "\n\n".join(lines) + "\n\nحذف: فراموش کن <شماره>"); return
+    m = FOX_FORGET_RE.match(text)
+    if m:
+        rid = int(m.group(1))
+        session = get_session()
+        try:
+            row = session.get(FoxKnowledge, rid)
+            if not row:
+                await reply("❌ همچین شماره‌ای پیدا نشد. «لیست یادگیری» رو ببین."); return
+            session.delete(row); session.commit()
+        finally:
+            session.close()
+        n = load_custom_entries()
+        await reply(f"🗑 فراموش کردم. ({n} مورد باقی مونده)"); return
+    # ریپلای روی یه فایل/استیکر → یاد گرفتن مدیا
+    rep = msg.reply_to_message
+    tm = FOX_TEACH_MEDIA_RE.match(text)
+    if tm and rep and fox_extract_media(rep):
+        await fox_teach_media(update, context, rep, text); return
+    if tm and tm.group('t'):
+        await reply("❌ برای یاد دادن مدیا باید روی همون فایل/استیکر ریپلای کنی (یا فایل رو با کپشن «یاد بگیر ...» بفرستی).\n\n" + FOX_TEACH_USAGE); return
+    m = FOX_TEACH_RE.match(text)
+    if not m:
+        return
+    body = m.group(1).strip()
+    sep = re.search(r'\s*(?:\||=>|⇒|＝>)\s*', body)
+    if not sep:
+        await reply("❌ فرمت اشتباهه. این‌جوری بنویس:\n\nیاد بگیر: کلید۱، کلید۲ | جواب\n\nمثال:\nیاد بگیر: کانال، آدرس کانال | کانال ما: @foxio\n\n" + FOX_TEACH_USAGE); return
+    keys_raw, answer = body[:sep.start()], body[sep.end():].strip()
+    keys = fox_split_keys(keys_raw)
+    answer = answer.replace('\u2063', '').replace('\u2064', '')
+    if not keys or any(len(k) < 2 or len(k) > 40 for k in keys):
+        await reply("❌ هر کلید باید بین ۲ تا ۴۰ حرف باشه (چند کلید رو با ویرگول جدا کن)."); return
+    if len(answer) < 2 or len(answer) > 1500:
+        await reply("❌ جواب باید بین ۲ تا ۱۵۰۰ حرف باشه."); return
+    session = get_session()
+    try:
+        if session.query(FoxKnowledge).count() >= FOX_TEACH_MAX:
+            await reply(f"❌ ظرفیت پر شده ({FOX_TEACH_MAX} مورد). با «فراموش کن <شماره>» چندتا رو پاک کن."); return
+        row = FoxKnowledge(keywords='\n'.join(keys), answer=answer, created_by=update.effective_user.id)
+        session.add(row); session.commit(); rid = row.id
+    finally:
+        session.close()
+    load_custom_entries()
+    await reply(f"✅ یاد گرفتم! (شماره {rid})\n\n🔑 کلیدها: {'، '.join(keys)}\n💬 جواب: {answer[:200]}\n\n"
+                "تست کن: یکی از کلیدها رو تو پیوی برام بنویس. برای حذف: فراموش کن " + str(rid))
+
+
 def ai_extract_prompt(update, context):
     """اگه پیام مخاطبِ هوش مصنوعیه (mode, prompt) برمی‌گردونه، وگرنه None."""
     msg = update.message; chat = update.effective_chat
@@ -7779,6 +8009,10 @@ async def ai_chat_entry(update, context):
     if context.user_data.get('ai_skip_msg') == update.message.message_id:
         return False       # این پیام ورودی یک فرم ادمین بوده
     trig = ai_extract_prompt(update, context)
+    if not trig and FOX_MEDIA_DIRECT and brain.ENABLED and update.effective_chat.type != 'private':
+        t = (update.message.text or '').strip()      # گروه: کل پیام دقیقاً یه کلیدِ آهنگ/ویدیو/گیف/استیکر باشه
+        if t and not t.startswith('/') and t != CLAIM_KEYWORD and brain.media_lookup(t, exact=True):
+            trig = ('chat', t[:AI_MAX_PROMPT_CHARS])
     if not trig:
         return False
     context.application.create_task(ai_chat_run(update, context, *trig), update=update)
@@ -7795,6 +8029,26 @@ async def ai_chat_run(update, context, mode, prompt):
             ctx_dict = {'name': user_display_name(u), 'level': u.level, 'fox': u.fox_name or 'مکار'}
         finally:
             session.close()
+        # آهنگ/ویدیو/گیف/استیکرِ یادگرفته‌شده توسط ادمین: اولویت با خودشه (قبل از API و مغز متنی)
+        if mode == 'chat' and brain.ENABLED:
+            entry = brain.media_lookup(prompt)
+            if entry:
+                if not brain.gate(tg_user.id):
+                    return
+                sent = None
+                try:
+                    try: await context.bot.send_chat_action(chat.id, 'typing')
+                    except Exception: pass
+                    sent = await send_fox_media(msg, entry, ctx_dict)
+                except Exception:
+                    logger.exception('fox media send failed (id=%s)', entry.get('id'))
+                if sent:
+                    AI_REPLY_IDS[(chat.id, sent.message_id)] = 1
+                    while len(AI_REPLY_IDS) > 3000:
+                        AI_REPLY_IDS.popitem(last=False)
+                    return
+                # ارسال نشد (مثلاً file_id قدیمی) → کولداون رو آزاد می‌کنیم و با جواب متنی معمولی ادامه می‌دیم
+                brain._last_call.pop(tg_user.id, None)
         answer = None
         if ai.AI_ENABLED:
             ok, reason, wait = ai.user_gate(tg_user.id)
@@ -8085,7 +8339,7 @@ async def ai_admin_command(update, context):
     lines = [
         "🤖 وضعیت روباهیو", "",
         f"🧠 مغز قانون‌محور (رایگان، داخل خود ربات): {'فعال ✅' if brain.ENABLED else 'خاموش ❌'}",
-        "   گفتگو، «راهنما ...»، مدیریت هوشمند گروه و اخبار شهر", "",
+        f"   گفتگو، «راهنما ...»، مدیریت هوشمند گروه و اخبار شهر | یادگرفته‌های دستی: {brain.custom_count()}", "",
         f"🌐 هوش مصنوعی خارجی (اختیاری): {'فعال ✅' if ai.AI_ENABLED else 'غیرفعال ⚪️ (AI_API_KEY تنظیم نشده)'}",
     ]
     if ai.AI_ENABLED or key:
@@ -8177,6 +8431,10 @@ async def text_router(update, context):
     if m:
         context.user_data["transfer_amount"] = m.group(1)
         await transfer_command(update, context); return
+    # آموزش دستی به روباه (فقط ادمین، فقط پیوی)
+    if update.effective_chat.type == "private" and admin_only(update.effective_user.id) and (
+            FOX_TEACH_RE.match(text) or FOX_FORGET_RE.match(text) or re.sub(r"\s+", " ", text) == "لیست یادگیری"):
+        await fox_teach_command(update, context); return
     # هر پیام دیگری که مخاطبش هوش مصنوعیه (پیوی، «روباهیو ...»، منشن، ریپلای روی جواب روباه، «راهنما ...»)
     if await ai_chat_entry(update, context): return
 
@@ -8224,6 +8482,7 @@ def main():
     init_db()
     ai.set_knowledge(build_ai_knowledge())
     brain.set_guide(build_guide_entries())
+    logger.info("پاسخ‌های دستی یادگرفته‌شده: %s", load_custom_entries())
     logger.info("مغز قانون‌محور: %s | هوش مصنوعی خارجی: %s", "فعال" if brain.ENABLED else "خاموش",
                 f"فعال ({ai.AI_PROVIDER} / {ai.AI_MODEL})" if ai.AI_ENABLED else "غیرفعال (AI_API_KEY تنظیم نشده)")
     app=ApplicationBuilder().token(BOT_TOKEN).build()
@@ -8298,6 +8557,11 @@ def main():
     app.add_handler(ChatMemberHandler(bot_joined_group, ChatMemberHandler.MY_CHAT_MEMBER), group=-2)
     app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, register_group_chat), group=-1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text_router),group=2)
+    # ادمین تو پیوی فایل (آهنگ/ویدیو/گیف/استیکر/...) رو با کپشن «یاد بگیر ...» می‌فرسته → به روباه یاد داده می‌شه
+    app.add_handler(MessageHandler(
+        (filters.AUDIO | filters.VIDEO | filters.ANIMATION | filters.Sticker.ALL | filters.VOICE | filters.PHOTO | filters.Document.ALL)
+        & filters.ChatType.PRIVATE & filters.User(user_id=list(ADMIN_IDS)) & filters.CaptionRegex(r"^\s*یاد\s*بگیر"),
+        fox_teach_media_caption), group=4)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,ai_moderation_handler),group=5)
     if app.job_queue:
         app.job_queue.run_repeating(settle_all_smuggling, interval=30, first=10, name="ruby-smuggling-settler")

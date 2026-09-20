@@ -190,6 +190,19 @@ class GiftCode(Base):
     active = Column(Integer, nullable=False, default=1)
     expires_at = Column(DateTime(timezone=True), nullable=True)   # None = بدون محدودیت زمانی
 
+class FoxKnowledge(Base):
+    """پاسخ‌های دستی که ادمین به روباه یاد می‌دهد («یاد بگیر: کلید | جواب»)."""
+    __tablename__ = 'fox_knowledge'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    keywords = Column(String, nullable=False)     # کلیدها؛ هر خط یک کلید
+    answer = Column(String, nullable=False)       # برای مدیا: کپشن (می‌تواند خالی باشد)
+    created_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    # مدیا (آهنگ/ویدیو/گیف/استیکر/...): اگه file_id پر باشه، روباه به‌جای متن این فایل را می‌فرستد
+    media_type = Column(String, nullable=True)     # audio | video | animation | sticker | voice | photo | document
+    file_id = Column(String, nullable=True)
+    file_unique_id = Column(String, nullable=True)
+
 class GiftCodeRedemption(Base):
     __tablename__ = 'gift_code_redemptions'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -545,6 +558,11 @@ def init_db():
                 "UPDATE group_chats SET city_election_status = 'none' "
                 "WHERE city_election_status IS NULL OR city_election_status = ''"
             ))
+        if 'fox_knowledge' in inspector.get_table_names():
+            fk_cols = {c['name'] for c in inspector.get_columns('fox_knowledge')}
+            for name, definition in {'media_type': 'VARCHAR', 'file_id': 'VARCHAR', 'file_unique_id': 'VARCHAR'}.items():
+                if name not in fk_cols:
+                    conn.execute(text(f'ALTER TABLE fox_knowledge ADD COLUMN {name} {definition}'))
 
 
 def get_session():

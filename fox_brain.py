@@ -78,6 +78,72 @@ def gate(uid):
     return True
 
 
+# ═════════════════════════ پاسخ‌های دستی (ادمین یاد می‌دهد) ═════════════════════════
+_CUSTOM = []      # هر آیتم: {'id','kws':[normalized...],'answer','media_type','file_id'}
+
+
+def set_custom(entries):
+    """entries: لیست dict با id, keywords (لیست)، answer و (اختیاری) media_type + file_id.
+    bot.py موقع شروع و بعد از هر تغییر صدا می‌زند. آیتم مدیا ممکنه answer (کپشن) نداشته باشه."""
+    global _CUSTOM
+    _CUSTOM = []
+    for e in entries:
+        kws = [normalize(k) for k in e.get('keywords', [])]
+        kws = [k for k in kws if k]
+        is_media = bool(e.get('file_id') and e.get('media_type'))
+        if kws and (e.get('answer') or is_media):
+            _CUSTOM.append({'id': e.get('id'), 'kws': kws, 'answer': e.get('answer') or '',
+                            'media_type': e.get('media_type') if is_media else None,
+                            'file_id': e.get('file_id') if is_media else None})
+
+
+def custom_count():
+    return len(_CUSTOM)
+
+
+def format_answer(template, ctx=None):
+    """جایگزینی {name} {level} {fox} تو کپشن/جواب."""
+    return _fmt(template, ctx)
+
+
+def _lookup(text, media, exact=False):
+    """media=False → فقط جواب‌های متنی؛ media=True → فقط جواب‌های مدیا (آهنگ/ویدیو/گیف/استیکر/...).
+    exact=True → کل پیام باید دقیقاً خودِ کلید باشه (برای واکنش مستقیم تو گروه بدون صدا زدن روباه)."""
+    norm = normalize(text)
+    if not norm or not _CUSTOM:
+        return None
+    padded = f' {norm} '
+    best = []; best_len = 0
+    for e in _CUSTOM:
+        if bool(e.get('file_id')) != media:
+            continue
+        for kw in e['kws']:
+            if exact:
+                hit = (kw == norm)
+            else:
+                hit = (f' {kw} ' in padded) if len(kw) < 3 else (kw in norm)
+            if not hit:
+                continue
+            if len(kw) > best_len:
+                best, best_len = [e], len(kw)
+            elif len(kw) == best_len and e not in best:
+                best.append(e)          # چند جواب برای یک کلید → یکی به‌صورت تصادفی (مثلاً چند جوک / چند آهنگ)
+    return random.choice(best) if best else None
+
+
+def custom_lookup(text):
+    """اگه یکی از کلیدهای دستیِ «متنی» تو پیام بود، آیتم اختصاصی‌ترین کلید (طولانی‌ترین) را برمی‌گرداند؛ اگه چند آیتم هم‌اندازه بودن یکی تصادفی."""
+    return _lookup(text, media=False)
+
+
+def media_lookup(text, exact=False):
+    """مثل custom_lookup ولی برای آیتم‌های مدیا. پیام‌های نگران‌کننده هیچ‌وقت مدیا نمی‌گیرن (جواب همدلانه‌ی متنی اولویت داره)."""
+    e = _lookup(text, media=True, exact=exact)
+    if e and 'distress' in _match_intents(normalize(text)):
+        return None
+    return e
+
+
 # ═════════════════════════ ۱) گفتگوی شخصیت‌دار ═════════════════════════
 _JOKES = [
     "چرا روباه تو قایم‌موشک همیشه می‌بازه؟ چون هر بار دمش لو می‌ده! 🦊😂",
@@ -191,6 +257,10 @@ def chat_reply(text, ctx=None, guide_threshold=4):
     # ۰) پیام‌های نگران‌کننده همیشه اولویت دارن، هر قدر هم طولانی باشن
     if 'distress' in found:
         return _fmt(random.choice(_reply_of('distress')), ctx)
+    # ۰٫۵) پاسخ‌هایی که ادمین دستی یاد داده (بر بقیه اولویت دارن، جز پیام‌های نگران‌کننده)
+    c = custom_lookup(text)
+    if c:
+        return _fmt(c['answer'], ctx)
     # ۱) مؤدب نبودن با روباه
     verdict = moderate_text(text)
     if verdict and verdict[0] == 'insult':
@@ -273,6 +343,9 @@ def guide_lookup(text):
 
 def guide_answer(question):
     """جواب «راهنما <سوال>». اگه سوال خالی بود یا چیزی پیدا نشد، لیست موضوع‌ها را می‌دهد."""
+    c = custom_lookup(question)
+    if c:
+        return _fmt(c['answer'], {})
     norm = normalize(question)
     titles = guide_titles()
     listing = "📚 می‌تونی درباره‌ی این‌ها بپرسی:\n" + "\n".join(f"• {t}" for t in titles) if titles else ""
