@@ -1459,7 +1459,7 @@ def render_rabbit_panel(tid,name,pot_line,ids,names_by_id,state):
 PAIRS_TOTAL_CELLS = 16   # ۴×۴
 PAIRS_TOTAL_PAIRS = 8
 PAIRS_TURN_SECONDS = 60
-PAIRS_MISMATCH_REVEAL_SECONDS = 0.35
+PAIRS_MISMATCH_REVEAL_SECONDS = 0.15
 PAIRS_SYMBOLS = ["🍒","🍋","🍇","🍉","🍊","🥝","🍎","🍓","🍌","🥥","🍍","🥕","🌟","💎","🦊"]
 
 def pairs_keyboard(tid, state):
@@ -2010,7 +2010,7 @@ async def ruby_join_table(update,context):
                 # شروع‌کننده اولین راند، همیشه سازنده میز است (اولین نفر در لیست بازیکنان).
                 t.state=json.dumps({"round":1,"wins":{str(i):0 for i in ids},"choices":{},"starter":ids[0]})
             elif game_type=='xo':
-                t.state=json.dumps({"board":[""]*9,"turn":ids[0],"turn_started_at":now_utc().isoformat(),"turn_token":f"{t.id}-{ids[0]}-{int(now_utc().timestamp()*1000)}","symbols":{str(ids[0]):"X",str(ids[1]):"O"}})
+                t.state=json.dumps({"board":[""]*9,"turn":ids[0],"turn_started_at":now_utc().isoformat(),"turn_token":f"{t.id}-{ids[0]}-{int(now_utc().timestamp()*1000)}","symbols":{str(ids[0]):"❌",str(ids[1]):"⭕"}})
             elif game_type=='cz_rabbit':
                 t.state=json.dumps({"phase":"plant","paws":{},"revealed":[],"turn_started_at":now_utc().isoformat(),"turn_token":f"{t.id}-{ids[0]}-{int(now_utc().timestamp()*1000)}"})
             elif game_type=='cz_pairs':
@@ -6048,7 +6048,7 @@ async def admin_jailset_callback(update, context):
 async def admin_text(update, context):
     if not admin_only(update.effective_user.id): return
     action=context.user_data.get("admin_action")
-    if not action: return
+    if not action: return False
     context.user_data.pop("admin_action",None); text=update.message.text.strip()
     context.user_data["ai_skip_msg"]=update.message.message_id   # همین پیام ورودی فرم ادمینه؛ چت هوشمند جوابش نده
     if action == "broadcast":
@@ -6187,6 +6187,7 @@ async def admin_text(update, context):
                 msg+="\n\n"+level_up_message(old_level,new_level,rewards)
             await notify_user_private(context.bot, uid, msg)
     finally: session.close()
+    return True
 
 
 # ---------- پیش‌بینی فوتبال ----------
@@ -9444,6 +9445,14 @@ async def support_text(update, context):
     await update.message.reply_text("✅ پیام تو برای پشتیبانی ارسال شد. پاسخ در همین ربات برایت می‌آید.")
     return True
 
+async def admin_message_router(update, context):
+    """Single group-0 router for admin replies and admin panel text actions."""
+    if await support_admin_reply(update, context):
+        return True
+    if await admin_text(update, context):
+        return True
+    return False
+
 async def text_router(update, context):
     if await support_admin_reply(update, context): return
     if await support_text(update, context): return
@@ -9641,9 +9650,8 @@ def main():
     app.add_handler(CallbackQueryHandler(football_predict_pick_button,pattern=r"^fbpred:pick:\d+:(home|draw|away)$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
-    app.add_handler(MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),support_admin_reply),group=0)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_message_router),group=0)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,support_text),group=1)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
