@@ -1459,7 +1459,7 @@ def render_rabbit_panel(tid,name,pot_line,ids,names_by_id,state):
 PAIRS_TOTAL_CELLS = 16   # ۴×۴
 PAIRS_TOTAL_PAIRS = 8
 PAIRS_TURN_SECONDS = 60
-PAIRS_MISMATCH_REVEAL_SECONDS = 1.2
+PAIRS_MISMATCH_REVEAL_SECONDS = 0.35
 PAIRS_SYMBOLS = ["🍒","🍋","🍇","🍉","🍊","🥝","🍎","🍓","🍌","🥥","🍍","🥕","🌟","💎","🦊"]
 
 def pairs_keyboard(tid, state):
@@ -4618,7 +4618,10 @@ def bank_keyboard(account):
     ])
 
 def bank_text(user, account):
-    return (f'🦊 بانک روبی 🏦\n\n💳 شماره حساب : {account.account_number}\n👤 به نام : {user_mention(user)}\n\n💰 موجودی حساب : {account.balance:,} 🪙\n\n🤑 سود بانکی\n┘─ 🛍 درصد سود : 3%\n┘─ 📥 مبلغ واریزی : بر اساس موجودی بانک\n┘─ ⏳ زمان واریز : هر 12 ساعت\n\n❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.')
+    principal=int(account.balance or 0)
+    estimated=int(principal * BANK_INTEREST_RATE)
+    total=principal + estimated
+    return (f'🦊 بانک روبی 🏦\n\n💳 شماره کارت: `{account.account_number}`\n👤 به نام: {user_mention(user)}\n\n💰 موجودی حساب: {principal:,} روب‌پوینت\n\n🤑 محاسبه سود دوره بعد\n┘─ درصد سود: {int(BANK_INTEREST_RATE*100)}٪\n┘─ مبلغ سود: {estimated:,} روب‌پوینت\n┘─ مبلغ کل با سود: {total:,} روب‌پوینت\n┘─ زمان محاسبه: هر ۱۲ ساعت\n\n❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.')
 
 def parse_amount(raw):
     trans=str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
@@ -4676,16 +4679,47 @@ async def bank_button(update,context):
             await q.message.reply_text(f"📋 شماره حساب روبی برای کپی:\n`{account.account_number}`", parse_mode='Markdown')
             return
         if action=='change':
-            if user.fox_points < BANK_CHANGE_COST: await q.answer('❌ 1,000 روب‌پوینت لازم داری.',show_alert=True); return
-            import secrets
-            newnum=''.join(str(secrets.randbelow(10)) for _ in range(12))
-            while session.get(BankAccount,newnum): newnum=''.join(str(secrets.randbelow(10)) for _ in range(12))
-            oldnum=account.account_number
-            user.fox_points-=BANK_CHANGE_COST
-            account.account_number=newnum
-            session.query(BankTransaction).filter(BankTransaction.account_number==oldnum).update({BankTransaction.account_number:newnum}, synchronize_session=False)
-            session.commit(); await q.answer('✅ شماره حساب روبی تغییر کرد.'); return
+            if user.fox_points < BANK_CHANGE_COST:
+                await q.answer('❌ برای تغییر شماره کارت ۱٬۰۰۰ روب‌پوینت لازم داری.',show_alert=True); return
+            await q.answer()
+            await q.message.reply_text(
+                f'⚠️ آیا از تغییر شماره کارت خود مطمئن هستید؟\n\n💳 شماره فعلی: {account.account_number}\n💰 هزینه تغییر: {BANK_CHANGE_COST:,} روب‌پوینت',
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('✅ بله، تغییر بده',callback_data=f'bankchange:yes:{uid}'), InlineKeyboardButton('❌ خیر',callback_data=f'bankchange:no:{uid}')]]))
+            return
     finally: session.close()
+
+async def bank_change_confirm(update, context):
+    q=update.callback_query
+    try: _,action,uid_s=q.data.split(':'); uid=int(uid_s)
+    except Exception: return
+    if q.from_user.id != uid:
+        await q.answer('⛔ این تأیید برای کاربر دیگری است.', show_alert=True); return
+    if action == 'no':
+        await q.answer('لغو شد.')
+        try: await q.edit_message_text('❌ تغییر شماره کارت لغو شد.')
+        except Exception: pass
+        return
+    session=get_session()
+    try:
+        user=session.get(User,uid); account=session.query(BankAccount).filter(BankAccount.user_id==uid).first()
+        if not user or not account:
+            await q.answer('حساب بانکی پیدا نشد.',show_alert=True); return
+        if int(user.fox_points or 0) < BANK_CHANGE_COST:
+            await q.answer('❌ روب‌پوینت کافی نیست.',show_alert=True); return
+        import secrets
+        oldnum=account.account_number
+        newnum=''.join(str(secrets.randbelow(10)) for _ in range(12))
+        while session.get(BankAccount,newnum): newnum=''.join(str(secrets.randbelow(10)) for _ in range(12))
+        user.fox_points -= BANK_CHANGE_COST
+        account.account_number=newnum
+        session.query(BankTransaction).filter(BankTransaction.account_number==oldnum).update({BankTransaction.account_number:newnum}, synchronize_session=False)
+        session.add(BankTransaction(account_number=newnum,direction='fee',amount=BANK_CHANGE_COST,description='هزینه تغییر شماره کارت'))
+        session.commit()
+    finally: session.close()
+    await q.answer('✅ شماره کارت تغییر کرد.')
+    try:
+        await q.edit_message_text(f'✅ شماره کارت روبی با موفقیت تغییر کرد.\n\n💳 شماره کارت جدید (برای کپی لمس کن):\n`{newnum}`\n💸 هزینه: {BANK_CHANGE_COST:,} روب‌پوینت',parse_mode='Markdown')
+    except Exception: pass
 
 async def bank_transfer_confirm(update, context):
     q=update.callback_query
@@ -5905,6 +5939,8 @@ async def admin_callback(update, context):
     q = update.callback_query
     if not admin_only(q.from_user.id): await q.answer("دسترسی نداری.", show_alert=True); return
     action = q.data.split(":")[1]; await q.answer()
+    if q.data == 'admin:back':
+        await q.message.reply_text('🛠 پنل مدیریت', reply_markup=admin_main_keyboard()); return
     if action == "stats":
         session=get_session()
         try:
@@ -9557,7 +9593,7 @@ def main():
     app.add_handler(CallbackQueryHandler(jail_callback_gate), group=-20)
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|jailmenu|backup)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|jailmenu|backup|back)$"))
     app.add_handler(CallbackQueryHandler(admin_jailset_callback,pattern=r"^admin:jailset:(?:add|free)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
@@ -9577,6 +9613,7 @@ def main():
     app.add_handler(CallbackQueryHandler(ruby_rabbit_choice,pattern=r"^rrabbit:\d+:(?:[0-9]|1[0-9])$"))
     app.add_handler(CallbackQueryHandler(ruby_pairs_move,pattern=r"^rpairs:\d+:(?:[0-9]|1[0-9]|2[0-9])$"))
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
+    app.add_handler(CallbackQueryHandler(bank_change_confirm,pattern=r"^bankchange:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
     app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change|copy|back):\d+$"))
@@ -9604,7 +9641,8 @@ def main():
     app.add_handler(CallbackQueryHandler(football_predict_pick_button,pattern=r"^fbpred:pick:\d+:(home|draw|away)$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),support_admin_reply),group=0)
+    app.add_handler(MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),support_admin_reply),group=0)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,support_text),group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
