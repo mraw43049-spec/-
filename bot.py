@@ -658,11 +658,11 @@ def jail_duration_text(seconds):
     return f"{m:02d}:{s:02d}"
 
 
-def jail_keyboard(user_id):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✏️ نوشتن خاطره", callback_data=f"jail:memory:{user_id}")],
-        [InlineKeyboardButton("💸 پرداخت جریمه", callback_data=f"jail:pay:{user_id}")],
-    ])
+def jail_keyboard(user_id, payable=True):
+    rows = [[InlineKeyboardButton("✏️ نوشتن خاطره", callback_data=f"jail:memory:{user_id}")]]
+    if payable:   # حبس پشتیبانی جریمه ندارد؛ دکمه‌ی پرداخت جریمه فقط برای حبس‌های دارای جریمه است
+        rows.append([InlineKeyboardButton("💸 پرداخت جریمه", callback_data=f"jail:pay:{user_id}")])
+    return InlineKeyboardMarkup(rows)
 
 
 def jail_wall_memory_text(session, user):
@@ -676,13 +676,19 @@ def jail_wall_memory_text(session, user):
     arrested=jalali_datetime_str(tehran_dt(user.jail_arrested_at)) if user.jail_arrested_at else "—"
     total=session.query(User).filter(User.jail_until != None).count()
     left=_jail_time_left(user)
+    fine=int(user.jail_fine or 0)
+    if fine > 0:
+        fine_block=(f"🏦 جریمه نقدی : {fine:,} روب‌پوینت 🪙\\n"
+                    "┘─ میتونید با پرداخت جریمه از زندان آزاد شوید\\n\\n")
+    else:
+        fine_block=("🔒 این حبس توسط پشتیبانی اعمال شده و جریمه نقدی ندارد\\n"
+                    "┘─ فقط با پایان مدت حبس یا آزادی توسط پشتیبانی آزاد می‌شوی\\n\\n")
     return (\
         "🦊 زندان روبی ⛓️\\n\\n"
         "🚨 شما روباه بدی بودین و زندانی شدید ❗️\\n\\n"
         f"📝 دلیل حبس : {user.jail_reason or 'تخلف در روباهیو'}\\n"
         f"⏳ مدت حبس : {jail_duration_text(left)}\\n"
-        f"🏦 جریمه نقدی : {int(user.jail_fine or 0):,} روب‌پوینت 🪙\\n"
-        "┘─ میتونید با پرداخت جریمه از زندان آزاد شوید\\n\\n"
+        f"{fine_block}"
         f"👮 دستگیر شده در : {arrested}\\n\\n"
         f"👥 تعداد کل زندانیان : {total}\\n\\n"
         "✏️ خاطرات نوشته شده روی دیوار سلول\\n"
@@ -703,7 +709,7 @@ async def jail_command(update, context):
         if not await _active_jail(session,user):
             await update.message.reply_text(free_jail_text(), **reply_kwargs(update.message)); return
         text=jail_wall_memory_text(session,user)
-        kb=jail_keyboard(user.telegram_id)
+        kb=jail_keyboard(user.telegram_id, payable=int(user.jail_fine or 0) > 0)
     finally: session.close()
     await update.message.reply_text(text,reply_markup=kb,**reply_kwargs(update.message))
 
@@ -727,6 +733,8 @@ async def jail_button(update,context):
             return
         if action=='pay':
             fine=int(user.jail_fine or 0)
+            if fine<=0:
+                await q.answer("🔒 این حبس توسط پشتیبانی است و با پرداخت جریمه باز نمی‌شود.",show_alert=True); return
             if int(user.fox_points or 0)<fine:
                 await q.answer(f"❌ روب‌پوینت کافی نداری. جریمه: {fine:,}",show_alert=True); return
             user.fox_points-=fine
@@ -5868,20 +5876,17 @@ def admin_main_keyboard():
         [InlineKeyboardButton("🎁 هدیه روب‌پوینت به همه", callback_data="admin:giftall")],
         [InlineKeyboardButton("🎟 ساخت کد هدیه", callback_data="admin:giftcode")],
         [InlineKeyboardButton("⭐ تنظیم سطح", callback_data="admin:setlevel")],
-        [InlineKeyboardButton("🦊 تنظیم روب‌پوینت", callback_data="admin:setfoxpoints")],
+        [InlineKeyboardButton("🐾 تنظیم روب روب", callback_data="admin:setclaims")],
         [InlineKeyboardButton("⚽ پیش‌بینی فوتبال", callback_data="admin:football")],
-        [InlineKeyboardButton("🚫 محرومیت کاربر", callback_data="admin:banmenu")],
+        [InlineKeyboardButton("⛓️ زندان روبی", callback_data="admin:jailmenu")],
         [InlineKeyboardButton("📦 دریافت بکاپ اطلاعات", callback_data="admin:backup")],
     ])
 
 
-def ban_menu_keyboard():
+def jail_menu_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⏱ ۱ روزه", callback_data="admin:banset:1")],
-        [InlineKeyboardButton("⏱ ۷ روزه", callback_data="admin:banset:7")],
-        [InlineKeyboardButton("⏱ ۳۰ روزه", callback_data="admin:banset:30")],
-        [InlineKeyboardButton("⛔ دائم", callback_data="admin:banset:permanent")],
-        [InlineKeyboardButton("✅ رفع محرومیت", callback_data="admin:banset:unban")],
+        [InlineKeyboardButton("⛓️ انداختن کاربر در زندان", callback_data="admin:jailset:add")],
+        [InlineKeyboardButton("✅ آزاد کردن کاربر", callback_data="admin:jailset:free")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="admin:back")],
     ])
 
@@ -5920,35 +5925,84 @@ async def admin_callback(update, context):
         sent = await q.message.reply_text(text, reply_markup=kb)
         context.user_data["gc_draft"]["panel"] = (sent.chat_id, sent.message_id)
     elif action == "setlevel": context.user_data["admin_action"]="setlevel"; await q.message.reply_text("⭐ فرمت: آیدی عددی کاربر + سطح")
-    elif action == "setfoxpoints": context.user_data["admin_action"]="setfoxpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی کاربر + مقدار روب‌پوینت")
-    elif action == "banmenu":
-        await q.message.reply_text("🚫 محرومیت کاربر\n\nمدت محرومیت رو انتخاب کن یا محرومیت رو بردار:", reply_markup=ban_menu_keyboard())
+    elif action == "setclaims": context.user_data["admin_action"]="setclaims"; await q.message.reply_text("🐾 فرمت: آیدی عددی کاربر + تعداد روب روب\nمثال: 123456789 500\n(سطح کاربر هم بر اساس همین تعداد تنظیم می‌شود.)")
+    elif action == "jailmenu":
+        await q.message.reply_text("⛓️ زندان روبی\n\nکاربر را با مدت و دلیل به زندان بینداز یا آزادش کن:", reply_markup=jail_menu_keyboard())
     elif action == "backup":
         raw, filename = build_backup_file()
         await q.message.reply_document(document=io.BytesIO(raw), filename=filename, caption="📦 بکاپ اطلاعات کاربران (دستی)")
 
 
-BAN_OPTION_LABELS = {
-    "1": "۱ روزه",
-    "7": "۷ روزه",
-    "30": "۳۰ روزه",
-    "permanent": "دائم",
-    "unban": "رفع محرومیت",
-}
+JAIL_ADMIN_MAX_SECONDS = 365 * 24 * 3600
+JAIL_ADMIN_UNITS = (
+    (("دقیقه", "دقيقه", "دقایق", "minutes", "minute", "min", "m"), 60),
+    (("ساعت", "hours", "hour", "hr", "h"), 3600),
+    (("روز", "days", "day", "d"), 86400),
+)
+_JAIL_ADMIN_TR = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+_JAIL_ADMIN_RE = re.compile(
+    r"^(\d+)\s+(\d+(?:\.\d+)?)\s*("
+    + "|".join(re.escape(w) for words, _ in JAIL_ADMIN_UNITS for w in words)
+    + r")\s+(.+)$", re.I)
 
 
-async def admin_banset_callback(update, context):
+def admin_duration_label(seconds):
+    seconds = max(0, int(seconds))
+    d, rem = divmod(seconds, 86400)
+    h, rem = divmod(rem, 3600)
+    m = rem // 60
+    parts = []
+    if d: parts.append(f"{d} روز")
+    if h: parts.append(f"{h} ساعت")
+    if m or not parts: parts.append(f"{m} دقیقه")
+    return " و ".join(parts)
+
+
+def admin_parse_jail_input(text):
+    """«آیدی مدت دلیل» → (uid, seconds, reason)؛ در صورت غلط بودن ValueError با پیام فارسی می‌دهد.
+    مدت: عدد + (دقیقه / ساعت / روز) مثل «2 ساعت» یا «30m» یا «۳ روز»؛ جدا یا چسبیده."""
+    norm = " ".join((text or "").translate(_JAIL_ADMIN_TR).split())
+    m = _JAIL_ADMIN_RE.match(norm)
+    if not m:
+        raise ValueError("❗️ فرمت اشتباه است.\n\nدرست: آیدی عددی + مدت + دلیل\nمثال: 123456789 2 ساعت اسپم در گپ\n(مدت: دقیقه / ساعت / روز)")
+    uid = int(m.group(1))
+    num = float(m.group(2))
+    unit = m.group(3).lower()
+    factor = next(f for words, f in JAIL_ADMIN_UNITS if unit in words)
+    seconds = int(round(num * factor))
+    reason = m.group(4).strip()
+    if seconds < 60:
+        raise ValueError("❗️ حداقل مدت زندان ۱ دقیقه است.")
+    if seconds > JAIL_ADMIN_MAX_SECONDS:
+        raise ValueError("❗️ حداکثر مدت زندان ۳۶۵ روز است.")
+    if len(reason) < 2 or len(reason) > 200:
+        raise ValueError("❗️ دلیل باید بین ۲ تا ۲۰۰ کاراکتر باشد.")
+    return uid, seconds, reason
+
+
+async def admin_jailset_callback(update, context):
     q = update.callback_query
     if not admin_only(q.from_user.id):
         await q.answer("دسترسی نداری.", show_alert=True)
         return
     option = q.data.split(":")[2]
-    if option not in BAN_OPTION_LABELS:
+    if option not in ("add", "free"):
         await q.answer()
         return
     await q.answer()
-    context.user_data["admin_action"] = f"ban:{option}"
-    await q.message.reply_text(f"🚫 محرومیت ({BAN_OPTION_LABELS[option]})\n\nآیدی عددی کاربر مورد نظر رو بفرست.")
+    context.user_data["admin_action"] = f"jail:{option}"
+    if option == "add":
+        await q.message.reply_text(
+            "⛓️ انداختن کاربر در زندان روبی\n\n"
+            "در یک پیام بفرست: آیدی عددی + مدت + دلیل\n\n"
+            "مثال‌ها:\n"
+            "123456789 2 ساعت اسپم در گپ\n"
+            "123456789 30 دقیقه توهین به بقیه\n"
+            "123456789 3 روز تخلف تکراری\n\n"
+            "مدت: دقیقه / ساعت / روز (حداکثر ۳۶۵ روز)"
+        )
+    else:
+        await q.message.reply_text("✅ آزاد کردن کاربر\n\nآیدی عددی کاربر مورد نظر رو بفرست.")
 
 
 async def admin_text(update, context):
@@ -5992,38 +6046,56 @@ async def admin_text(update, context):
         await gc_handle_input(update, context, action.split(":",1)[1], text); return
     if action == "football_add_match":
         await football_add_match_text(update, context); return
-    if action.startswith("ban:"):
-        option = action.split(":", 1)[1]
+    if action == "jail:add":
+        try:
+            uid, seconds, reason = admin_parse_jail_input(text)
+        except ValueError as e:
+            context.user_data["admin_action"] = action   # ادمین بتواند همان‌جا دوباره بفرستد
+            await update.message.reply_text(str(e), **reply_kwargs(update.message)); return
+        if uid in ADMIN_IDS:
+            context.user_data["admin_action"] = action
+            await update.message.reply_text("⚠️ این کاربر ادمین است و زندان روی ادمین‌ها اعمال نمی‌شود.", **reply_kwargs(update.message)); return
+        session=get_session()
+        try:
+            user=session.get(User,uid)
+            if not user:
+                context.user_data["admin_action"] = action
+                await update.message.reply_text("کاربر پیدا نشد.", **reply_kwargs(update.message)); return
+            now=now_utc(); until=now+timedelta(seconds=seconds)
+            user.jail_until=until
+            user.jail_reason=reason
+            user.jail_fine=0          # حبس پشتیبانی جریمه‌ی نقدی ندارد و با پرداخت پول باز نمی‌شود
+            user.jail_arrested_at=now
+            session.commit()
+        finally:
+            session.close()
+        label=admin_duration_label(seconds)
+        until_text=jalali_datetime_str(tehran_dt(until))
+        await update.message.reply_text(f"⛓️ کاربر {uid} به زندان روبی افتاد.\n⏳ مدت: {label}\n📝 دلیل: {reason}\nتا: {until_text}", **reply_kwargs(update.message))
+        await notify_user_private(context.bot, uid, f"📢 اطلاعیه پشتیبانی\n\n⛓️ شما توسط پشتیبانی به زندان روبی انداخته شدید.\n📝 دلیل: {reason}\n⏳ مدت: {label}\nپایان حبس: {until_text}\n\nبرای دیدن سلولت بنویس «زندان روبی».")
+        return
+    if action == "jail:free":
         if not text.lstrip("-").isdigit():
+            context.user_data["admin_action"] = action
             await update.message.reply_text("❗️ فقط آیدی عددی کاربر رو بفرست.", **reply_kwargs(update.message)); return
         uid = int(text)
         session=get_session()
         try:
             user=session.get(User,uid)
             if not user: await update.message.reply_text("کاربر پیدا نشد.", **reply_kwargs(update.message)); return
-            if option == "unban":
-                user.is_banned = 0
-                user.banned_until = None
-                session.commit()
-                await update.message.reply_text(f"✅ محرومیت کاربر {uid} برداشته شد.", **reply_kwargs(update.message))
-                await notify_user_private(context.bot, uid, "📢 اطلاعیه پشتیبانی\n\n✅ محرومیت شما لغو شد و می‌تونی دوباره از ربات استفاده کنی.")
-            elif option == "permanent":
-                user.is_banned = 1
-                user.banned_until = None
-                session.commit()
-                await update.message.reply_text(f"⛔ کاربر {uid} به‌طور دائم محروم شد.", **reply_kwargs(update.message))
-                await notify_user_private(context.bot, uid, "📢 اطلاعیه پشتیبانی\n\n⛔️ شما به‌طور دائم از ربات محروم شدید.")
-            else:
-                days = int(option)
-                until = now_utc() + timedelta(days=days)
-                user.is_banned = 0
-                user.banned_until = until
-                session.commit()
-                until_text = jalali_datetime_str(tehran_dt(until))
-                await update.message.reply_text(f"⏱ کاربر {uid} به مدت {BAN_OPTION_LABELS[option]} محروم شد.\nتا: {until_text}", **reply_kwargs(update.message))
-                await notify_user_private(context.bot, uid, f"📢 اطلاعیه پشتیبانی\n\n⏱ شما به مدت {BAN_OPTION_LABELS[option]} از ربات محروم شدید.\nپایان محرومیت: {until_text}")
+            was_jailed = bool(user.jail_until)
+            was_banned = bool(user.is_banned) or bool(user.banned_until)
+            user.jail_until=None; user.jail_reason=None; user.jail_fine=0; user.jail_arrested_at=None
+            # محرومیت‌های قدیمی (بن) هم از همین‌جا برداشته می‌شود تا کسی برای همیشه گیر نکند.
+            user.is_banned=0; user.banned_until=None
+            session.commit()
         finally:
             session.close()
+        if not was_jailed and not was_banned:
+            await update.message.reply_text(f"ℹ️ کاربر {uid} زندانی یا محروم نبود.", **reply_kwargs(update.message)); return
+        note = " (محرومیت قبلی هم برداشته شد)" if was_banned else ""
+        await update.message.reply_text(f"✅ کاربر {uid} آزاد شد{note}.", **reply_kwargs(update.message))
+        await notify_user_private(context.bot, uid, "📢 اطلاعیه پشتیبانی\n\n✅ شما از زندان روبی آزاد شدید و می‌تونید دوباره از ربات استفاده کنید.")
         return
     parts=text.split()
     if len(parts)!=2 or not all(p.lstrip("-").isdigit() for p in parts): await update.message.reply_text("فرمت اشتباه است.", **reply_kwargs(update.message)); return
@@ -6049,12 +6121,22 @@ async def admin_text(update, context):
             if rewards:
                 msg += "\n\n" + level_up_message(old_level,value,rewards)
             await notify_user_private(context.bot, uid, msg)
-        elif action=="setfoxpoints":
-            old_points=int(user.fox_points or 0)
-            user.fox_points=max(0,value)
+        elif action=="setclaims":
+            if value<0 or value>100_000_000: await update.message.reply_text("تعداد روب روب باید بین 0 تا 100,000,000 باشد.", **reply_kwargs(update.message)); return
+            old_claims=int(user.fox_claim_count or 0)
+            old_level=int(user.level or 1)
+            user.fox_claim_count=value
+            new_level=user_level_from_roobrub(value)     # سطح کاربر همیشه از تعداد روب روب محاسبه می‌شود
+            user.level=new_level
+            rewards=apply_level_rewards(session,user,old_level,new_level) if new_level>old_level else []
             session.commit()
-            await update.message.reply_text(f"🦊 روب‌پوینت کاربر: {user.fox_points:,.2f}", **reply_kwargs(update.message))
-            await notify_user_private(context.bot, uid, f"📢 اطلاعیه پشتیبانی\n\n🦊 روب‌پوینت‌های شما توسط پشتیبانی تنظیم شد.\n💰 مقدار قبلی: {old_points:,}\n💰 مقدار جدید: {user.fox_points:,}")
+            await update.message.reply_text(f"🐾 روب روب‌های کاربر: {old_claims:,} ← {value:,}\n⭐ سطح: {old_level} ← {new_level}", **reply_kwargs(update.message))
+            msg=f"📢 اطلاعیه پشتیبانی\n\n🐾 روب روب‌های شما توسط پشتیبانی تنظیم شد.\nمقدار قبلی: {old_claims:,}\nمقدار جدید: {value:,}"
+            if new_level!=old_level:
+                msg+=f"\n\n⭐ سطح شما {old_level} ← {new_level}\n\n🔓 قابلیت‌های این سطح:\n{level_capabilities(new_level)}"
+            if rewards:
+                msg+="\n\n"+level_up_message(old_level,new_level,rewards)
+            await notify_user_private(context.bot, uid, msg)
     finally: session.close()
 
 
@@ -9419,8 +9501,8 @@ def main():
     app.add_handler(CallbackQueryHandler(jail_callback_gate), group=-20)
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setfoxpoints|banmenu|backup)$"))
-    app.add_handler(CallbackQueryHandler(admin_banset_callback,pattern=r"^admin:banset:(?:1|7|30|permanent|unban)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|jailmenu|backup)$"))
+    app.add_handler(CallbackQueryHandler(admin_jailset_callback,pattern=r"^admin:jailset:(?:add|free)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|resetask|resetyes|resetno):\d+$"))
