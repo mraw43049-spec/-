@@ -3414,6 +3414,18 @@ async def ruby_egg_button(update, context):
             await q.answer()
             await q.message.edit_text(fridge_text(user,items),reply_markup=fridge_keyboard(user,items))
             return
+        if action=="list":
+            # دکمه‌ی «🥚 تخم مرغ‌ها» آرگومان 0 می‌فرستد (تخم مرغ مشخصی ندارد)؛
+            # پس باید قبل از جست‌وجوی یک تخم مرغ خاص رسیدگی شود.
+            eggs=session.query(RubyEgg).filter(RubyEgg.user_id==user_id).order_by(RubyEgg.id.asc()).all()
+            for e in eggs: settle_ruby_egg(e)
+            session.commit()
+            await q.answer()
+            await q.message.edit_text(
+                f"🥚 تخم مرغ‌های یخچال\n\n🧮 تعداد : {len(eggs):,}\n🚫 تخم‌مرغ خام و پخته قابل فروش نیست.",
+                reply_markup=ruby_eggs_keyboard(eggs,user_id)
+            )
+            return
         egg=session.get(RubyEgg,arg)
         if not egg or egg.user_id!=user_id:
             await q.answer("❌ این تخم‌مرغ پیدا نشد.",show_alert=True); return
@@ -3434,16 +3446,6 @@ async def ruby_egg_button(update, context):
             session.commit()
             await q.answer()
             await q.message.edit_text(text,reply_markup=InlineKeyboardMarkup(rows))
-            return
-        if action=="list":
-            eggs=session.query(RubyEgg).filter(RubyEgg.user_id==user_id).order_by(RubyEgg.id.asc()).all()
-            for egg in eggs: settle_ruby_egg(egg)
-            session.commit()
-            await q.answer()
-            await q.message.edit_text(
-                f"🥚 تخم مرغ‌های یخچال\n\n🧮 تعداد : {len(eggs):,}\n🚫 تخم‌مرغ خام و پخته قابل فروش نیست.",
-                reply_markup=ruby_eggs_keyboard(eggs,user_id)
-            )
             return
         if action=="cook":
             if egg.cooked:
@@ -6704,7 +6706,18 @@ CITY_BASE_REQ = {'points': 150, 'rescued': 5, 'hunts': 10, 'treasury': 100}
 CITY_REQ_GROWTH = 1.5     # روب‌روب؛ مثل قبل
 CITY_RESCUED_GROWTH = 2   # روباه زخمی در هر ارتقا ۲ برابر
 CITY_HUNT_GROWTH = 2      # شکار در هر ارتقا ۲ برابر
-CITY_TREASURY_GROWTH = 3    # دارایی خزانه در هر سطح ۳ برابر می‌شود
+# دارایی لازم خزانه برای رفتن از سطح N به N+1 (عدد ثابت برای هر سطح؛ برای تنظیم راحت‌تر جدول را عوض کن).
+CITY_TREASURY_REQ = {
+    1: 10_000,
+    2: 50_000,
+    3: 200_000,
+    4: 750_000,
+    5: 2_000_000,
+    6: 5_000_000,       # ارتقا از سطح ۶ به ۷
+    7: 12_000_000,
+    8: 30_000_000,
+    9: 75_000_000,      # ارتقا از سطح ۹ به آخرین سطح (۱۰)
+}
 CITY_MAX_LEVEL = 10         # آخرین سطح شهر ۱۰ است
 CITY_CLAIM_COOLDOWN_BONUS = 10  # ثانیه؛ باف «روب روب سریع‌تر»
 CITY_DONATE_REWARD = 200    # پاداش هر دونیت‌کننده هنگام ارتقای شهر
@@ -6724,7 +6737,7 @@ CITY_MARKET_NAMES = {
 }
 CITY_MARKET_DESCRIPTIONS = {
     'egg': '🥚 تخم‌مرغ خام داخل یخچال میره؛ ارزش غذایی خام ۵ و بعد از پخت ۱۱ میشه.',
-    'injured_fox': '🦊 روباه زخمی به موجودی روباه‌های زخمی تو اضافه میشه و برای سیستم‌های مربوط به روباه زخمی قابل استفاده است.',
+    'injured_fox': '🦊 روباه زخمی به موجودی روباه‌های زخمی تو و به مجموع روباه‌های زخمی نجات‌یافته‌ات (پروفایل و لیدربرد) اضافه میشه و برای سیستم‌های مربوط به روباه زخمی قابل استفاده است.',
 }
 
 def city_requirements(level):
@@ -6735,16 +6748,26 @@ def city_requirements(level):
         'points': int(round(CITY_BASE_REQ['points'] * (CITY_REQ_GROWTH ** idx))),
         'rescued': int(round(CITY_BASE_REQ['rescued'] * (CITY_RESCUED_GROWTH ** idx))),
         'hunts': int(round(CITY_BASE_REQ['hunts'] * (CITY_HUNT_GROWTH ** idx))),
-        'treasury': int(CITY_BASE_REQ['treasury'] * (CITY_TREASURY_GROWTH ** idx)),
+        'treasury': int(CITY_TREASURY_REQ.get(level, CITY_TREASURY_REQ[max(CITY_TREASURY_REQ)])),
     }
 
 def fa_compact_number(n):
+    """عدد را خلاصه می‌نویسد: هزار / میلیون / میلیارد (مثلاً 24.3 هزار، 5 میلیون، 1.25 میلیون)."""
     n = int(n or 0)
-    if abs(n) < 1000:
+    a = abs(n)
+    if a < 1000:
         return f"{n:,}"
-    val = n / 1000
-    s = f"{val:.2f}".rstrip('0').rstrip('.')
-    return f"{s} هزار"
+    units = ((1_000, "هزار"), (1_000_000, "میلیون"), (1_000_000_000, "میلیارد"))
+    idx = 0
+    for i, (unit, _) in enumerate(units):
+        if a >= unit:
+            idx = i
+    # اگه گرد کردن عدد رو به ۱۰۰۰ برسونه (مثل 999,999 → «1000 هزار») یک واحد بالاتر می‌رویم.
+    while idx < len(units) - 1 and round(a / units[idx][0], 2) >= 1000:
+        idx += 1
+    unit, name = units[idx]
+    s = f"{n / unit:.2f}".rstrip('0').rstrip('.')
+    return f"{s} {name}"
 
 def is_group_chat_id(chat_id):
     return bool(chat_id) and chat_id < 0
@@ -7099,15 +7122,29 @@ def market_get_items(session, chat_id):
 def market_tax(amount):
     return max(0, int(amount * CITY_MARKET_TAX_RATE))
 
-def market_text(session, row):
+CITY_MARKET_ITEM_CODES = {'egg': 'e', 'injured_fox': 'f'}
+CITY_MARKET_CODE_ITEMS = {v: k for k, v in CITY_MARKET_ITEM_CODES.items()}
+
+def market_cb(action, chat_id, owner_id, item_key=None, qty=None):
+    """callback_data پنل مارکت. آیدی صاحب پنل همیشه داخلش هست تا کاربر دیگه‌ای نتونه از پنل کس دیگه استفاده کنه.
+    فرمت: rmarket:<action>:<chat_id>:<owner_id>[:<e|f>[:<qty>]]  (حداکثر حدود ۵۰ بایت؛ زیر سقف ۶۴ تلگرام)"""
+    data = f"rmarket:{action}:{chat_id}:{owner_id}"
+    if item_key is not None:
+        data += f":{CITY_MARKET_ITEM_CODES[item_key]}"
+        if qty is not None:
+            data += f":{int(qty)}"
+    return data
+
+def market_text(session, row, buyer=None):
     items = market_get_items(session, row.chat_id)
     treasury = int(row.city_treasury or 0)
-    lines = [
-        "🛍 مارکت روبی",
-        "",
+    lines = ["🛍 مارکت روبی", ""]
+    if buyer:
+        lines += [f"👤 پنل خرید : {buyer}", ""]
+    lines += [
         "❓ یک محصول را جهت خرید انتخاب کنید ⬇️",
         "",
-        "🤑 مالیات شهرداری : 5%",
+        "🤑 مالیات شهرداری : 5% (علاوه بر قیمت محصول از خریدار کسر می‌شود)",
         "",
         "〰️〰️〰️〰️〰️〰️〰️",
         "",
@@ -7127,27 +7164,37 @@ def market_text(session, row):
     ]
     return "\n".join(lines)
 
-def market_buyer_keyboard(chat_id):
+def market_cart_text(item_key, price, stock, qty):
+    total = price * qty
+    tax = market_tax(total)
+    return (f"{CITY_MARKET_NAMES[item_key]}\n\n{CITY_MARKET_DESCRIPTIONS[item_key]}\n\n"
+            f"🧮 تعداد : {qty:,}\n💰 قیمت واحد : {price:,} 🪙\n"
+            f"💵 مبلغ کل : {total:,} 🪙\n🤑 مالیات شهرداری (5%) : {tax:,} 🪙\n"
+            f"💳 پرداخت نهایی : {total + tax:,} 🪙\n"
+            f"📦 موجودی مارکت : {stock:,}\n\n"
+            "با ➕ تعداد را بیشتر و با ➖ کمتر کن.")
+
+def market_buyer_keyboard(chat_id, owner_id):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("خرید تخم مرغ🥚", callback_data=f"rmarket:buy:{chat_id}:egg"),
-         InlineKeyboardButton("خرید روباه زخمی🦊", callback_data=f"rmarket:buy:{chat_id}:injured_fox")]
+        [InlineKeyboardButton("خرید تخم مرغ🥚", callback_data=market_cb("buy", chat_id, owner_id, "egg")),
+         InlineKeyboardButton("خرید روباه زخمی🦊", callback_data=market_cb("buy", chat_id, owner_id, "injured_fox"))]
     ])
 
-def market_settings_keyboard(chat_id):
+def market_settings_keyboard(chat_id, owner_id):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🥚 پر کردن تخم مرغ", callback_data=f"rmarket:stock:{chat_id}:egg"),
-         InlineKeyboardButton("🦊 پر کردن روباه زخمی", callback_data=f"rmarket:stock:{chat_id}:injured_fox")],
-        [InlineKeyboardButton("🔁 واگذاری شهرداری", callback_data=f"rmarket:transfer:{chat_id}")],
-        [InlineKeyboardButton("🔙 مارکت روبی", callback_data=f"rmarket:open:{chat_id}")]
+        [InlineKeyboardButton("🥚 پر کردن تخم مرغ", callback_data=market_cb("stock", chat_id, owner_id, "egg")),
+         InlineKeyboardButton("🦊 پر کردن روباه زخمی", callback_data=market_cb("stock", chat_id, owner_id, "injured_fox"))],
+        [InlineKeyboardButton("🔁 واگذاری شهرداری", callback_data=market_cb("transfer", chat_id, owner_id))],
+        [InlineKeyboardButton("🔙 مارکت روبی", callback_data=market_cb("open", chat_id, owner_id))]
     ])
 
-def market_cart_keyboard(chat_id, item_key, qty, max_qty):
+def market_cart_keyboard(chat_id, owner_id, item_key, qty, max_qty):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➖", callback_data=f"rmarket:minus:{chat_id}:{item_key}:{qty}"),
-         InlineKeyboardButton(f"{qty:,}", callback_data=f"rmarket:noop:{chat_id}"),
-         InlineKeyboardButton("➕", callback_data=f"rmarket:plus:{chat_id}:{item_key}:{qty}")],
-        [InlineKeyboardButton("✅ تایید خرید", callback_data=f"rmarket:confirm:{chat_id}:{item_key}:{qty}")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data=f"rmarket:open:{chat_id}")]
+        [InlineKeyboardButton("➖", callback_data=market_cb("minus", chat_id, owner_id, item_key, qty)),
+         InlineKeyboardButton(f"{qty:,}", callback_data=market_cb("noop", chat_id, owner_id)),
+         InlineKeyboardButton("➕", callback_data=market_cb("plus", chat_id, owner_id, item_key, qty))],
+        [InlineKeyboardButton("✅ تایید خرید", callback_data=market_cb("confirm", chat_id, owner_id, item_key, qty))],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data=market_cb("open", chat_id, owner_id))]
     ])
 
 async def city_market_command(update, context):
@@ -7156,15 +7203,18 @@ async def city_market_command(update, context):
     chat=update.effective_chat
     if not chat or chat.type not in ("group","supergroup"):
         await update.message.reply_text("🛍 مارکت روبی فقط داخل گپ شهر فعال است.", **reply_kwargs(update.message)); return
+    viewer=update.effective_user
     session=get_session()
     try:
         row=session.get(GroupChat,chat.id)
         if not row or (row.city_level or 1)<CITY_MARKET_UNLOCK_LEVEL:
             level=row.city_level if row else 1
             await update.message.reply_text(f"🔒 مارکت روبی از سطح شهر {CITY_MARKET_UNLOCK_LEVEL} باز می‌شود.\n⭐️ سطح فعلی شهر : {level}", **reply_kwargs(update.message)); return
-        text=market_text(session,row)
+        text=market_text(session,row,buyer=mention_of(viewer.id,viewer.full_name or viewer.first_name))
+        session.commit()
     finally: session.close()
-    await update.message.reply_text(text,reply_markup=market_buyer_keyboard(chat.id),**reply_kwargs(update.message))
+    # پنل مخصوص همین کاربر است (آیدی‌اش داخل دکمه‌ها هست)؛ بقیه‌ی اعضا فقط می‌بینند و نمی‌توانند بزنند.
+    await update.message.reply_text(text,reply_markup=market_buyer_keyboard(chat.id,viewer.id),**reply_kwargs(update.message))
 
 async def market_callback(update, context):
     q=update.callback_query
@@ -7172,8 +7222,22 @@ async def market_callback(update, context):
     if len(parts)<3: return
     action=parts[1]
     try: chat_id=int(parts[2])
-    except: return
+    except Exception: return
+    clicker=q.from_user.id
+    owner_id=None
+    if len(parts)>=4:
+        try: owner_id=int(parts[3])
+        except Exception:
+            await q.answer("♻️ این پنل قدیمی است؛ دوباره «مارکت روبی» را بفرست.",show_alert=True); return
+    # دکمه‌های ورودی که داخل پنل شهر/شهردار (پیام مشترک) هستند owner ندارند؛ فقط «باز کردن مارکت» و «تنظیمات».
+    entry = owner_id is None and action in ("open","settings")
+    if owner_id is None and not entry:
+        await q.answer("♻️ این پنل قدیمی است؛ دوباره «مارکت روبی» را بفرست.",show_alert=True); return
+    if owner_id is not None and clicker != owner_id:
+        await q.answer("⛔ این پنل مارکت برای کاربر دیگری است. برای خودت «مارکت روبی» را بفرست.",show_alert=True); return
     if not await require_membership(update,context): return
+    owner_id = clicker  # از اینجا به بعد صاحب پنل همان کسی است که دکمه را زده
+    spawn_new_panel=False
     session=get_session()
     try:
         row=session.get(GroupChat,chat_id)
@@ -7181,54 +7245,50 @@ async def market_callback(update, context):
             await q.answer("🔒 مارکت هنوز باز نیست.",show_alert=True); return
         items=market_get_items(session,chat_id)
         user=get_or_create_user(session,q.from_user)
+        buyer_label=mention_of(clicker,q.from_user.full_name or q.from_user.first_name)
         if action=="open":
-            text=market_text(session,row)
-            kb=market_buyer_keyboard(chat_id)
+            text=market_text(session,row,buyer=buyer_label)
+            kb=market_buyer_keyboard(chat_id,owner_id)
+            # از روی پیام مشترک (پنل شهر/شهردار) پیام جدید و مخصوص خودش ساخته می‌شود، نه ویرایش پیام مشترک.
+            spawn_new_panel=entry
         elif action=="settings":
-            if not mayor_is_current(row,q.from_user.id):
+            if not mayor_is_current(row,clicker):
                 await q.answer("⛔ فقط شهردار فعلی دسترسی دارد.",show_alert=True); return
             text=market_text(session,row)+"\n\n⚙️ تنظیمات شهرداری:"
-            kb=market_settings_keyboard(chat_id)
-        elif action in ("buy",):
-            item_key=parts[3]
-            item=items.get(item_key)
+            kb=market_settings_keyboard(chat_id,owner_id)
+        elif action=="buy":
+            item_key=CITY_MARKET_CODE_ITEMS.get(parts[4]) if len(parts)>4 else None
+            item=items.get(item_key) if item_key else None
             if not item or int(item.quantity or 0)<=0:
                 await q.answer("❌ موجودی این محصول در مارکت تمام شده.",show_alert=True); return
-            desc=CITY_MARKET_DESCRIPTIONS[item_key]
-            price=int(item.price)
-            context.user_data[f"rmarket_cart:{chat_id}"]={"item":item_key,"qty":1}
-            text=(f"{CITY_MARKET_NAMES[item_key]}\n\n{desc}\n\n"
-                  f"💰 قیمت هر عدد : {price:,} 🪙\n"
-                  f"🧮 موجودی مارکت : {int(item.quantity):,}\n\n"
-                  "با ➕ تعداد را بیشتر و با ➖ کمتر کن.")
-            kb=market_cart_keyboard(chat_id,item_key,1,int(item.quantity))
+            text=market_cart_text(item_key,int(item.price),int(item.quantity),1)
+            kb=market_cart_keyboard(chat_id,owner_id,item_key,1,int(item.quantity))
         elif action in ("plus","minus"):
-            item_key=parts[3]
-            try: qty=int(parts[4])
-            except: qty=1
-            item=items.get(item_key)
-            max_qty=int(item.quantity or 0) if item else 0
-            if action=="plus": qty=min(max_qty,qty+1)
-            else: qty=max(1,qty-1)
-            context.user_data[f"rmarket_cart:{chat_id}"]={"item":item_key,"qty":qty}
-            price=int(item.price)
-            total=price*qty
-            tax=market_tax(total)
-            text=(f"{CITY_MARKET_NAMES[item_key]}\n\n{CITY_MARKET_DESCRIPTIONS[item_key]}\n\n"
-                  f"🧮 تعداد : {qty:,}\n💰 قیمت واحد : {price:,} 🪙\n"
-                  f"💵 مبلغ کل : {total:,} 🪙\n🤑 مالیات شهرداری (5%) : {tax:,} 🪙\n"
-                  f"💳 پرداخت نهایی : {total:,} 🪙")
-            kb=market_cart_keyboard(chat_id,item_key,qty,max_qty)
+            item_key=CITY_MARKET_CODE_ITEMS.get(parts[4]) if len(parts)>4 else None
+            item=items.get(item_key) if item_key else None
+            if not item: return
+            try: qty=int(parts[5])
+            except Exception: qty=1
+            max_qty=int(item.quantity or 0)
+            if max_qty<=0:
+                await q.answer("❌ موجودی این محصول در مارکت تمام شده.",show_alert=True); return
+            qty=min(max_qty,qty+1) if action=="plus" else max(1,qty-1)
+            qty=max(1,min(qty,max_qty))
+            text=market_cart_text(item_key,int(item.price),max_qty,qty)
+            kb=market_cart_keyboard(chat_id,owner_id,item_key,qty,max_qty)
         elif action=="noop":
             await q.answer(); return
         elif action=="confirm":
-            item_key=parts[3]
-            qty=max(1,int(parts[4]))
-            item=items.get(item_key)
+            item_key=CITY_MARKET_CODE_ITEMS.get(parts[4]) if len(parts)>4 else None
+            try: qty=max(1,int(parts[5]))
+            except Exception: qty=1
+            item=items.get(item_key) if item_key else None
             if not item or int(item.quantity or 0)<qty:
                 await q.answer("❌ موجودی مارکت کافی نیست.",show_alert=True); return
             price=int(item.price or 0)
-            total=price*qty
+            total=price*qty                 # قیمت محصول
+            tax=market_tax(total)           # مالیات ۵٪ که علاوه بر قیمت از خریدار کم می‌شود
+            grand=total+tax                 # مجموع پرداختی خریدار
             if item_key == "egg":
                 if user.level < FRIDGE_UNLOCK_LEVEL:
                     await q.answer(f"❌ برای خرید تخم‌مرغ باید یخچال روبی در سطح {FRIDGE_UNLOCK_LEVEL} برایت باز شده باشد.",show_alert=True); return
@@ -7237,32 +7297,35 @@ async def market_callback(update, context):
                 used += session.query(RubyEgg).filter(RubyEgg.user_id==user.telegram_id).count()
                 if used + qty > cap:
                     await q.answer(f"❌ ظرفیت یخچالت کافی نیست. {qty:,} جای خالی لازم داری؛ ظرفیت: {used}/{cap}",show_alert=True); return
-            if (user.fox_points or 0)<total:
-                await q.answer(f"❌ روب‌پوینت کافی نیست. {total:,} 🪙 لازم داری.",show_alert=True); return
-            tax=market_tax(total)
-            user.fox_points-=total
+            if (user.fox_points or 0)<grand:
+                await q.answer(f"❌ روب‌پوینت کافی نیست. {grand:,} 🪙 لازم داری (قیمت {total:,} + مالیات {tax:,}).",show_alert=True); return
+            user.fox_points-=grand
             item.quantity-=qty
-            # ۹۵٪ به خزانه برمی‌گردد و ۵٪ مالیات مستقیم به شهردار می‌رسد.
-            row.city_treasury=(row.city_treasury or 0)+(total-tax)
+            # کل قیمت محصول به خزانه شهر می‌رسد و مالیات ۵٪ (که اضافه روی قیمت بود) مستقیم به شهردار.
+            row.city_treasury=(row.city_treasury or 0)+total
             mayor=session.get(User,int(row.city_mayor_id)) if row.city_mayor_id else None
             if mayor:
                 mayor.fox_points=(mayor.fox_points or 0)+tax
+            else:
+                row.city_treasury=(row.city_treasury or 0)+tax   # شهردار نداریم؛ مالیات گم نشود
             if item_key=="egg":
                 for _ in range(qty):
                     session.add(RubyEgg(user_id=user.telegram_id,cooked=0,cooking_started_at=None,created_at=now_utc()))
             else:
                 user.injured_fox_stock=(user.injured_fox_stock or 0)+qty
+                # مثل نجات معمولی، به مجموع روباه‌های زخمی نجات‌یافته‌ی خود کاربر (پروفایل/لیدربرد) هم اضافه می‌شود.
+                user.fox_rescued_count=(user.fox_rescued_count or 0)+qty
             session.commit()
-            context.user_data.pop(f"rmarket_cart:{chat_id}",None)
             text=(f"✅ خرید با موفقیت انجام شد!\n\n"
                   f"🛍 محصول : {CITY_MARKET_NAMES[item_key]}\n"
                   f"🧮 تعداد : {qty:,}\n"
-                  f"💰 مبلغ : {total:,} 🪙\n"
+                  f"💰 قیمت محصول : {total:,} 🪙\n"
                   f"🤑 مالیات شهرداری : {tax:,} 🪙\n"
+                  f"💳 مجموع پرداختی : {grand:,} 🪙\n"
                   f"🏦 خزانه شهر : {int(row.city_treasury):,} 🪙\n"
-                  f"💳 موجودی تو : {int(user.fox_points):,} 🪙\n\n"
+                  f"💰 موجودی تو : {int(user.fox_points):,} 🪙\n\n"
                   f"{CITY_MARKET_DESCRIPTIONS[item_key]}")
-            kb=market_buyer_keyboard(chat_id)
+            kb=market_buyer_keyboard(chat_id,owner_id)
             mayor_id=row.city_mayor_id
             mayor_tax=tax
             buyer_name=user_display_name(user)
@@ -7288,10 +7351,11 @@ async def market_callback(update, context):
                 except Exception: pass
             return
         elif action=="stock":
-            if not mayor_is_current(row,q.from_user.id):
+            if not mayor_is_current(row,clicker):
                 await q.answer("⛔ فقط شهردار فعلی می‌تواند مارکت را پر کند.",show_alert=True); return
-            item_key=parts[3]
-            item=items.get(item_key)
+            item_key=CITY_MARKET_CODE_ITEMS.get(parts[4]) if len(parts)>4 else None
+            item=items.get(item_key) if item_key else None
+            if not item: return
             base=CITY_MARKET_BASE_PRICES[item_key]
             current=int(item.quantity or 0)
             text=(f"⚙️ پر کردن {CITY_MARKET_NAMES[item_key]}\n\n"
@@ -7305,17 +7369,17 @@ async def market_callback(update, context):
                   "عدد اول = تعداد، عدد دوم = قیمت فروش هر عدد")
             context.user_data["rmarket_stock"]={"chat_id":chat_id,"item_key":item_key}
             await q.answer()
-            try: await q.message.edit_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 تنظیمات",callback_data=f"rmarket:settings:{chat_id}")]]))
-            except: pass
+            try: await q.message.edit_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 تنظیمات",callback_data=market_cb("settings",chat_id,owner_id))]]))
+            except Exception: pass
             return
         elif action=="transfer":
-            if not mayor_is_current(row,q.from_user.id):
+            if not mayor_is_current(row,clicker):
                 await q.answer("⛔ فقط شهردار فعلی می‌تواند واگذاری کند.",show_alert=True); return
             context.user_data["rmarket_transfer_chat"]=chat_id
             text=("🔁 واگذاری شهرداری\n\n"
                   "آیدی عددی تلگرام یا شناسه کاربری فرد را بفرست.\n"
                   "فرد باید عضو همین گپ باشد و حداقل ۳ روز از اولین حضور ثبت‌شده‌اش توسط ربات گذشته باشد.")
-            kb=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 تنظیمات",callback_data=f"rmarket:settings:{chat_id}")]])
+            kb=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 تنظیمات",callback_data=market_cb("settings",chat_id,owner_id))]])
         else:
             return
         session.commit()
@@ -7323,6 +7387,10 @@ async def market_callback(update, context):
         if session.is_active:
             session.close()
     await q.answer()
+    if spawn_new_panel:
+        try: await q.message.reply_text(text,reply_markup=kb)
+        except Exception: pass
+        return
     try: await q.message.edit_text(text,reply_markup=kb)
     except Exception: pass
 
@@ -9391,7 +9459,7 @@ def main():
     app.add_handler(CallbackQueryHandler(city_donate_button,pattern=r"^citydonate:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_top_donors_button,pattern=r"^citytop:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_back_button,pattern=r"^cityback:-?\d+$"))
-    app.add_handler(CallbackQueryHandler(market_callback,pattern=r"^rmarket:(?:open|settings|buy|plus|minus|noop|confirm|stock|transfer):-?\d+(?::(?:egg|injured_fox|\d+))?(?::\d+)?$"))
+    app.add_handler(CallbackQueryHandler(market_callback,pattern=r"^rmarket:(?:open|settings|buy|plus|minus|noop|confirm|stock|transfer):-?\d+(?::[\w-]+)*$"))
     app.add_handler(CallbackQueryHandler(ruby_egg_button,pattern=r"^rubyegg:(?:item|cook|feed|list|back):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(admin_football_callback,pattern=r"^admin:(football(:.*)?|back)$"))
     app.add_handler(CallbackQueryHandler(football_predict_match_button,pattern=r"^fbpred:match:\d+$"))
