@@ -131,7 +131,8 @@ class GroupChat(Base):
     city_donors = Column(String, nullable=True, default='')          # آیدی دونیت‌کننده‌های این چرخه (تا ارتقا بعدی)
     # ---------- انتخابات شهرداری (از سطح شهر 5 به بعد) ----------
     city_mayor_id = Column(BigInteger, nullable=True)                 # آیدی شهردار منتخب فعلی
-    city_mayor_name = Column(String, nullable=True)                   # نام نمایشی شهردار منتخب فعلی
+    city_mayor_name = Column(String, nullable=True)                   # نام نمایشی شهردار فعلی
+    city_mayor_source = Column(String, nullable=False, default='owner') # owner | transferred
     city_mayor_term_ends_at = Column(DateTime(timezone=True), nullable=True)  # پایان دوره 3 روزه شهردار فعلی
     city_election_status = Column(String, nullable=False, default='none')     # none | candidacy | voting
     city_election_candidates = Column(String, nullable=True, default='')      # آیدی کاندیدها با کاما جدا شده (به ترتیب ثبت‌نام)
@@ -231,6 +232,35 @@ class GiftCodeRedemption(Base):
     code_id = Column(Integer, ForeignKey('gift_codes.id'), nullable=False)
     user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
     redeemed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class CityMarketItem(Base):
+    """موجودی و قیمت محصولات مارکت روبی برای هر شهر."""
+    __tablename__ = 'city_market_items'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, ForeignKey('group_chats.chat_id'), nullable=False)
+    item_key = Column(String, nullable=False)  # egg | injured_fox
+    quantity = Column(Integer, nullable=False, default=0)
+    price = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class RubyEgg(Base):
+    """تخم‌مرغ‌های خریداری‌شده از مارکت؛ خام/پخته و غیرقابل فروش."""
+    __tablename__ = 'ruby_eggs'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    cooked = Column(Integer, nullable=False, default=0)
+    cooking_started_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class CityMemberPresence(Base):
+    """اولین زمانی که ربات حضور یک کاربر را در یک شهر دیده است."""
+    __tablename__ = 'city_member_presence'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, ForeignKey('group_chats.chat_id'), nullable=False)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    first_seen_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 class CityDonation(Base):
     __tablename__ = 'city_donations'
@@ -567,6 +597,7 @@ def init_db():
             mayor_additions = {
                 'city_mayor_id': 'BIGINT',
                 'city_mayor_name': 'VARCHAR',
+                'city_mayor_source': "VARCHAR DEFAULT 'owner'",
                 'city_mayor_term_ends_at': DT_SQL_TYPE,
                 'city_election_status': "VARCHAR DEFAULT 'none'",
                 'city_election_candidates': "VARCHAR DEFAULT ''",
@@ -581,6 +612,19 @@ def init_db():
                 "UPDATE group_chats SET city_election_status = 'none' "
                 "WHERE city_election_status IS NULL OR city_election_status = ''"
             ))
+            # نسخه‌ی جدید رأی‌گیری ندارد: برای شهرهای قدیمی شهردار به مالک گپ منتقل می‌شود.
+            # فقط ردیف‌هایی که ستون source تازه ساخته شده‌اند (یعنی هنوز انتقال دستی نداشته‌اند).
+            if 'city_mayor_source' not in gc_cols:
+                conn.execute(text(
+                    "UPDATE group_chats SET city_mayor_id = city_owner_id, "
+                    "city_mayor_name = city_owner_name, city_mayor_source = 'owner' "
+                    "WHERE city_owner_id IS NOT NULL"
+                ))
+        # جداول جدید مارکت روبی و شرط ۳ روز حضور
+        if 'city_market_items' in inspector.get_table_names():
+            cm_cols = {c['name'] for c in inspector.get_columns('city_market_items')}
+            if 'updated_at' not in cm_cols:
+                conn.execute(text(f'ALTER TABLE city_market_items ADD COLUMN updated_at {DT_SQL_TYPE}'))
         if 'fox_knowledge' in inspector.get_table_names():
             fk_cols = {c['name'] for c in inspector.get_columns('fox_knowledge')}
             for name, definition in {'media_type': 'VARCHAR', 'file_id': 'VARCHAR', 'file_unique_id': 'VARCHAR'}.items():

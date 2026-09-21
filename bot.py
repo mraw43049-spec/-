@@ -21,7 +21,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, get_session, init_db
 )
 import ai_service as ai
 import fox_brain as brain
@@ -3174,12 +3174,18 @@ def fridge_item_block(hunt):
 def fridge_text(user, items):
     level = max(1, min(FRIDGE_MAX_LEVEL, int(user.fridge_level or 1)))
     cap = fridge_capacity(level)
+    egg_session = get_session()
+    try:
+        egg_count = egg_session.query(RubyEgg).filter(RubyEgg.user_id == user.telegram_id).count()
+    finally:
+        egg_session.close()
     lines = [
         f"❄️ یخچال روبی {user_mention(user)}",
         "",
         f"⭐️ سطح یخچال : {level} / {FRIDGE_MAX_LEVEL}",
         "",
-        f"🦊 ظرفیت یخچال : {len(items)} / {cap}",
+        f"🧊 ظرفیت یخچال : {len(items) + egg_count} / {cap}",
+        f"🥚 تخم مرغ : {egg_count:,}",
         "",
         FRIDGE_SEPARATOR,
     ]
@@ -3188,6 +3194,7 @@ def fridge_text(user, items):
     else:
         for hunt in items:
             lines += ["", fridge_item_block(hunt), "", FRIDGE_SEPARATOR]
+    lines += ["", f"🥚 تخم مرغ‌ها: {egg_count:,} عدد | خام: ۵ ارزش غذایی | پخته: ۱۱ | پخت: ۵ دقیقه", ""]
     if level >= FRIDGE_MAX_LEVEL:
         lines += ["", "✨ یخچال در آخرین سطح ممکن میباشد."]
     else:
@@ -3208,6 +3215,13 @@ def fridge_keyboard(user, items):
     if row:
         rows.append(row)
     level = max(1, min(FRIDGE_MAX_LEVEL, int(user.fridge_level or 1)))
+    egg_session = get_session()
+    try:
+        egg_count = egg_session.query(RubyEgg).filter(RubyEgg.user_id == owner_id).count()
+    finally:
+        egg_session.close()
+    if egg_count:
+        rows.append([InlineKeyboardButton(f"🥚 تخم مرغ‌ها ({egg_count:,})", callback_data=f"rubyegg:list:0:{owner_id}")])
     if level < FRIDGE_MAX_LEVEL:
         cost = fridge_upgrade_cost(level)
         cost_label = "رایگان 🎁" if cost == 0 else f"{cost:,} روب‌پوینت"
@@ -3337,6 +3351,132 @@ async def fridge_button(update, context):
                 f"🦊 {fed_name} به روباه داده شد.\n"
                 f"🍖 شکم روباه: {old}/{cap} → {user.fox_belly}/{cap}\n\n" + fridge_text(user, items),
                 reply_markup=fridge_keyboard(user, items)
+            )
+            return
+    finally:
+        session.close()
+    await q.answer()
+
+
+# ---------- تخم مرغ مارکت / یخچال ----------
+RUBY_EGG_COOK_SECONDS = 5 * 60
+
+def ruby_egg_remaining(egg):
+    if egg.cooked or not egg.cooking_started_at:
+        return 0
+    return max(0, int(RUBY_EGG_COOK_SECONDS - (now_utc() - aware(egg.cooking_started_at)).total_seconds()))
+
+def settle_ruby_egg(egg):
+    if not egg.cooked and egg.cooking_started_at and ruby_egg_remaining(egg) <= 0:
+        egg.cooked = 1
+        egg.cooking_started_at = None
+    return egg
+
+def ruby_egg_label(egg):
+    settle_ruby_egg(egg)
+    if egg.cooked:
+        return "پخته 🍳"
+    if egg.cooking_started_at:
+        return f"در حال پخت 🔥 ({format_duration(ruby_egg_remaining(egg))})"
+    return "خام 🥚"
+
+def ruby_eggs_keyboard(eggs, user_id):
+    rows=[]
+    for egg in eggs:
+        settle_ruby_egg(egg)
+        rows.append([InlineKeyboardButton(
+            f"#{egg.id} {ruby_egg_label(egg)}",
+            callback_data=f"rubyegg:item:{egg.id}:{user_id}"
+        )])
+    rows.append([InlineKeyboardButton("🔙 بازگشت به یخچال", callback_data=f"rubyegg:back:0:{user_id}")])
+    return InlineKeyboardMarkup(rows)
+
+async def ruby_egg_button(update, context):
+    q=update.callback_query
+    try:
+        _,action,arg_s,user_s=q.data.split(":")
+        arg=int(arg_s); user_id=int(user_s)
+    except Exception:
+        return
+    if q.from_user.id != user_id:
+        await q.answer("⛔ این یخچال برای کاربر دیگری است.",show_alert=True); return
+    session=get_session()
+    try:
+        user=session.get(User,user_id)
+        if not user:
+            await q.answer("❌ کاربر پیدا نشد.",show_alert=True); return
+        if action=="back":
+            items=settle_all_fridge_items(session,user_id)
+            session.commit()
+            eggs=session.query(RubyEgg).filter(RubyEgg.user_id==user_id).order_by(RubyEgg.id.asc()).all()
+            for egg in eggs: settle_ruby_egg(egg)
+            session.commit()
+            await q.answer()
+            await q.message.edit_text(fridge_text(user,items),reply_markup=fridge_keyboard(user,items))
+            return
+        egg=session.get(RubyEgg,arg)
+        if not egg or egg.user_id!=user_id:
+            await q.answer("❌ این تخم‌مرغ پیدا نشد.",show_alert=True); return
+        settle_ruby_egg(egg)
+        if action=="item":
+            state=ruby_egg_label(egg)
+            text=(f"🥚 تخم مرغ #{egg.id}\n\n"
+                  f"📌 وضعیت : {state}\n"
+                  f"🍖 ارزش غذایی : {11 if egg.cooked else 5}\n"
+                  "🚫 فروش این تخم‌مرغ ممکن نیست.")
+            rows=[]
+            if not egg.cooked and not egg.cooking_started_at:
+                rows.append([InlineKeyboardButton("🔥 پختن (۵ دقیقه)",callback_data=f"rubyegg:cook:{egg.id}:{user_id}")])
+            if egg.cooking_started_at:
+                rows.append([InlineKeyboardButton("🔄 بررسی پخت",callback_data=f"rubyegg:item:{egg.id}:{user_id}")])
+            rows.append([InlineKeyboardButton("🦊 دادن به روباه",callback_data=f"rubyegg:feed:{egg.id}:{user_id}")])
+            rows.append([InlineKeyboardButton("🔙 تخم مرغ‌ها",callback_data=f"rubyegg:list:0:{user_id}")])
+            session.commit()
+            await q.answer()
+            await q.message.edit_text(text,reply_markup=InlineKeyboardMarkup(rows))
+            return
+        if action=="list":
+            eggs=session.query(RubyEgg).filter(RubyEgg.user_id==user_id).order_by(RubyEgg.id.asc()).all()
+            for egg in eggs: settle_ruby_egg(egg)
+            session.commit()
+            await q.answer()
+            await q.message.edit_text(
+                f"🥚 تخم مرغ‌های یخچال\n\n🧮 تعداد : {len(eggs):,}\n🚫 تخم‌مرغ خام و پخته قابل فروش نیست.",
+                reply_markup=ruby_eggs_keyboard(eggs,user_id)
+            )
+            return
+        if action=="cook":
+            if egg.cooked:
+                await q.answer("🍳 این تخم‌مرغ قبلاً پخته شده.",show_alert=True); return
+            if egg.cooking_started_at:
+                await q.answer(f"🔥 در حال پخت است؛ {format_duration(ruby_egg_remaining(egg))} مانده.",show_alert=True); return
+            egg.cooking_started_at=now_utc()
+            session.commit()
+            await q.answer("🔥 پخت تخم‌مرغ شروع شد؛ ۵ دقیقه زمان می‌برد.",show_alert=True)
+            await q.message.edit_text(
+                f"🥚 تخم مرغ #{egg.id}\n\n🔥 پخت شروع شد.\n⏳ زمان پخت: ۵ دقیقه\n🍖 ارزش غذایی بعد از پخت: ۱۱",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 بررسی پخت",callback_data=f"rubyegg:item:{egg.id}:{user_id}")],
+                    [InlineKeyboardButton("🔙 تخم مرغ‌ها",callback_data=f"rubyegg:list:0:{user_id}")]
+                ])
+            )
+            return
+        if action=="feed":
+            settle_fox_production(user)
+            if user.fox_belly >= int(user.fox_belly_capacity or 3):
+                await q.answer("🦊 شکم روباه پر است.",show_alert=True); return
+            nutrition=11 if egg.cooked else 5
+            old=user.fox_belly
+            cap=int(user.fox_belly_capacity or 3)
+            user.fox_belly=min(cap,old+nutrition)
+            session.delete(egg)
+            session.commit()
+            await q.answer("🦊 تخم‌مرغ به روباه داده شد!")
+            await q.message.edit_text(
+                f"🦊 تخم‌مرغ {'پخته' if nutrition==11 else 'خام'} به روباه داده شد.\n"
+                f"🍖 شکم روباه: {old}/{cap} → {user.fox_belly}/{cap}\n\n"
+                "🚫 تخم‌مرغ قابل فروش نیست.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 یخچال",callback_data=f"rubyegg:back:0:{user_id}")]])
             )
             return
     finally:
@@ -6569,13 +6709,23 @@ CITY_MAX_LEVEL = 10         # آخرین سطح شهر ۱۰ است
 CITY_CLAIM_COOLDOWN_BONUS = 10  # ثانیه؛ باف «روب روب سریع‌تر»
 CITY_DONATE_REWARD = 200    # پاداش هر دونیت‌کننده هنگام ارتقای شهر
 
-# ---------- انتخابات شهرداری ----------
-CITY_MAYOR_UNLOCK_LEVEL = 5            # از این سطح شهر به بعد انتخابات فعال می‌شه
-CITY_MAYOR_CANDIDACY_COST = 10_000     # هزینه‌ی کاندید شدن
-CITY_MAYOR_CANDIDATE_CAPACITY = 5      # حداکثر تعداد کاندید
-CITY_MAYOR_TERM_SECONDS = 3 * 24 * 3600        # دوره‌ی شهرداری: هر 3 روز عوض می‌شه
-CITY_MAYOR_CANDIDACY_WINDOW_SECONDS = 24 * 3600  # مهلت ثبت‌نام کاندیدها قبل از شروع خودکار رای‌گیری
-CITY_MAYOR_VOTING_SECONDS = 5 * 3600           # رای‌گیری حداکثر 5 ساعت طول می‌کشه
+# ---------- شهردار و مارکت روبی ----------
+CITY_MAYOR_UNLOCK_LEVEL = 5
+CITY_MAYOR_MEMBERSHIP_SECONDS = 3 * 24 * 3600
+CITY_MARKET_UNLOCK_LEVEL = 5
+CITY_MARKET_TAX_RATE = 0.05
+CITY_MARKET_BASE_PRICES = {
+    'egg': 15_000,
+    'injured_fox': 20_000,
+}
+CITY_MARKET_NAMES = {
+    'egg': 'تخم مرغ🥚',
+    'injured_fox': 'روباه زخمی🦊',
+}
+CITY_MARKET_DESCRIPTIONS = {
+    'egg': '🥚 تخم‌مرغ خام داخل یخچال میره؛ ارزش غذایی خام ۵ و بعد از پخت ۱۱ میشه.',
+    'injured_fox': '🦊 روباه زخمی به موجودی روباه‌های زخمی تو اضافه میشه و برای سیستم‌های مربوط به روباه زخمی قابل استفاده است.',
+}
 
 def city_requirements(level):
     """نیازمندی رفتن از سطح فعلی به سطح بعدی؛ شهر حداکثر سطح ۱۰ دارد."""
@@ -6620,15 +6770,17 @@ def city_keyboard(chat_id, level=1):
     rows=[]
     if int(level or 1) < CITY_MAX_LEVEL:
         rows.append([InlineKeyboardButton("🏦 دونیت به خزانه شهر", callback_data=f"citydonate:{chat_id}")])
+    if int(level or 1) >= CITY_MARKET_UNLOCK_LEVEL:
+        rows.append([InlineKeyboardButton("🛍 مارکت روبی", callback_data=f"rmarket:open:{chat_id}")])
     rows.append([InlineKeyboardButton("🥇 برترین دونیت های شهر", callback_data=f"citytop:{chat_id}")])
     return InlineKeyboardMarkup(rows)
 
 def city_mayor_display_label(row):
     if row.city_mayor_id and row.city_mayor_name:
-        return f"{mention_of(row.city_mayor_id, row.city_mayor_name)} (منتخب مردم 🗳)"
+        return mention_of(row.city_mayor_id, row.city_mayor_name)
     if row.city_owner_name:
         who = mention_of(row.city_owner_id, row.city_owner_name) if row.city_owner_id else row.city_owner_name
-        return f"{who} (مالک)"
+        return who
     return "نامشخص"
 
 def city_panel_text(session, row):
@@ -6642,7 +6794,7 @@ def city_panel_text(session, row):
     r_hunt = city_ranking_position(session, 'city_hunt_total', hunt_total)
     r_treasury = city_ranking_position(session, 'city_treasury', treasury)
     mayor = city_mayor_display_label(row)
-    mayor_hint = "\n┘─ 🗳 برای شرکت تو انتخابات شهرداری بنویس «شهردار روبی»" if level >= CITY_MAYOR_UNLOCK_LEVEL else ""
+    mayor_hint = "\n┘─ 🦁 مدیریت شهرداری: «شهردار روبی»" if level >= CITY_MAYOR_UNLOCK_LEVEL else ""
     if level >= CITY_MAX_LEVEL:
         goals_block = "🏆 شهر به بالاترین سطح ممکن رسیده!"
     else:
@@ -6693,6 +6845,10 @@ async def city_command(update, context):
             if creator:
                 row.city_owner_id = creator.user.id
                 row.city_owner_name = creator.user.full_name or (f"@{creator.user.username}" if creator.user.username else str(creator.user.id))
+                if row.city_level >= CITY_MAYOR_UNLOCK_LEVEL and not row.city_mayor_id:
+                    row.city_mayor_id = creator.user.id
+                    row.city_mayor_name = row.city_owner_name
+                    row.city_mayor_source = 'owner'
         except Exception:
             pass
         session.commit()
@@ -6841,6 +6997,10 @@ async def maybe_level_up_city(context, chat_id):
             return
         row.city_level += 1
         new_level = row.city_level
+        if new_level >= CITY_MAYOR_UNLOCK_LEVEL and not row.city_mayor_id and row.city_owner_id:
+            row.city_mayor_id = row.city_owner_id
+            row.city_mayor_name = row.city_owner_name or str(row.city_owner_id)
+            row.city_mayor_source = 'owner'
         donor_ids = [int(x) for x in (row.city_donors or '').split(',') if x]
         row.city_donors = ''
         chat_title = row.title or "گپ"
@@ -6871,111 +7031,18 @@ async def maybe_level_up_city(context, chat_id):
         except Exception:
             pass
 
-# ---------- انتخابات شهرداری (از سطح شهر 5 به بعد) ----------
-
-def city_mayor_candidate_ids(row):
-    return [int(x) for x in (row.city_election_candidates or '').split(',') if x]
-
-def city_mayor_votes_map(row):
-    """{آیدی رای‌دهنده: آیدی کاندید}"""
-    votes = {}
-    for pair in (row.city_election_votes or '').split(','):
-        if not pair or ':' not in pair:
-            continue
-        voter_s, cand_s = pair.split(':', 1)
-        try:
-            votes[int(voter_s)] = int(cand_s)
-        except ValueError:
-            continue
-    return votes
-
-def city_mayor_vote_counts(row):
-    counts = {cid: 0 for cid in city_mayor_candidate_ids(row)}
-    for cand_id in city_mayor_votes_map(row).values():
-        counts[cand_id] = counts.get(cand_id, 0) + 1
-    return counts
-
-def city_mayor_start_candidacy(row):
-    row.city_election_status = 'candidacy'
-    row.city_election_candidates = ''
-    row.city_election_votes = ''
-    row.city_election_candidacy_ends_at = now_utc() + timedelta(seconds=CITY_MAYOR_CANDIDACY_WINDOW_SECONDS)
-    row.city_election_voting_ends_at = None
-
-def city_mayor_start_voting(row):
-    row.city_election_status = 'voting'
-    row.city_election_voting_ends_at = now_utc() + timedelta(seconds=CITY_MAYOR_VOTING_SECONDS)
-
-def city_mayor_panel_text(session, row):
-    status = row.city_election_status or 'none'
-    title = row.title or 'گپ'
-    if status == 'candidacy':
-        cands = city_mayor_candidate_ids(row)
-        end = aware(row.city_election_candidacy_ends_at)
-        left = max(0, int((end - now_utc()).total_seconds())) if end else 0
-        lines = [
-            f"🗳 ثبت‌نام کاندیدهای شهرداری «{title}» بازه!",
-            f"💰 هزینه‌ی کاندید شدن : {CITY_MAYOR_CANDIDACY_COST:,} روب‌پوینت",
-            f"👥 ظرفیت کاندید : {len(cands)} / {CITY_MAYOR_CANDIDATE_CAPACITY}",
-            f"⏳ مهلت ثبت‌نام : {format_duration(left)} دیگه (یا زودتر اگه ظرفیت پر بشه)",
-        ]
-        if cands:
-            lines.append("")
-            lines.append("👤 کاندیدهای فعلی ⬇️")
-            for cid in cands:
-                u = session.get(User, cid)
-                lines.append(f"┘─ {user_mention(u) if u else cid}")
-        return "\n".join(lines)
-    if status == 'voting':
-        cands = city_mayor_candidate_ids(row)
-        counts = city_mayor_vote_counts(row)
-        end = aware(row.city_election_voting_ends_at)
-        left = max(0, int((end - now_utc()).total_seconds())) if end else 0
-        lines = [
-            f"🗳 رای‌گیری شهرداری «{title}» در جریانه!",
-            f"⏳ تا پایان رای‌گیری : {format_duration(left)} دیگه",
-            "",
-            "👤 کاندیدها ⬇️",
-        ]
-        for cid in cands:
-            u = session.get(User, cid)
-            lines.append(f"┘─ {user_mention(u) if u else cid} — {counts.get(cid, 0):,} رای")
-        lines.append("")
-        lines.append("هر کاربر فقط یک بار می‌تونه رای بده.")
-        return "\n".join(lines)
-    if row.city_mayor_id:
-        end = aware(row.city_mayor_term_ends_at)
-        left = max(0, int((end - now_utc()).total_seconds())) if end else 0
-        return (
-            f"🦁 شهردار فعلی «{title}» : {mention_of(row.city_mayor_id, row.city_mayor_name or row.city_mayor_id)}\n"
-            f"⏳ تا پایان این دوره : {format_duration(left)} دیگه\n"
-            "بعد از پایان دوره، دور بعدی انتخابات خودکار باز می‌شه."
-        )
-    return f"🗳 هنوز شهرداری برای «{title}» انتخاب نشده؛ همین الان یه دور جدید انتخابات باز شد."
-
-def city_mayor_keyboard(session, row):
-    status = row.city_election_status or 'none'
-    if status == 'candidacy':
-        return InlineKeyboardMarkup([[InlineKeyboardButton(
-            f"🙋 کاندید شدن ({CITY_MAYOR_CANDIDACY_COST:,} روب‌پوینت)", callback_data=f"citymayor:cand:{row.chat_id}"
-        )]])
-    if status == 'voting':
-        rows = []
-        for cid in city_mayor_candidate_ids(row):
-            u = session.get(User, cid)
-            name = user_display_name(u) if u else str(cid)
-            rows.append([InlineKeyboardButton(f"🗳 رای به {name}", callback_data=f"citymayor:vote:{row.chat_id}:{cid}")])
-        return InlineKeyboardMarkup(rows) if rows else None
-    return None
+# ---------- شهردار روبی: بدون انتخابات ----------
+def mayor_is_current(row, user_id):
+    return bool(row and row.city_mayor_id and int(row.city_mayor_id) == int(user_id))
 
 async def city_mayor_command(update, context):
-    if not await require_membership(update, context): return
+    if not await require_membership(update, context):
+        return
     chat = update.effective_chat
     if not chat or chat.type not in ("group", "supergroup"):
-        await update.message.reply_text("🗳 انتخابات شهرداری فقط مخصوص گپ‌هاست؛ این دستور رو تو یه گروه بفرست.", **reply_kwargs(update.message))
+        await update.message.reply_text("🦁 شهردار روبی فقط مخصوص گپ‌هاست.", **reply_kwargs(update.message))
         return
     session = get_session()
-    started_new = False
     try:
         row = session.get(GroupChat, chat.id)
         if row is None:
@@ -6984,211 +7051,375 @@ async def city_mayor_command(update, context):
         row.title = chat.title or row.title
         if row.city_level is None:
             row.city_level = 1
-        level = row.city_level or 1
-        locked = level < CITY_MAYOR_UNLOCK_LEVEL
-        if locked:
-            text = (
-                f"🔒 انتخابات شهرداری از سطح شهر {CITY_MAYOR_UNLOCK_LEVEL} به بعد باز می‌شه.\n"
-                f"⭐️ سطح فعلی شهر : {level}"
-            )
-            markup = None
-        else:
-            status = row.city_election_status or 'none'
-            term_ends = aware(row.city_mayor_term_ends_at)
-            if not (status == 'none' and row.city_mayor_id and term_ends and now_utc() < term_ends):
-                if status == 'none':
-                    city_mayor_start_candidacy(row)
-                    status = 'candidacy'
-                    started_new = True
-            text = city_mayor_panel_text(session, row)
-            markup = city_mayor_keyboard(session, row)
-        chat_id = row.chat_id
+        # شهردار اولیه همیشه مالک/سازنده‌ی خود گپ است؛ فقط وقتی هنوز شهرداری تعیین نشده.
+        try:
+            admins = await context.bot.get_chat_administrators(chat.id)
+            creator = next((a for a in admins if a.status == "creator"), None)
+            if creator:
+                row.city_owner_id = creator.user.id
+                row.city_owner_name = creator.user.full_name or (f"@{creator.user.username}" if creator.user.username else str(creator.user.id))
+                if row.city_level >= CITY_MAYOR_UNLOCK_LEVEL and not row.city_mayor_id:
+                    row.city_mayor_id = creator.user.id
+                    row.city_mayor_name = row.city_owner_name
+                    row.city_mayor_source = 'owner'
+        except Exception:
+            pass
         session.commit()
+        mayor_id = row.city_mayor_id
+        mayor_name = row.city_mayor_name or row.city_owner_name or "نامشخص"
+        lines = [
+            f"🦁 شهردار روبی «{row.title or 'گپ'}»",
+            "",
+            f"👤 شهردار فعلی : {mention_of(mayor_id, mayor_name) if mayor_id else mayor_name}",
+            f"⭐️ سطح شهر : {row.city_level or 1}",
+        ]
+        markup_rows = []
+        if row.city_level >= CITY_MARKET_UNLOCK_LEVEL:
+            lines.append(f"🏦 خزانه شهر : {(row.city_treasury or 0):,} 🪙")
+            markup_rows.append([InlineKeyboardButton("🛍 مارکت روبی", callback_data=f"rmarket:open:{chat.id}")])
+        if mayor_id == update.effective_user.id:
+            lines.append("")
+            lines.append("⚙️ فقط شهردار می‌تواند مدیریت مارکت و واگذاری شهرداری را انجام دهد.")
+            markup_rows.append([InlineKeyboardButton("⚙️ تنظیمات شهرداری", callback_data=f"rmarket:settings:{chat.id}")])
+        text="\n".join(lines)
+        markup=InlineKeyboardMarkup(markup_rows) if markup_rows else None
     finally:
         session.close()
     await update.message.reply_text(text, reply_markup=markup, **reply_kwargs(update.message))
-    if started_new and context.job_queue:
-        context.job_queue.run_once(
-            city_mayor_candidacy_timeout_job, CITY_MAYOR_CANDIDACY_WINDOW_SECONDS,
-            data=chat_id, name=f"citymayor-cand-{chat_id}"
-        )
 
-async def city_mayor_candidate_button(update, context):
-    q = update.callback_query
-    try:
-        _, _, chat_id_s = q.data.split(":")
-        chat_id = int(chat_id_s)
-    except Exception:
+def market_get_items(session, chat_id):
+    rows = session.query(CityMarketItem).filter(CityMarketItem.chat_id == chat_id).all()
+    by_key = {r.item_key: r for r in rows}
+    for key, base in CITY_MARKET_BASE_PRICES.items():
+        if key not in by_key:
+            row = CityMarketItem(chat_id=chat_id, item_key=key, quantity=0, price=base, updated_at=now_utc())
+            session.add(row); by_key[key]=row
+    return by_key
+
+def market_tax(amount):
+    return max(0, int(amount * CITY_MARKET_TAX_RATE))
+
+def market_text(session, row):
+    items = market_get_items(session, row.chat_id)
+    treasury = int(row.city_treasury or 0)
+    lines = [
+        "🛍 مارکت روبی",
+        "",
+        "❓ یک محصول را جهت خرید انتخاب کنید ⬇️",
+        "",
+        "🤑 مالیات شهرداری : 5%",
+        "",
+        "〰️〰️〰️〰️〰️〰️〰️",
+        "",
+        f"تخم مرغ🥚",
+        f"┘─ 🧮 موجودی : {int(items['egg'].quantity or 0):,}",
+        f"┘─ 💰 قیمت : {int(items['egg'].price or CITY_MARKET_BASE_PRICES['egg']):,} 🪙",
+        "",
+        "🦊 روباه زخمی",
+        f"┘─ 🧮 موجودی : {int(items['injured_fox'].quantity or 0):,}",
+        f"┘─ 💰 قیمت : {int(items['injured_fox'].price or CITY_MARKET_BASE_PRICES['injured_fox']):,} 🪙",
+        "",
+        "〰️〰️〰️〰️〰️〰️〰️",
+        "",
+        f"🏦 خزانه شهر : {treasury:,} 🪙",
+        "",
+        "❗️ مسئولیت پر کردن مارکت بر عهده شهردار شهر میباشد.",
+    ]
+    return "\n".join(lines)
+
+def market_buyer_keyboard(chat_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("خرید تخم مرغ🥚", callback_data=f"rmarket:buy:{chat_id}:egg"),
+         InlineKeyboardButton("خرید روباه زخمی🦊", callback_data=f"rmarket:buy:{chat_id}:injured_fox")]
+    ])
+
+def market_settings_keyboard(chat_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🥚 پر کردن تخم مرغ", callback_data=f"rmarket:stock:{chat_id}:egg"),
+         InlineKeyboardButton("🦊 پر کردن روباه زخمی", callback_data=f"rmarket:stock:{chat_id}:injured_fox")],
+        [InlineKeyboardButton("🔁 واگذاری شهرداری", callback_data=f"rmarket:transfer:{chat_id}")],
+        [InlineKeyboardButton("🔙 مارکت روبی", callback_data=f"rmarket:open:{chat_id}")]
+    ])
+
+def market_cart_keyboard(chat_id, item_key, qty, max_qty):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➖", callback_data=f"rmarket:minus:{chat_id}:{item_key}:{qty}"),
+         InlineKeyboardButton(f"{qty:,}", callback_data=f"rmarket:noop:{chat_id}"),
+         InlineKeyboardButton("➕", callback_data=f"rmarket:plus:{chat_id}:{item_key}:{qty}")],
+        [InlineKeyboardButton("✅ تایید خرید", callback_data=f"rmarket:confirm:{chat_id}:{item_key}:{qty}")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data=f"rmarket:open:{chat_id}")]
+    ])
+
+async def city_market_command(update, context):
+    if not await require_membership(update, context):
         return
-    if not await require_membership(update, context): return
-    session = get_session()
-    capacity_full = False
+    chat=update.effective_chat
+    if not chat or chat.type not in ("group","supergroup"):
+        await update.message.reply_text("🛍 مارکت روبی فقط داخل گپ شهر فعال است.", **reply_kwargs(update.message)); return
+    session=get_session()
     try:
-        row = session.get(GroupChat, chat_id)
-        if not row or (row.city_level or 1) < CITY_MAYOR_UNLOCK_LEVEL:
-            await q.answer("❌ این انتخابات فعال نیست.", show_alert=True); return
-        if (row.city_election_status or 'none') != 'candidacy':
-            await q.answer("⏳ الان زمان ثبت‌نام کاندید نیست.", show_alert=True); return
-        cands = city_mayor_candidate_ids(row)
-        user = get_or_create_user(session, q.from_user)
-        if user.telegram_id in cands:
-            await q.answer("✅ قبلاً کاندید شدی.", show_alert=True); return
-        if len(cands) >= CITY_MAYOR_CANDIDATE_CAPACITY:
-            await q.answer("❌ ظرفیت کاندیدها پر شده.", show_alert=True); return
-        if (user.fox_points or 0) < CITY_MAYOR_CANDIDACY_COST:
-            await q.answer("❌ روب‌پوینت کافی نداری.", show_alert=True); return
-        user.fox_points -= CITY_MAYOR_CANDIDACY_COST
-        cands.append(user.telegram_id)
-        row.city_election_candidates = ','.join(str(c) for c in cands)
-        capacity_full = len(cands) >= CITY_MAYOR_CANDIDATE_CAPACITY
-        if capacity_full:
-            city_mayor_start_voting(row)
-        session.commit()
-        text = city_mayor_panel_text(session, row)
-        markup = city_mayor_keyboard(session, row)
-    finally:
-        session.close()
-    await q.answer("🙋 کاندید شدی!")
-    try:
-        await q.message.edit_text(text, reply_markup=markup)
-    except Exception:
-        pass
-    if capacity_full and context.job_queue:
-        context.job_queue.run_once(
-            city_mayor_voting_timeout_job, CITY_MAYOR_VOTING_SECONDS,
-            data=chat_id, name=f"citymayor-vote-{chat_id}"
-        )
+        row=session.get(GroupChat,chat.id)
+        if not row or (row.city_level or 1)<CITY_MARKET_UNLOCK_LEVEL:
+            level=row.city_level if row else 1
+            await update.message.reply_text(f"🔒 مارکت روبی از سطح شهر {CITY_MARKET_UNLOCK_LEVEL} باز می‌شود.\n⭐️ سطح فعلی شهر : {level}", **reply_kwargs(update.message)); return
+        text=market_text(session,row)
+    finally: session.close()
+    await update.message.reply_text(text,reply_markup=market_buyer_keyboard(chat.id),**reply_kwargs(update.message))
 
-async def city_mayor_vote_button(update, context):
-    q = update.callback_query
+async def market_callback(update, context):
+    q=update.callback_query
+    parts=q.data.split(":")
+    if len(parts)<3: return
+    action=parts[1]
+    try: chat_id=int(parts[2])
+    except: return
+    if not await require_membership(update,context): return
+    session=get_session()
     try:
-        _, _, chat_id_s, cand_id_s = q.data.split(":")
-        chat_id = int(chat_id_s); cand_id = int(cand_id_s)
-    except Exception:
-        return
-    if not await require_membership(update, context): return
-    session = get_session()
-    try:
-        row = session.get(GroupChat, chat_id)
-        if not row or (row.city_election_status or 'none') != 'voting':
-            await q.answer("❌ الان رای‌گیری فعال نیست.", show_alert=True); return
-        if cand_id not in city_mayor_candidate_ids(row):
-            await q.answer("❌ این کاندید معتبر نیست.", show_alert=True); return
-        user = get_or_create_user(session, q.from_user)
-        votes = city_mayor_votes_map(row)
-        if user.telegram_id in votes:
-            await q.answer("✅ قبلاً رای دادی.", show_alert=True); return
-        votes[user.telegram_id] = cand_id
-        row.city_election_votes = ','.join(f"{v}:{c}" for v, c in votes.items())
-        session.commit()
-        text = city_mayor_panel_text(session, row)
-        markup = city_mayor_keyboard(session, row)
-    finally:
-        session.close()
-    await q.answer("🗳 رایت ثبت شد!")
-    try:
-        await q.message.edit_text(text, reply_markup=markup)
-    except Exception:
-        pass
-
-async def city_mayor_candidacy_timeout_job(context):
-    """اگه بعد از مهلت ثبت‌نام هنوز تو فاز candidacy بودیم: با حداقل یه کاندید رای‌گیری رو شروع می‌کنه،
-    وگرنه (صفر کاندید) انتخابات رو می‌بنده تا دفعه‌ی بعد با «شهردار روبی» دوباره باز بشه."""
-    chat_id = int(context.job.data)
-    session = get_session()
-    try:
-        row = session.get(GroupChat, chat_id)
-        if not row or (row.city_election_status or 'none') != 'candidacy':
-            return
-        cands = city_mayor_candidate_ids(row)
-        chat_title = row.title or "گپ"
-        if not cands:
-            row.city_election_status = 'none'
-            row.city_election_candidacy_ends_at = None
+        row=session.get(GroupChat,chat_id)
+        if not row or (row.city_level or 1)<CITY_MARKET_UNLOCK_LEVEL:
+            await q.answer("🔒 مارکت هنوز باز نیست.",show_alert=True); return
+        items=market_get_items(session,chat_id)
+        user=get_or_create_user(session,q.from_user)
+        if action=="open":
+            text=market_text(session,row)
+            kb=market_buyer_keyboard(chat_id)
+        elif action=="settings":
+            if not mayor_is_current(row,q.from_user.id):
+                await q.answer("⛔ فقط شهردار فعلی دسترسی دارد.",show_alert=True); return
+            text=market_text(session,row)+"\n\n⚙️ تنظیمات شهرداری:"
+            kb=market_settings_keyboard(chat_id)
+        elif action in ("buy",):
+            item_key=parts[3]
+            item=items.get(item_key)
+            if not item or int(item.quantity or 0)<=0:
+                await q.answer("❌ موجودی این محصول در مارکت تمام شده.",show_alert=True); return
+            desc=CITY_MARKET_DESCRIPTIONS[item_key]
+            price=int(item.price)
+            context.user_data[f"rmarket_cart:{chat_id}"]={"item":item_key,"qty":1}
+            text=(f"{CITY_MARKET_NAMES[item_key]}\n\n{desc}\n\n"
+                  f"💰 قیمت هر عدد : {price:,} 🪙\n"
+                  f"🧮 موجودی مارکت : {int(item.quantity):,}\n\n"
+                  "با ➕ تعداد را بیشتر و با ➖ کمتر کن.")
+            kb=market_cart_keyboard(chat_id,item_key,1,int(item.quantity))
+        elif action in ("plus","minus"):
+            item_key=parts[3]
+            try: qty=int(parts[4])
+            except: qty=1
+            item=items.get(item_key)
+            max_qty=int(item.quantity or 0) if item else 0
+            if action=="plus": qty=min(max_qty,qty+1)
+            else: qty=max(1,qty-1)
+            context.user_data[f"rmarket_cart:{chat_id}"]={"item":item_key,"qty":qty}
+            price=int(item.price)
+            total=price*qty
+            tax=market_tax(total)
+            text=(f"{CITY_MARKET_NAMES[item_key]}\n\n{CITY_MARKET_DESCRIPTIONS[item_key]}\n\n"
+                  f"🧮 تعداد : {qty:,}\n💰 قیمت واحد : {price:,} 🪙\n"
+                  f"💵 مبلغ کل : {total:,} 🪙\n🤑 مالیات شهرداری (5%) : {tax:,} 🪙\n"
+                  f"💳 پرداخت نهایی : {total:,} 🪙")
+            kb=market_cart_keyboard(chat_id,item_key,qty,max_qty)
+        elif action=="noop":
+            await q.answer(); return
+        elif action=="confirm":
+            item_key=parts[3]
+            qty=max(1,int(parts[4]))
+            item=items.get(item_key)
+            if not item or int(item.quantity or 0)<qty:
+                await q.answer("❌ موجودی مارکت کافی نیست.",show_alert=True); return
+            price=int(item.price or 0)
+            total=price*qty
+            if item_key == "egg":
+                if user.level < FRIDGE_UNLOCK_LEVEL:
+                    await q.answer(f"❌ برای خرید تخم‌مرغ باید یخچال روبی در سطح {FRIDGE_UNLOCK_LEVEL} برایت باز شده باشد.",show_alert=True); return
+                cap=fridge_capacity(user.fridge_level)
+                used=session.query(FoxHunt).filter(FoxHunt.user_id==user.telegram_id,FoxHunt.status=="fridge").count()
+                used += session.query(RubyEgg).filter(RubyEgg.user_id==user.telegram_id).count()
+                if used + qty > cap:
+                    await q.answer(f"❌ ظرفیت یخچالت کافی نیست. {qty:,} جای خالی لازم داری؛ ظرفیت: {used}/{cap}",show_alert=True); return
+            if (user.fox_points or 0)<total:
+                await q.answer(f"❌ روب‌پوینت کافی نیست. {total:,} 🪙 لازم داری.",show_alert=True); return
+            tax=market_tax(total)
+            user.fox_points-=total
+            item.quantity-=qty
+            # ۹۵٪ به خزانه برمی‌گردد و ۵٪ مالیات مستقیم به شهردار می‌رسد.
+            row.city_treasury=(row.city_treasury or 0)+(total-tax)
+            mayor=session.get(User,int(row.city_mayor_id)) if row.city_mayor_id else None
+            if mayor:
+                mayor.fox_points=(mayor.fox_points or 0)+tax
+            if item_key=="egg":
+                for _ in range(qty):
+                    session.add(RubyEgg(user_id=user.telegram_id,cooked=0,cooking_started_at=None,created_at=now_utc()))
+            else:
+                user.injured_fox_stock=(user.injured_fox_stock or 0)+qty
             session.commit()
-            no_candidates = True
+            context.user_data.pop(f"rmarket_cart:{chat_id}",None)
+            text=(f"✅ خرید با موفقیت انجام شد!\n\n"
+                  f"🛍 محصول : {CITY_MARKET_NAMES[item_key]}\n"
+                  f"🧮 تعداد : {qty:,}\n"
+                  f"💰 مبلغ : {total:,} 🪙\n"
+                  f"🤑 مالیات شهرداری : {tax:,} 🪙\n"
+                  f"🏦 خزانه شهر : {int(row.city_treasury):,} 🪙\n"
+                  f"💳 موجودی تو : {int(user.fox_points):,} 🪙\n\n"
+                  f"{CITY_MARKET_DESCRIPTIONS[item_key]}")
+            kb=market_buyer_keyboard(chat_id)
+            mayor_id=row.city_mayor_id
+            mayor_tax=tax
+            buyer_name=user_display_name(user)
+            market_title=row.title or "گپ"
+            treasury_after=int(row.city_treasury or 0)
+            session.close()
+            await q.answer("✅ خرید انجام شد!")
+            try:
+                await q.message.edit_text(text,reply_markup=kb)
+            except Exception: pass
+            if mayor_id and mayor_tax:
+                try:
+                    await context.bot.send_message(
+                        mayor_id,
+                        f"🛍 اطلاعیه مارکت روبی «{market_title}»\n\n"
+                        f"👤 خریدار : {buyer_name}\n"
+                        f"📦 محصول : {CITY_MARKET_NAMES[item_key]}\n"
+                        f"🧮 تعداد : {qty:,}\n"
+                        f"💰 مبلغ خرید : {total:,} 🪙\n"
+                        f"🤑 مالیات 5٪ شما : +{mayor_tax:,} 🪙\n"
+                        f"🏦 خزانه شهر : {treasury_after:,} 🪙"
+                    )
+                except Exception: pass
+            return
+        elif action=="stock":
+            if not mayor_is_current(row,q.from_user.id):
+                await q.answer("⛔ فقط شهردار فعلی می‌تواند مارکت را پر کند.",show_alert=True); return
+            item_key=parts[3]
+            item=items.get(item_key)
+            base=CITY_MARKET_BASE_PRICES[item_key]
+            current=int(item.quantity or 0)
+            text=(f"⚙️ پر کردن {CITY_MARKET_NAMES[item_key]}\n\n"
+                  f"💰 قیمت اولیه هر عدد : {base:,} 🪙\n"
+                  f"📈 قیمت فروش را شهردار می‌تواند بالاتر از قیمت اولیه تعیین کند.\n"
+                  f"🏦 هزینه پر کردن از خزانه شهر پرداخت می‌شود.\n"
+                  f"💳 خزانه فعلی : {int(row.city_treasury or 0):,} 🪙\n"
+                  f"📦 موجودی فعلی : {current:,}\n\n"
+                  "تعداد و قیمت را با پیام زیر وارد کن:\n"
+                  f"مثال: 100 {base}\n"
+                  "عدد اول = تعداد، عدد دوم = قیمت فروش هر عدد")
+            context.user_data["rmarket_stock"]={"chat_id":chat_id,"item_key":item_key}
+            await q.answer()
+            try: await q.message.edit_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 تنظیمات",callback_data=f"rmarket:settings:{chat_id}")]]))
+            except: pass
+            return
+        elif action=="transfer":
+            if not mayor_is_current(row,q.from_user.id):
+                await q.answer("⛔ فقط شهردار فعلی می‌تواند واگذاری کند.",show_alert=True); return
+            context.user_data["rmarket_transfer_chat"]=chat_id
+            text=("🔁 واگذاری شهرداری\n\n"
+                  "آیدی عددی تلگرام یا شناسه کاربری فرد را بفرست.\n"
+                  "فرد باید عضو همین گپ باشد و حداقل ۳ روز از اولین حضور ثبت‌شده‌اش توسط ربات گذشته باشد.")
+            kb=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 تنظیمات",callback_data=f"rmarket:settings:{chat_id}")]])
         else:
-            city_mayor_start_voting(row)
-            session.commit()
-            no_candidates = False
-    finally:
-        session.close()
-    if no_candidates:
-        try:
-            await context.bot.send_message(
-                chat_id,
-                f"🗳 مهلت ثبت‌نام کاندیدهای شهرداری «{chat_title}» تموم شد و هیچ‌کس کاندید نشد؛ "
-                "دفعه‌ی بعد که «شهردار روبی» زده بشه، ثبت‌نام دوباره باز می‌شه."
-            )
-        except Exception:
-            pass
-        return
-    try:
-        await context.bot.send_message(
-            chat_id,
-            f"🗳 مهلت ثبت‌نام کاندیدهای شهرداری «{chat_title}» تموم شد؛ رای‌گیری شروع شد!\n"
-            "برای رای دادن بنویس «شهردار روبی»."
-        )
-    except Exception:
-        pass
-    if context.job_queue:
-        context.job_queue.run_once(
-            city_mayor_voting_timeout_job, CITY_MAYOR_VOTING_SECONDS,
-            data=chat_id, name=f"citymayor-vote-{chat_id}"
-        )
-
-async def city_mayor_voting_timeout_job(context):
-    """رای‌گیری رو می‌بنده، کاندیدی که بیشترین رای رو داره (در تساوی، اولین کاندید ثبت‌نامی) شهردار می‌کنه،
-    دوره‌ی 3 روزه‌ی شهرداریش رو شروع می‌کنه و اعلام عمومی/خصوصی می‌فرسته."""
-    chat_id = int(context.job.data)
-    session = get_session()
-    winner_id = None
-    try:
-        row = session.get(GroupChat, chat_id)
-        if not row or (row.city_election_status or 'none') != 'voting':
             return
-        cands = city_mayor_candidate_ids(row)
-        counts = city_mayor_vote_counts(row)
-        chat_title = row.title or "گپ"
-        best = -1
-        for cid in cands:
-            c = counts.get(cid, 0)
-            if c > best:
-                best = c; winner_id = cid
-        winner_name = None
-        if winner_id:
-            u = session.get(User, winner_id)
-            winner_name = user_display_name(u) if u else str(winner_id)
-            row.city_mayor_id = winner_id
-            row.city_mayor_name = winner_name
-            row.city_mayor_term_ends_at = now_utc() + timedelta(seconds=CITY_MAYOR_TERM_SECONDS)
-        row.city_election_status = 'none'
-        row.city_election_candidates = ''
-        row.city_election_votes = ''
-        row.city_election_candidacy_ends_at = None
-        row.city_election_voting_ends_at = None
         session.commit()
     finally:
-        session.close()
-    if not winner_id:
+        if session.is_active:
+            session.close()
+    await q.answer()
+    try: await q.message.edit_text(text,reply_markup=kb)
+    except Exception: pass
+
+async def handle_market_text(update, context):
+    text=(update.message.text or "").strip()
+    # تنظیم موجودی/قیمت توسط شهردار
+    stock=context.user_data.get("rmarket_stock")
+    if stock:
+        context.user_data.pop("rmarket_stock",None)
+        chat_id=int(stock["chat_id"]); item_key=stock["item_key"]
+        if not update.effective_chat or update.effective_chat.id != chat_id:
+            await update.message.reply_text("❌ این تنظیمات فقط داخل همان گپ قابل استفاده است.",**reply_kwargs(update.message)); return True
+        session=get_session()
         try:
-            await context.bot.send_message(chat_id, f"🗳 رای‌گیری شهرداری «{chat_title}» بدون کاندید تموم شد.")
-        except Exception:
-            pass
-        return
-    term_days = CITY_MAYOR_TERM_SECONDS // 86400
-    try:
-        await context.bot.send_message(
-            chat_id,
-            f"🎉 «{mention_of(winner_id, winner_name)}» با بیشترین رای، شهردار جدید «{chat_title}» شد! 🦁\n"
-            f"این دوره {term_days} روز ادامه داره."
-        )
-    except Exception:
-        pass
-    try:
-        await context.bot.send_message(winner_id, f"🎉 تبریک! تو شهردار جدید «{chat_title}» شدی 🦁🏰")
-    except Exception:
-        pass
+            row=session.get(GroupChat,chat_id)
+            if not row or not mayor_is_current(row,update.effective_user.id):
+                await update.message.reply_text("⛔ فقط شهردار فعلی می‌تواند مارکت را پر کند.",**reply_kwargs(update.message)); return True
+            m=re.fullmatch(r"\s*([0-9۰-۹.,]+)\s+([0-9۰-۹.,]+)\s*",text)
+            if not m:
+                await update.message.reply_text("❌ فرمت درست: تعداد سپس قیمت. مثال: 100 15000",**reply_kwargs(update.message)); return True
+            qty=parse_amount(m.group(1)); price=parse_amount(m.group(2))
+            base=CITY_MARKET_BASE_PRICES[item_key]
+            if qty<=0 or price<base:
+                await update.message.reply_text(f"❌ تعداد باید مثبت و قیمت حداقل {base:,} 🪙 باشد.",**reply_kwargs(update.message)); return True
+            cost=qty*base
+            if int(row.city_treasury or 0)<cost:
+                await update.message.reply_text(f"❌ خزانه شهر کافی نیست.\n🏦 هزینه پر کردن: {cost:,} 🪙\n💰 خزانه: {int(row.city_treasury or 0):,} 🪙",**reply_kwargs(update.message)); return True
+            items=market_get_items(session,chat_id); item=items[item_key]
+            row.city_treasury-=cost
+            item.quantity=(item.quantity or 0)+qty
+            item.price=price
+            item.updated_at=now_utc()
+            session.commit()
+            await update.message.reply_text(
+                f"✅ مارکت پر شد!\n\n{CITY_MARKET_NAMES[item_key]}\n"
+                f"📦 مقدار اضافه‌شده : {qty:,}\n💰 قیمت فروش : {price:,} 🪙\n"
+                f"🏦 هزینه از خزانه : {cost:,} 🪙\n🏦 خزانه جدید : {int(row.city_treasury):,} 🪙",
+                **reply_kwargs(update.message))
+        finally: session.close()
+        return True
+    transfer_chat=context.user_data.get("rmarket_transfer_chat")
+    if transfer_chat:
+        context.user_data.pop("rmarket_transfer_chat",None)
+        chat_id=int(transfer_chat)
+        if not update.effective_chat or update.effective_chat.id != chat_id:
+            await update.message.reply_text("❌ واگذاری شهرداری فقط داخل همان گپ قابل استفاده است.",**reply_kwargs(update.message)); return True
+        session=get_session()
+        try:
+            row=session.get(GroupChat,chat_id)
+            if not row or not mayor_is_current(row,update.effective_user.id):
+                await update.message.reply_text("⛔ فقط شهردار فعلی می‌تواند واگذاری کند.",**reply_kwargs(update.message)); return True
+            candidate=None
+            raw=text.strip()
+            if raw.startswith("@"): raw=raw[1:]
+            if raw.isdigit():
+                candidate=session.get(User,int(raw))
+            else:
+                candidate=session.query(User).filter(User.username.ilike(raw)).first()
+            if not candidate and raw.isdigit():
+                try:
+                    cm_probe=await context.bot.get_chat_member(chat_id,int(raw))
+                    if cm_probe.status not in ("left","kicked"):
+                        candidate=get_or_create_user(session,cm_probe.user)
+                        session.flush()
+                except Exception:
+                    candidate=None
+            if not candidate:
+                await update.message.reply_text("❌ کاربر پیدا نشد. آیدی عددی یا شناسه کاربری معتبر وارد کن.",**reply_kwargs(update.message)); return True
+            try:
+                cm=await context.bot.get_chat_member(chat_id,candidate.telegram_id)
+                if cm.status in ("left","kicked"):
+                    await update.message.reply_text("❌ این فرد عضو همین گپ نیست.",**reply_kwargs(update.message)); return True
+            except Exception:
+                await update.message.reply_text("❌ عضویت این فرد در گپ قابل تأیید نیست.",**reply_kwargs(update.message)); return True
+            presence=session.query(CityMemberPresence).filter_by(chat_id=chat_id,user_id=candidate.telegram_id).first()
+            if not presence:
+                presence=CityMemberPresence(chat_id=chat_id,user_id=candidate.telegram_id,first_seen_at=now_utc(),last_seen_at=now_utc())
+                session.add(presence); session.commit()
+            age=(now_utc()-aware(presence.first_seen_at)).total_seconds()
+            if age < CITY_MAYOR_MEMBERSHIP_SECONDS:
+                await update.message.reply_text(
+                    f"❌ این فرد هنوز شرایط شهردار شدن را ندارد.\n⏳ زمان باقی‌مانده: {format_duration(CITY_MAYOR_MEMBERSHIP_SECONDS-age)}",
+                    **reply_kwargs(update.message)); return True
+            row.city_mayor_id=candidate.telegram_id
+            row.city_mayor_name=user_display_name(candidate)
+            row.city_mayor_source='transferred'
+            session.commit()
+            old_mayor=update.effective_user.id
+            new_id=candidate.telegram_id
+            new_name=row.city_mayor_name
+            title=row.title or "گپ"
+        finally: session.close()
+        await update.message.reply_text(f"✅ شهرداری «{title}» واگذار شد.\n🦁 شهردار جدید: {mention_of(new_id,new_name)}\n❌ شهردار قبلی عزل شد.",**reply_kwargs(update.message))
+        try: await context.bot.send_message(new_id,f"🎉 تبریک! از این لحظه شهردار روبی «{title}» هستی. 🦁🏰")
+        except Exception: pass
+        return True
+    return False
 
 CITY_LEADERBOARD_CATEGORIES = [
     ('city_hunt_total', '⚔️ شکارها'),
@@ -7656,7 +7887,7 @@ def build_ai_knowledge():
     lines += [
         f"- 🧊 یخچال روبی: از لول {FRIDGE_UNLOCK_LEVEL} فعال می‌شه.",
         f"- 🏭 کارخونه روبی: از لول {FACTORY_UNLOCK_LEVEL} فعال می‌شه.",
-        f"- 🦁 شهر روبی: تو گروه «شهر روبی» رو بنویس. شهر تا سطح {CITY_MAX_LEVEL} بالا می‌ره (با روب‌روب، نجات روباه زخمی، شکار و دونیت به خزانه). از سطح {CITY_MAYOR_UNLOCK_LEVEL} انتخابات شهرداری داره («شهردار روبی») و هر دوره‌ی شهردار {CITY_MAYOR_TERM_SECONDS // 86400} روزه. «اخبار شهر» یه خبر بامزه از وضعیت شهر می‌ده.",
+        f"- 🦁 شهر روبی: تو گروه «شهر روبی» رو بنویس. شهر تا سطح {CITY_MAX_LEVEL} بالا می‌ره (با روب‌روب، نجات روباه زخمی، شکار و دونیت به خزانه). از سطح {CITY_MAYOR_UNLOCK_LEVEL} شهردار روبی فعال می‌شه؛ شهردار اولیه مالک گپ است و می‌تونه شهرداری را واگذار کنه. «اخبار شهر» یه خبر بامزه از وضعیت شهر می‌ده.",
         f"- 👥 دوست روبی: بنویس «دوست روبی» و ➕ افزودن دوست رو بزن، بعد آیدی عددی یا @یوزرنیم دوستت رو بفرست. حداکثر {FRIEND_LIMIT} دوست؛ درخواست به پیوی ربات دوستت می‌ره و اون قبول یا رد می‌کنه؛ نتیجه هم تو پیوی ربات به تو خبر داده می‌شه. با دوستات می‌تونی روب‌پوینت و پیام بفرستی و رتبه‌شون رو ببینی.",
         "- 🎁 کد هدیه: «کد هدیه» رو بنویس، 🎟 ورود کد رو بزن و کد رو روی همون پنل ریپلای کن. هر کد برای هر حساب فقط یک‌بار قابل استفاده‌ست؛ ظرفیت و مهلت داره.",
         f"- 🃏 کازینو (از لول {CASINO_UNLOCK_LEVEL}؛ مبلغ ورودی هر نفر حداکثر {RUBY_MAX_ENTRY:,} روب‌پوینت؛ میز ۶۰ ثانیه برای پیوستن فرصت داره؛ هر کاربر هر {RUBY_COOLDOWN_SECONDS} ثانیه فقط یک میز جدید می‌سازه یا وارد میز می‌شه):",
@@ -7731,7 +7962,7 @@ def build_guide_entries():
         ("🏭 کارخونه روبی", ['کارخونه', 'کارخانه', 'کارخونه روبی', 'تولید'],
          f"از لول {FACTORY_UNLOCK_LEVEL} فعال می‌شه؛ «کارخونه روبی» یا «کارخونه» رو بنویس."),
         ("🦁 شهر روبی", ['شهر', 'شهر روبی', 'شهردار', 'شهردار روبی', 'انتخابات', 'دونیت', 'خزانه', 'سطح شهر'],
-         f"تو گروه «شهر روبی» رو بنویس. شهر تا سطح {CITY_MAX_LEVEL} بالا می‌ره (با روب‌روب، نجات روباه زخمی، شکار و دونیت به خزانه). از سطح {CITY_MAYOR_UNLOCK_LEVEL} انتخابات شهرداری داره («شهردار روبی») و هر دوره‌ی شهردار {CITY_MAYOR_TERM_SECONDS // 86400} روزه. «اخبار شهر» هم یه خبر بامزه از وضعیت شهر می‌ده."),
+         f"تو گروه «شهر روبی» رو بنویس. شهر تا سطح {CITY_MAX_LEVEL} بالا می‌ره (با روب‌روب، نجات روباه زخمی، شکار و دونیت به خزانه). از سطح {CITY_MAYOR_UNLOCK_LEVEL} شهردار روبی فعال می‌شه؛ شهردار اولیه مالک گپ است و می‌تونه شهرداری را واگذار کنه. «اخبار شهر» هم یه خبر بامزه از وضعیت شهر می‌ده."),
         ("👥 دوست روبی", ['دوست روبی', 'دوست', 'دوستان', 'فرند', 'درخواست دوستی', 'دوست اضافه', 'افزودن دوست'],
          f"«دوست روبی» رو بنویس و ➕ افزودن دوست رو بزن، بعد آیدی عددی یا @یوزرنیم دوستت رو بفرست. حداکثر {FRIEND_LIMIT} دوست؛ درخواست به پیوی ربات دوستت می‌ره و اون قبول یا رد می‌کنه؛ نتیجه هم تو پیوی ربات به تو خبر داده می‌شه. با دوستات می‌تونی روب‌پوینت و پیام بفرستی و رتبه‌شون رو ببینی."),
         ("🎁 کد هدیه", ['کد هدیه', 'کد جایزه', 'گیفت کد', 'gift code', 'کد', 'جایزه'],
@@ -8948,6 +9179,31 @@ async def spell_toggle_command(update, context):
                 "تغییر (فقط ادمین): «غلط گیر روشن» / «غلط گیر خاموش»")
 
 
+async def track_city_member_presence(update, context):
+    """حضور اعضای گپ را برای شرط ۳ روز شهرداری ثبت می‌کند."""
+    chat=update.effective_chat
+    tg_user=update.effective_user
+    if not chat or chat.type not in ("group","supergroup") or not tg_user or tg_user.is_bot:
+        return
+    session=get_session()
+    try:
+        row=session.get(GroupChat,chat.id)
+        if row is None:
+            row=GroupChat(chat_id=chat.id,title=chat.title or "گپ",active=1)
+            session.add(row); session.flush()
+        presence=session.query(CityMemberPresence).filter_by(chat_id=chat.id,user_id=tg_user.id).first()
+        now=now_utc()
+        if presence:
+            presence.last_seen_at=now
+        else:
+            session.add(CityMemberPresence(chat_id=chat.id,user_id=tg_user.id,first_seen_at=now,last_seen_at=now))
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.warning("track_city_member_presence failed: %s",e)
+    finally:
+        session.close()
+
 async def text_router(update, context):
     if not update.message or not update.message.text: return
     if await handle_jail_memory_text(update, context): return
@@ -8958,6 +9214,7 @@ async def text_router(update, context):
     if await handle_bank_text(update, context): return
     if await handle_fox_rename_text(update, context): return
     if await handle_ruby_entry_text(update, context): return
+    if await handle_market_text(update, context): return
     if await handle_city_donate_text(update, context): return
     text=update.message.text.strip()
     if text in FOX_CLAIM_ALIASES:
@@ -8968,6 +9225,7 @@ async def text_router(update, context):
     if text in {"کد هدیه","کد جایزه","gift code","giftcode"}: await gift_code_command(update,context); return
     if text in {"لیدر برد","لیدربرد","leaderboard","Leaderboard"}: await leaderboard_command(update,context); return
     if text in {"شهر روبی","شهر روباهیو","شهر روباه","🦊 شهر روبی"}: await city_command(update,context); return
+    if text in {"مارکت روبی","مارکت","🛍 مارکت روبی"}: await city_market_command(update,context); return
     if text in {"شهردار روبی","شهردار","🦁 شهردار روبی"}: await city_mayor_command(update,context); return
     if re.sub(r"\s+", " ", text) in {"روباه", "روباه روباه", "روبی", "روباهیو", "🦊 روباه", "🦊 روبی", "🦊 روباهیو"}:
         await fox_command(update, context); return
@@ -9037,7 +9295,7 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?|رفرال|زیرمجموعه(?:\s+گیری)?)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?|رفرال|زیرمجموعه(?:\s+گیری)?)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
@@ -9045,6 +9303,7 @@ async def persian_slash_router(update, context):
         elif cmd in {"رفرال","زیرمجموعه","زیرمجموعه گیری"}: await referral_command(update,context)
         elif cmd in {"بازی روبی","بازی"}: await ruby_games_command(update,context)
         elif cmd in {"کازینو روبی","کازینو"}: await casino_command(update,context)
+        elif cmd in {"مارکت روبی","مارکت"}: await city_market_command(update,context)
         elif cmd in {"گردونه","چرخ"}: await wheel_command(update,context)
         elif cmd in {"قاچاق روبی","قاچاق روباهیو","قاچاق"}: await smuggling_command(update,context)
         elif cmd in {"زندان روبی","زندان روباهیو","زندان"}: await jail_command(update,context)
@@ -9132,19 +9391,20 @@ def main():
     app.add_handler(CallbackQueryHandler(city_donate_button,pattern=r"^citydonate:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_top_donors_button,pattern=r"^citytop:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_back_button,pattern=r"^cityback:-?\d+$"))
-    app.add_handler(CallbackQueryHandler(city_mayor_candidate_button,pattern=r"^citymayor:cand:-?\d+$"))
-    app.add_handler(CallbackQueryHandler(city_mayor_vote_button,pattern=r"^citymayor:vote:-?\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(market_callback,pattern=r"^rmarket:(?:open|settings|buy|plus|minus|noop|confirm|stock|transfer):-?\d+(?::(?:egg|injured_fox|\d+))?(?::\d+)?$"))
+    app.add_handler(CallbackQueryHandler(ruby_egg_button,pattern=r"^rubyegg:(?:item|cook|feed|list|back):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(admin_football_callback,pattern=r"^admin:(football(:.*)?|back)$"))
     app.add_handler(CallbackQueryHandler(football_predict_match_button,pattern=r"^fbpred:match:\d+$"))
     app.add_handler(CallbackQueryHandler(football_predict_pick_button,pattern=r"^fbpred:pick:\d+:(home|draw|away)$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
-    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
     app.add_handler(ChatMemberHandler(bot_joined_group, ChatMemberHandler.MY_CHAT_MEMBER), group=-2)
     app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, register_group_chat), group=-1)
+    app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, track_city_member_presence), group=-2)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text_router),group=2)
     # ادمین تو پیوی فایل (آهنگ/ویدیو/گیف/استیکر/...) رو با کپشن «یاد بگیر ...» می‌فرسته → به روباه یاد داده می‌شه
     app.add_handler(MessageHandler(
