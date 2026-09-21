@@ -1669,10 +1669,10 @@ async def ruby_pairs_move(update,context):
                             if u: u.fox_points=(u.fox_points or 0)+share
                     state["turn_token"]=None
                 else:
-                    other=[x for x in ids if x!=uid][0]
-                    state["turn"]=other
+                    # پیدا کردن جفت، نوبت همان بازیکن باقی می‌ماند
+                    state["turn"]=uid
                     state["turn_started_at"]=now_utc().isoformat()
-                    state["turn_token"]=f"{tid}-{other}-{int(now_utc().timestamp()*1000)}"
+                    state["turn_token"]=f"{tid}-{uid}-{int(now_utc().timestamp()*1000)}"
             else:
                 state["lock"]=True
                 extra=f"❌ {deck[a]} و {deck[b]} جفت نبودند."
@@ -4567,7 +4567,7 @@ async def injured_fox_button(update, context):
 # ---------- بانک روبی ----------
 
 BANK_OPEN_COST = 5000
-BANK_CHANGE_COST = 3000
+BANK_CHANGE_COST = 1000
 BANK_INTEREST_RATE = 0.03
 BANK_INTEREST_INTERVAL_SECONDS = 12 * 60 * 60
 
@@ -4671,8 +4671,12 @@ async def bank_button(update,context):
             rows=session.query(BankTransaction).filter(BankTransaction.account_number==account.account_number).order_by(BankTransaction.id.desc()).limit(10).all()
             txt='📃 آخرین تراکنش‌ها\n\n' + ('\n'.join(f"{r.created_at:%Y-%m-%d %H:%M} | {('به حساب ' + str(r.counterparty_user_id)) if r.direction in ('card_out','card_transfer_out') else ('از حساب ' + str(r.counterparty_user_id)) if r.counterparty_user_id else r.description or r.direction} | {r.amount:,} 🪙" for r in rows[:3]) if rows else 'تراکنشی ثبت نشده است.')
             await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n'+txt,reply_markup=bank_keyboard(account)); return
+        if action=='copy':
+            await q.answer()
+            await q.message.reply_text(f"📋 شماره حساب روبی برای کپی:\n`{account.account_number}`", parse_mode='Markdown')
+            return
         if action=='change':
-            if user.fox_points < BANK_CHANGE_COST: await q.answer('❌ 3,000 روب‌پوینت لازم داری.',show_alert=True); return
+            if user.fox_points < BANK_CHANGE_COST: await q.answer('❌ 1,000 روب‌پوینت لازم داری.',show_alert=True); return
             import secrets
             newnum=''.join(str(secrets.randbelow(10)) for _ in range(12))
             while session.get(BankAccount,newnum): newnum=''.join(str(secrets.randbelow(10)) for _ in range(12))
@@ -5914,7 +5918,7 @@ async def admin_callback(update, context):
         finally: session.close()
         await q.message.reply_text(f"👥 تعداد کاربران ثبت‌شده: {count}")
     elif action == "broadcast": context.user_data["admin_action"]="broadcast"; await q.message.reply_text("📣 متن پیام همگانی را بفرست.")
-    elif action == "addpoints": context.user_data["admin_action"]="addpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی کاربر + مقدار روب‌پوینت")
+    elif action == "addpoints": context.user_data["admin_action"]="addpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی یا @شناسه کاربر + مقدار روب‌پوینت")
     elif action == "giftall":
         context.user_data["admin_action"]="giftall"
         await q.message.reply_text("🎁 چند روب‌پوینت به همه‌ی کاربرا هدیه داده بشه؟\nفقط عدد بفرست (مثلاً 500). برای کسر از همه، عدد منفی بفرست.")
@@ -5924,8 +5928,8 @@ async def admin_callback(update, context):
         text, kb = gc_panel(context.user_data["gc_draft"])
         sent = await q.message.reply_text(text, reply_markup=kb)
         context.user_data["gc_draft"]["panel"] = (sent.chat_id, sent.message_id)
-    elif action == "setlevel": context.user_data["admin_action"]="setlevel"; await q.message.reply_text("⭐ فرمت: آیدی عددی کاربر + سطح")
-    elif action == "setclaims": context.user_data["admin_action"]="setclaims"; await q.message.reply_text("🐾 فرمت: آیدی عددی کاربر + تعداد روب روب\nمثال: 123456789 500\n(سطح کاربر هم بر اساس همین تعداد تنظیم می‌شود.)")
+    elif action == "setlevel": context.user_data["admin_action"]="setlevel"; await q.message.reply_text("⭐ فرمت: آیدی عددی یا @شناسه کاربر + سطح")
+    elif action == "setclaims": context.user_data["admin_action"]="setclaims"; await q.message.reply_text("🐾 فرمت: آیدی عددی یا @شناسه کاربر + تعداد روب روب\nمثال: 123456789 500\n(سطح کاربر هم بر اساس همین تعداد تنظیم می‌شود.)")
     elif action == "jailmenu":
         await q.message.reply_text("⛓️ زندان روبی\n\nکاربر را با مدت و دلیل به زندان بینداز یا آزادش کن:", reply_markup=jail_menu_keyboard())
     elif action == "backup":
@@ -6099,7 +6103,16 @@ async def admin_text(update, context):
         return
     parts=text.split()
     if len(parts)!=2 or not all(p.lstrip("-").isdigit() for p in parts): await update.message.reply_text("فرمت اشتباه است.", **reply_kwargs(update.message)); return
-    uid,value=int(parts[0]),int(parts[1]); session=get_session()
+    session=get_session()
+    try:
+        token=parts[0].lstrip('@')
+        user_lookup=session.query(User).filter(User.username.ilike(token)).first() if not token.isdigit() else session.get(User,int(token))
+        if not user_lookup:
+            await update.message.reply_text("کاربر با این آیدی یا شناسه پیدا نشد.", **reply_kwargs(update.message)); return
+        uid,value=user_lookup.telegram_id,int(parts[1])
+    finally:
+        session.close()
+    session=get_session()
     try:
         user=session.get(User,uid)
         if not user: await update.message.reply_text("کاربر پیدا نشد.", **reply_kwargs(update.message)); return
@@ -9354,7 +9367,50 @@ async def track_city_member_presence(update, context):
     finally:
         session.close()
 
+
+# ---------- پشتیبانی مستقیم روبی ----------
+async def support_admin_reply(update, context):
+    """پاسخ ادمین به پیام پشتیبانی را به کاربر اصلی می‌رساند."""
+    msg = update.message
+    if not msg or not msg.reply_to_message or not admin_only(update.effective_user.id):
+        return False
+    mapping = context.application.bot_data.get("support_message_map", {})
+    target_id = mapping.get(msg.reply_to_message.message_id)
+    if not target_id:
+        return False
+    await context.bot.send_message(chat_id=int(target_id),
+        text="📩 پاسخ پشتیبانی روبی:\n\n" + (msg.text or msg.caption or ""))
+    await msg.reply_text("✅ پاسخ برای کاربر ارسال شد.")
+    return True
+
+async def support_text(update, context):
+    """کاربر با «پشتیبانی» وارد گفت‌وگو می‌شود و پیام بعدی برای ادمین‌ها می‌رود."""
+    if not update.message or not update.effective_user:
+        return False
+    text=(update.message.text or "").strip()
+    if text in {"پشتیبانی", "پشتیبان", "ارتباط با پشتیبانی"}:
+        context.user_data["support_waiting"]=True
+        await update.message.reply_text("🦊 پیام خودت را بفرست؛ برای پشتیبانی ارسال می‌شود.")
+        return True
+    if not context.user_data.get("support_waiting") or update.effective_user.id in ADMIN_IDS:
+        return False
+    context.user_data["support_waiting"]=False
+    u=update.effective_user
+    username=("@" + u.username) if u.username else "ندارد"
+    header=(f"📩 پیام جدید پشتیبانی\n\n"
+            f"🆔 آیدی عددی: `{u.id}`\n"
+            f"👤 شناسه کاربری: {username}\n"
+            f"📛 نام: {u.full_name}\n\n"
+            f"💬 پیام کاربر:")
+    for aid in ADMIN_IDS:
+        sent=await context.bot.send_message(chat_id=aid,text=header+"\n"+(update.message.text or ""),parse_mode="Markdown")
+        context.application.bot_data.setdefault("support_message_map",{})[sent.message_id]=u.id
+    await update.message.reply_text("✅ پیام تو برای پشتیبانی ارسال شد. پاسخ در همین ربات برایت می‌آید.")
+    return True
+
 async def text_router(update, context):
+    if await support_admin_reply(update, context): return
+    if await support_text(update, context): return
     if not update.message or not update.message.text: return
     if await handle_jail_memory_text(update, context): return
     if await handle_friend_text(update, context): return
@@ -9523,7 +9579,7 @@ def main():
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
-    app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change|back):\d+$"))
+    app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change|copy|back):\d+$"))
     app.add_handler(CallbackQueryHandler(gift_code_button,pattern=r"^giftcode:(enter|cancel)$"))
     app.add_handler(CallbackQueryHandler(admin_giftcode_callback,pattern=r"^gc:(?:home|cancel|create|opt:(?:fmt|max|reward|ttl)|set:(?:fmt|max|reward|ttl):[A-Za-z0-9]+)$"))
     app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|opt|qty|qtyok|backshop|backopt|tiers|backtiers|notext|noop):[^:]+:[^:]+$"))
@@ -9548,6 +9604,7 @@ def main():
     app.add_handler(CallbackQueryHandler(football_predict_pick_button,pattern=r"^fbpred:pick:\d+:(home|draw|away)$"))
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),support_admin_reply),group=0)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_text),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
