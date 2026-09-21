@@ -140,6 +140,8 @@ class GroupChat(Base):
     city_election_voting_ends_at = Column(DateTime(timezone=True), nullable=True)     # مهلت رای‌گیری (حداکثر 5 ساعت)
     # ---------- ناظر هوشمند گروه (پیش‌فرض خاموش؛ ادمین گروه روشنش می‌کند) ----------
     ai_mod = Column(Integer, nullable=False, default=0)
+    # غلط‌گیر املایی: -1 = طبق پیش‌فرض ربات (FOX_SPELL_DEFAULT)، 0 = خاموش، 1 = روشن
+    spell_mod = Column(Integer, nullable=False, default=-1)
 
 
 
@@ -213,6 +215,14 @@ class FoxMoodSong(Base):
     file_unique_id = Column(String, nullable=True)
     title = Column(String, nullable=True)
     created_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class FoxMoodChannel(Base):
+    """کانال‌هایی که ادمین ربات، ربات رو توش ادمین کرده؛ آهنگ‌های این کانال‌ها با هشتگ حال (#شاد ...) خودکار به «روباهیو حال» اضافه می‌شن."""
+    __tablename__ = 'fox_mood_channels'
+    chat_id = Column(BigInteger, primary_key=True, autoincrement=False)
+    title = Column(String, nullable=True)
+    added_by = Column(BigInteger, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class GiftCodeRedemption(Base):
@@ -549,6 +559,7 @@ def init_db():
                 'city_treasury': 'INTEGER NOT NULL DEFAULT 0',
                 'city_donors': "VARCHAR DEFAULT ''",
                 'ai_mod': 'INTEGER NOT NULL DEFAULT 0',
+                'spell_mod': 'INTEGER NOT NULL DEFAULT -1',
             }
             for name, definition in gc_additions.items():
                 if name not in gc_cols:

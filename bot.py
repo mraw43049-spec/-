@@ -21,10 +21,11 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, get_session, init_db
 )
 import ai_service as ai
 import fox_brain as brain
+import fox_spell as spell
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
     fox_production_interval, fox_production_per_second, fox_rank, fox_upgrade_cost, fox_storage_capacity, get_level_for_points,
@@ -5185,6 +5186,8 @@ async def purchase_flow_gate(update, context):
     gift_flow نداشتند). این تابع هر دو را به ترتیب داخل یک هندلر واحد
     صدا می‌زند تا هر دو فلو واقعاً بررسی شوند.
     """
+    if not update.effective_user:      # پست کانال و ... کاربر ندارن
+        return
     if context.user_data.get("gift_flow"):
         await gift_flow_gate(update, context)
         return
@@ -7988,7 +7991,7 @@ FOX_MOODS = {
 FOX_MOOD_WORDS = {brain.normalize(k): v for k, v in {
     'شاد': 'happy', 'خوشحال': 'happy', 'آروم': 'calm', 'آرام': 'calm', 'ریلکس': 'calm',
     'غمگین': 'sad', 'دلتنگ': 'sad', 'ناراحت': 'sad', 'پرانرژی': 'energy', 'انرژی': 'energy', 'هیجانی': 'energy',
-    'عاشقانه': 'love', 'عاشق': 'love', 'عصبی': 'rage', 'خشمگین': 'rage', 'شاکی': 'rage',
+    'عاشقانه': 'love', 'عاشق': 'love', 'عصبی': 'rage', 'خشمگین': 'rage', 'شاکی': 'rage', 'پر انرژی': 'energy',
 }.items()}
 # اگه برای یه حال آهنگی نبود، از نزدیک‌ترین حال‌ها انتخاب می‌شه
 FOX_MOOD_NEAR = {
@@ -7998,6 +8001,7 @@ FOX_MOOD_NEAR = {
 }
 MOOD_ADD_RE = re.compile(r'^(?:یاد\s*بگیر\s+)?آهنگ\s+حال[\s:：]+(?P<m>.+)$', re.S)
 MOOD_LIST_RE = re.compile(r'^لیست\s+آهنگ\s+حال$')
+MOOD_CHANNEL_RE = re.compile(r'^کانال\s+آهنگ(?:\s+(-?\d+))?$')
 MOOD_DEL_RE = re.compile(r'^حذف\s+آهنگ\s+حال[\s:：]+(\d+)$')
 MOOD_START_RE = re.compile(r'^(?:(?:روباهیو|روباه جون|روباه|روبی)\s+)?(?P<x>حال|حالم|حال من|حال و هوا|حال و هوام|حالمو خوب کن|حال منو خوب کن)$')
 MOOD_USAGE = (
@@ -8201,6 +8205,56 @@ async def mood_button(update, context):
         except BadRequest: pass
 
 
+def mood_is_audio(kind, mime):
+    return kind == 'audio' or (kind == 'document' and (mime or '').lower().startswith('audio/'))
+
+
+def mood_audio_title(media_msg):
+    a = getattr(media_msg, 'audio', None); d = getattr(media_msg, 'document', None)
+    if a is not None:
+        title = ' - '.join(x for x in ((a.performer or '').strip(), (a.title or '').strip()) if x) or (a.file_name or '')
+    else:
+        title = (getattr(d, 'file_name', '') or '')
+    return re.sub(r'\.(mp3|m4a|ogg|wav|flac)$', '', title, flags=re.I)[:100]
+
+
+def mood_parse_moods(words):
+    """لیست کلمه‌ها → (لیست حال‌های درست، اولین کلمه‌ی نامعتبر یا None)"""
+    moods = []
+    for w in words:
+        w = (w or '').strip()
+        if not w:
+            continue
+        mk = FOX_MOOD_WORDS.get(brain.normalize(w.replace('_', '').replace('\u200c', '')))
+        if not mk:
+            return moods, w
+        if mk not in moods:
+            moods.append(mk)
+    return moods, None
+
+
+def mood_song_upsert(kind, file_id, unique_id, moods, title, created_by, replace=False):
+    """آهنگ رو با حال‌هاش ذخیره می‌کنه؛ اگه همین فایل قبلاً بوده حال‌ها ادغام می‌شن (replace=True: جایگزین). → (شماره، مجموع، حال‌های نهایی)"""
+    session = get_session()
+    try:
+        row = session.query(FoxMoodSong).filter(FoxMoodSong.file_unique_id == unique_id).first() if unique_id else None
+        if row:
+            old = [x for x in (row.moods or '').split(',') if x]
+            row.moods = ','.join(moods if replace else old + [x for x in moods if x not in old])
+            if title and not row.title:
+                row.title = title
+        else:
+            row = FoxMoodSong(moods=','.join(moods), media_type='audio' if kind == 'audio' else 'document', file_id=file_id,
+                              file_unique_id=unique_id, title=title, created_by=created_by)
+            session.add(row)
+        session.commit(); rid = row.id
+        final = [x for x in (row.moods or '').split(',') if x]
+        total = session.query(FoxMoodSong).count()
+    finally:
+        session.close()
+    return rid, total, final
+
+
 async def fox_mood_song_add(update, context, media_msg, text):
     """ادمین: آهنگ حال: شاد، آروم (کپشنِ آهنگ یا ریپلای روی آهنگ)."""
     msg = update.message
@@ -8212,43 +8266,117 @@ async def fox_mood_song_add(update, context, media_msg, text):
     if not info:
         await reply("❌ باید روی یه آهنگ ریپلای کنی، یا آهنگ رو با کپشن «آهنگ حال: شاد» بفرستی.\n\n" + MOOD_USAGE); return
     kind, file_id, unique_id, mime = info
-    if not (kind == 'audio' or (kind == 'document' and (mime or '').lower().startswith('audio/'))):
+    if not mood_is_audio(kind, mime):
         await reply("❌ این آهنگ (فایل صوتی) نیست. آهنگ رو به‌صورت Music یا فایل mp3 بفرست."); return
-    moods = []
-    body = m.group('m').replace('پر انرژی', 'پرانرژی')
-    for w in re.split(r'[،,\s]+', body):
-        if not w:
-            continue
-        mk = FOX_MOOD_WORDS.get(brain.normalize(w))
-        if not mk:
-            await reply(f"❌ «{w}» حال نیست. حال‌های درست: " + "، ".join(v[1] for v in FOX_MOODS.values())); return
-        if mk not in moods:
-            moods.append(mk)
+    words = re.split(r'[،,\s]+', m.group('m').replace('پر انرژی', 'پرانرژی'))
+    moods, bad = mood_parse_moods(words)
+    if bad:
+        await reply(f"❌ «{bad}» حال نیست. حال‌های درست: " + "، ".join(v[1] for v in FOX_MOODS.values())); return
     if not moods:
         await reply("❌ حال رو بنویس.\n\n" + MOOD_USAGE); return
-    a = getattr(media_msg, 'audio', None); d = getattr(media_msg, 'document', None)
-    if a is not None:
-        title = ' - '.join(x for x in ((a.performer or '').strip(), (a.title or '').strip()) if x) or (a.file_name or '')
-    else:
-        title = (getattr(d, 'file_name', '') or '')
-    title = re.sub(r'\.(mp3|m4a|ogg|wav|flac)$', '', title, flags=re.I)[:100]
+    title = mood_audio_title(media_msg)
+    rid, total, final = mood_song_upsert(kind, file_id, unique_id, moods, title, update.effective_user.id)
+    await reply(f"✅ 🎵 آهنگ اضافه شد! (شماره {rid})\n" + (f"📀 {title}\n" if title else "")
+                + "🎭 حال: " + "، ".join(f"{FOX_MOODS[x][0]} {FOX_MOODS[x][1]}" for x in final)
+                + f"\n\n📚 مجموع آهنگ‌ها: {total}\nحذف: حذف آهنگ حال {rid}")
+
+
+# ── کانال آهنگ: آهنگ‌هایی که تو کانال (که ربات توش ادمینه) با هشتگ حال گذاشته می‌شن خودکار اضافه می‌شن ──
+MOOD_CHANNEL_ENV = {int(x) for x in re.findall(r'-?\d+', os.getenv('MOOD_CHANNEL_IDS', ''))}
+_MOOD_CH_CACHE = {'t': 0.0, 'ids': set()}
+MOOD_CHANNEL_HELP = (
+    "هر آهنگی (Music یا mp3) که تو این کانال بذاری و تو کپشنش هشتگ حال بنویسی خودکار به «روباهیو حال» اضافه می‌شه:\n"
+    "#شاد #آروم #غمگین #پرانرژی #عاشقانه #عصبی (چند هشتگ = چند حال؛ ویرایش کپشن حال‌ها رو اصلاح می‌کنه)\n"
+    "ربات با 👍 نشون می‌ده اضافه شد و با 🤔 یعنی هشتگ حال نداشت."
+)
+
+
+def mood_channel_ids():
+    now = _time.time()
+    if now - _MOOD_CH_CACHE['t'] > 60:
+        session = get_session()
+        try:
+            ids = {int(r.chat_id) for r in session.query(FoxMoodChannel).all()}
+        except Exception:
+            logger.exception('load mood channels failed'); ids = set()
+        finally:
+            session.close()
+        _MOOD_CH_CACHE.update(t=now, ids=ids | MOOD_CHANNEL_ENV)
+    return _MOOD_CH_CACHE['ids']
+
+
+def mood_channel_register(chat_id, title, added_by):
     session = get_session()
     try:
-        row = session.query(FoxMoodSong).filter(FoxMoodSong.file_unique_id == unique_id).first() if unique_id else None
-        if row:      # همین آهنگ قبلاً اضافه شده → حال‌های جدید بهش اضافه می‌شه
-            old = [x for x in (row.moods or '').split(',') if x]
-            row.moods = ','.join(old + [x for x in moods if x not in old]); rid = row.id
+        row = session.get(FoxMoodChannel, chat_id)
+        if row is None:
+            session.add(FoxMoodChannel(chat_id=chat_id, title=title or '', added_by=added_by))
         else:
-            row = FoxMoodSong(moods=','.join(moods), media_type='audio' if kind == 'audio' else 'document', file_id=file_id,
-                              file_unique_id=unique_id, title=title, created_by=update.effective_user.id)
-            session.add(row)
-        session.commit(); rid = row.id
-        total = session.query(FoxMoodSong).count()
+            row.title = title or row.title
+        session.commit()
     finally:
         session.close()
-    await reply(f"✅ 🎵 آهنگ اضافه شد! (شماره {rid})\n" + (f"📀 {title}\n" if title else "")
-                + "🎭 حال: " + "، ".join(f"{FOX_MOODS[x][0]} {FOX_MOODS[x][1]}" for x in moods)
-                + f"\n\n📚 مجموع آهنگ‌ها: {total}\nحذف: حذف آهنگ حال {rid}")
+    _MOOD_CH_CACHE['t'] = 0.0
+
+
+async def mood_channel_member(update, context):
+    """ربات تو یه کانال ادمین شد: فقط اگه اضافه‌کننده از ادمین‌های ربات باشه ثبتش می‌کنیم (نه هر کانالی)."""
+    cm = update.my_chat_member
+    if not cm or cm.chat.type != 'channel':
+        return
+    status = cm.new_chat_member.status
+    if status in ('left', 'kicked'):
+        session = get_session()
+        try:
+            row = session.get(FoxMoodChannel, cm.chat.id)
+            if row:
+                session.delete(row); session.commit()
+        finally:
+            session.close()
+        _MOOD_CH_CACHE['t'] = 0.0
+        return
+    if status != 'administrator':
+        return
+    adder = cm.from_user
+    if not adder or adder.id not in ADMIN_IDS:
+        logger.info('mood channel ignored (added by non-admin): %s', cm.chat.id); return
+    mood_channel_register(cm.chat.id, cm.chat.title, adder.id)
+    try:
+        await context.bot.send_message(adder.id, f"✅ کانال «{cm.chat.title}» برای «روباهیو حال» ثبت شد 🎶\n\n" + MOOD_CHANNEL_HELP)
+    except Exception:
+        pass
+
+
+def mood_hashtag_moods(caption):
+    """کپشن → (حال‌های درست از روی هشتگ‌ها). هشتگ ناشناس نادیده گرفته می‌شه."""
+    moods = []
+    for tag in re.findall(r'#([^\s#]+)', caption or ''):
+        mk = FOX_MOOD_WORDS.get(brain.normalize(tag.replace('_', '').replace('\u200c', '')))
+        if mk and mk not in moods:
+            moods.append(mk)
+    return moods
+
+
+async def mood_channel_post(update, context):
+    msg = update.channel_post or update.edited_channel_post
+    if not msg or msg.chat_id not in mood_channel_ids():
+        return
+    info = fox_extract_media(msg)
+    if not info or not mood_is_audio(info[0], info[3]):
+        return
+    kind, file_id, unique_id, mime = info
+    moods = mood_hashtag_moods(msg.caption)
+    react = '🤔'
+    if moods:
+        try:
+            mood_song_upsert(kind, file_id, unique_id, moods, mood_audio_title(msg), None, replace=update.edited_channel_post is not None)
+            react = '👍'
+        except Exception:
+            logger.exception('mood channel save failed')
+    try:
+        await context.bot.set_message_reaction(msg.chat_id, msg.message_id, reaction=react)
+    except Exception:
+        pass
 
 
 async def fox_mood_admin_command(update, context):
@@ -8265,6 +8393,28 @@ async def fox_mood_admin_command(update, context):
             await reply("🎶 هنوز آهنگی برای «روباهیو حال» اضافه نشده.\n\n" + MOOD_USAGE); return
         lines = [f"{i}) 🎵 {t}\n    🎭 " + "، ".join(f"{FOX_MOODS[x][0]}{FOX_MOODS[x][1]}" for x in ms if x in FOX_MOODS) for i, t, ms in rows[-40:]]
         await reply(f"🎶 آهنگ‌های حال ({len(rows)} تا؛ آخرین ۴۰ تا):\n\n" + "\n\n".join(lines) + "\n\nحذف: حذف آهنگ حال <شماره>"); return
+    m = MOOD_CHANNEL_RE.match(text)
+    if m:
+        if m.group(1):
+            cid = int(m.group(1))
+            try:
+                ch = await context.bot.get_chat(cid)
+                me = await context.bot.get_chat_member(cid, context.bot.id)
+                if ch.type != 'channel' or me.status != 'administrator':
+                    raise ValueError('not channel admin')
+            except Exception:
+                await reply("❌ کانال پیدا نشد یا ربات تو اون کانال ادمین نیست. اول ربات رو ادمین کانال کن."); return
+            mood_channel_register(cid, ch.title, update.effective_user.id)
+            await reply(f"✅ کانال «{ch.title}» ثبت شد 🎶\n\n" + MOOD_CHANNEL_HELP); return
+        session = get_session()
+        try:
+            rows = [(r.chat_id, r.title or '') for r in session.query(FoxMoodChannel).all()]
+        finally:
+            session.close()
+        lst = "\n".join(f"• {t} ({i})" for i, t in rows) or "هنوز کانالی ثبت نشده."
+        await reply("📻 کانال‌های آهنگ:\n" + lst + "\n\n"
+                    "ثبت: یه کانال (خصوصی هم می‌شه) بساز، ربات رو ادمینش کن (خودکار ثبت می‌شه؛ فقط وقتی تو ادمین ربات باشی).\n"
+                    "اگه قبلاً ربات ادمین بوده: کانال آهنگ <آیدی عددی کانال، مثل -1001234567890>\n\n" + MOOD_CHANNEL_HELP); return
     m = MOOD_DEL_RE.match(text)
     if m:
         session = get_session()
@@ -8677,6 +8827,127 @@ async def ai_admin_selftest(update, context):
         logger.exception('ai selftest failed')
 
 
+# ── غلط تایپی دستورها («گازینو» → «آیا منظورت کازینو بود؟») + غلط‌گیر املایی ──
+FOX_COMMAND_PHRASES = [
+    "روبام", "روباش", "گردونه", "چرخ شانس", "دوست روبی", "فرند روب", "دوست روباهیو", "کد هدیه", "کد جایزه",
+    "لیدربرد", "لیدر برد", "شهر روبی", "شهر روباهیو", "شهر روباه", "شهردار روبی", "روباه", "روبی", "روباهیو",
+    "زندان روبی", "زندان روباهیو", "قاچاق روبی", "قاچاق روباهیو", "شکار", "یخچال روبی", "کارخونه روبی", "کارخونه",
+    "رفرال", "زیرمجموعه", "زیرمجموعه گیری", "بانک", "بانک روبی", "شاپ روبی", "فروشگاه روبی", "بازی روبی",
+    "بازی های روبی", "کازینو روبی", "کازینو", "پیش بینی", "پیشبینی", "پیش بینی فوتبال", "اخبار شهر", "اخبار شهر روبی",
+    "خبر شهر", "مدیریت هوشمند", "روباهیو حال", "روب روب", "هور هور",
+]
+if CLAIM_KEYWORD and CLAIM_KEYWORD not in FOX_COMMAND_PHRASES:
+    FOX_COMMAND_PHRASES.append(CLAIM_KEYWORD)
+FOX_SPELL_DEFAULT = os.getenv('FOX_SPELL_DEFAULT', '1').strip().lower() in ('1', 'true', 'yes', 'on')
+SPELL_TOGGLE_RE = re.compile(r'^(?:غلط\s*گیر|غلط\s*یاب|غلط\s*گیر\s*املایی|املا\s*یار)(?:\s+(روشن|خاموش))?$')
+_HINT_AT = {}            # (chat_id, user_id) → زمان آخرین پیشنهاد دستور
+_HINT_CHAT_AT = {}       # chat_id → زمان آخرین پیشنهاد دستور
+_SPELL_AT = {}           # (chat_id, user_id) → زمان آخرین تذکر املایی
+_SPELL_CHAT_AT = {}      # chat_id → زمان آخرین تذکر املایی
+_SPELL_CACHE = {}        # chat_id → (روشن؟، زمان)
+
+
+def _trim_times(d, limit=5000):
+    if len(d) > limit:
+        for k in sorted(d, key=d.get)[:limit // 2]:
+            d.pop(k, None)
+
+
+async def command_hint(update, context, text):
+    """اگه کل پیام شبیه (ولی نه دقیقاً) یه دستور ربات بود «آیا منظورت X بود؟» می‌فرسته. True = پیام مصرف شد."""
+    if len(text) > 60:
+        return False
+    msg = update.message; chat = update.effective_chat; user = update.effective_user
+    if not msg or not chat or not user:
+        return False
+    sug = spell.suggest_command(text, FOX_COMMAND_PHRASES)
+    if sug:
+        reply = f"🦊 آیا منظورت «{sug}» بود؟ 🤔\nهمین رو بنویس تا اجرا بشه."
+    else:
+        tr = spell.suggest_transfer(text)
+        if not tr:
+            return False
+        reply = f"🦊 آیا منظورت «{tr}» بود؟ 🤔\n(روی پیام گیرنده ریپلای کن و همین رو بنویس)"
+    now = _time.time(); private = chat.type == 'private'
+    if now - _HINT_AT.get((chat.id, user.id), 0) < (2 if private else 15) or (not private and now - _HINT_CHAT_AT.get(chat.id, 0) < 4):
+        return True      # ضداسپم؛ ولی پیام رو به هوش مصنوعی هم نمی‌دیم
+    _HINT_AT[(chat.id, user.id)] = now; _HINT_CHAT_AT[chat.id] = now
+    _trim_times(_HINT_AT); _trim_times(_HINT_CHAT_AT)
+    await msg.reply_text(reply, **reply_kwargs(msg))
+    return True
+
+
+def spell_enabled(chat, context):
+    if chat.type == 'private':
+        return not (context.user_data or {}).get('spell_off')
+    now = _time.time(); c = _SPELL_CACHE.get(chat.id)
+    if c and now - c[1] < 60:
+        return c[0]
+    flag = FOX_SPELL_DEFAULT
+    session = get_session()
+    try:
+        row = session.get(GroupChat, chat.id)
+        v = int(getattr(row, 'spell_mod', -1) if row is not None and getattr(row, 'spell_mod', None) is not None else -1)
+        flag = FOX_SPELL_DEFAULT if v < 0 else bool(v)
+    except Exception:
+        pass
+    finally:
+        session.close()
+    _SPELL_CACHE[chat.id] = (flag, now)
+    return flag
+
+
+async def spell_assist(update, context, text):
+    """غلط‌های املایی مطمئن رو (قذا → غذا) با یه ریپلای کوتاه تصحیح می‌کنه. بقیه‌ی کارهای ربات رو متوقف نمی‌کنه."""
+    if len(text) > 400:
+        return
+    pairs = spell.find_typos(text)
+    if not pairs:
+        return
+    msg = update.message; chat = update.effective_chat; user = update.effective_user
+    if not msg or not chat or not user or not spell_enabled(chat, context):
+        return
+    now = _time.time(); private = chat.type == 'private'
+    if now - _SPELL_AT.get((chat.id, user.id), 0) < (20 if private else 45) or (not private and now - _SPELL_CHAT_AT.get(chat.id, 0) < 12):
+        return
+    _SPELL_AT[(chat.id, user.id)] = now; _SPELL_CHAT_AT[chat.id] = now
+    _trim_times(_SPELL_AT); _trim_times(_SPELL_CHAT_AT)
+    try:
+        await msg.reply_text(spell.format_typos(pairs), **reply_kwargs(msg))
+    except Exception:
+        logger.exception('spell reply failed')
+
+
+async def spell_toggle_command(update, context):
+    """«غلط گیر» / «غلط گیر روشن» / «غلط گیر خاموش» — تو گروه فقط ادمین‌ها؛ تو پیوی برای خود کاربر."""
+    msg = update.message; chat = update.effective_chat; user = update.effective_user
+    text = re.sub(r'\s+', ' ', (msg.text or '').replace('\u200c', ' ').strip())
+    m = SPELL_TOGGLE_RE.match(text)
+    want = None if not m or not m.group(1) else 1 if m.group(1) == 'روشن' else 0
+    reply = lambda t: msg.reply_text(t, **reply_kwargs(msg))
+    if chat.type == 'private':
+        if want is not None:
+            context.user_data['spell_off'] = (want == 0)
+        st = "روشن ✅" if spell_enabled(chat, context) else "خاموش ⛔"
+        await reply(f"✍️ غلط‌گیر املایی تو پیوی: {st}\nتغییر: «غلط گیر روشن» یا «غلط گیر خاموش»"); return
+    if want is not None:
+        if user.id not in ADMIN_IDS and not await ai_is_chat_admin(context.bot, chat.id, user.id, use_cache=False):
+            await reply("⛔ فقط ادمین‌های گروه می‌تونن غلط‌گیر رو تنظیم کنن."); return
+        session = get_session()
+        try:
+            row = session.get(GroupChat, chat.id)
+            if row is None:
+                row = GroupChat(chat_id=chat.id, title=chat.title or "گپ", active=1); session.add(row)
+            row.spell_mod = want; session.commit()
+        finally:
+            session.close()
+        _SPELL_CACHE[chat.id] = (bool(want), _time.time())
+    st = "روشن ✅" if spell_enabled(chat, context) else "خاموش ⛔"
+    await reply(f"✍️ غلط‌گیر املایی تو این گروه: {st}\n"
+                "غلط‌های مطمئن (مثل «قذا» ← «غذا») رو با یه پیام کوتاه تصحیح می‌کنه؛ هر نفر حداکثر دقیقه‌ای یه بار.\n"
+                "تغییر (فقط ادمین): «غلط گیر روشن» / «غلط گیر خاموش»")
+
+
 async def text_router(update, context):
     if not update.message or not update.message.text: return
     if await handle_jail_memory_text(update, context): return
@@ -8738,12 +9009,20 @@ async def text_router(update, context):
         await mood_start(update, context); return
     # مدیریت آهنگ‌های «روباهیو حال» (فقط ادمین، فقط پیوی)
     if update.effective_chat.type == "private" and admin_only(update.effective_user.id) and (
-            MOOD_ADD_RE.match(text) or MOOD_LIST_RE.match(re.sub(r"\s+", " ", text)) or MOOD_DEL_RE.match(re.sub(r"\s+", " ", text))):
+            MOOD_ADD_RE.match(text) or MOOD_LIST_RE.match(re.sub(r"\s+", " ", text)) or MOOD_DEL_RE.match(re.sub(r"\s+", " ", text))
+            or MOOD_CHANNEL_RE.match(re.sub(r"\s+", " ", text))):
         await fox_mood_admin_command(update, context); return
     # آموزش دستی به روباه (فقط ادمین، فقط پیوی)
     if update.effective_chat.type == "private" and admin_only(update.effective_user.id) and (
             FOX_TEACH_RE.match(text) or FOX_FORGET_RE.match(text) or re.sub(r"\s+", " ", text) == "لیست یادگیری"):
         await fox_teach_command(update, context); return
+    # تنظیم غلط‌گیر املایی
+    if SPELL_TOGGLE_RE.match(re.sub(r"\s+", " ", text.replace("\u200c", " "))):
+        await spell_toggle_command(update, context); return
+    # غلط تایپی دستورها: «گازینو» → «آیا منظورت کازینو بود؟»
+    if await command_hint(update, context, text): return
+    # غلط‌گیر املایی (فقط تذکر می‌ده؛ کار بقیه‌ی بخش‌ها ادامه پیدا می‌کنه)
+    await spell_assist(update, context, text)
     # هر پیام دیگری که مخاطبش هوش مصنوعیه (پیوی، «روباهیو ...»، منشن، ریپلای روی جواب روباه، «راهنما ...»)
     if await ai_chat_entry(update, context): return
 
@@ -8873,6 +9152,9 @@ def main():
         & filters.ChatType.PRIVATE & filters.User(user_id=list(ADMIN_IDS)) & filters.CaptionRegex(r"^\s*(?:یاد\s*بگیر|آهنگ\s+حال)"),
         fox_teach_media_caption), group=4)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,ai_moderation_handler),group=5)
+    # کانال آهنگ: ثبت کانال وقتی ادمین ربات، ربات رو ادمین کانال می‌کنه + آهنگ‌های کانال با هشتگ حال
+    app.add_handler(ChatMemberHandler(mood_channel_member, ChatMemberHandler.MY_CHAT_MEMBER), group=-3)
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POSTS & (filters.AUDIO | filters.Document.ALL), mood_channel_post), group=6)
     if app.job_queue:
         app.job_queue.run_repeating(settle_all_smuggling, interval=30, first=10, name="ruby-smuggling-settler")
         app.job_queue.run_repeating(post_injured_fox_job, interval=INJURED_FOX_INTERVAL, first=5, name="injured-fox")
