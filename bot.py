@@ -26,6 +26,7 @@ from database import (
 import ai_service as ai
 import fox_brain as brain
 import fox_spell as spell
+from education import education_command, education_topic, education_answer
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
     fox_production_interval, fox_production_per_second, fox_rank, fox_upgrade_cost, fox_storage_capacity, get_level_for_points,
@@ -9481,6 +9482,8 @@ async def text_router(update, context):
     if await handle_market_text(update, context): return
     if await handle_city_donate_text(update, context): return
     text=update.message.text.strip()
+    if text in {"روباهیو درس"}:
+        await education_command(update, context); return
     if text in FOX_CLAIM_ALIASES:
         await collect_fox_points(update,context); return
     if text in {"روبام","روبام!","روباش","روباش!"}: await roobam_command(update,context); return
@@ -9635,6 +9638,8 @@ def main():
     app.add_handler(CallbackQueryHandler(ruby_rabbit_choice,pattern=r"^rrabbit:\d+:(?:[0-9]|1[0-9])$"))
     app.add_handler(CallbackQueryHandler(ruby_pairs_move,pattern=r"^rpairs:\d+:(?:[0-9]|1[0-9]|2[0-9])$"))
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
+    app.add_handler(CallbackQueryHandler(education_topic, pattern=r"^edutopic:(general|religion|history_geo|literature|math_iq)$"))
+    app.add_handler(CallbackQueryHandler(education_answer, pattern=r"^edu:(general|religion|history_geo|literature|math_iq):\d+:\d$"))
     app.add_handler(CallbackQueryHandler(bank_change_confirm,pattern=r"^bankchange:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
