@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 FOX_UNLOCK_LEVEL = 3
 FOX_MAX_LEVEL = 25
-FOX_HUNGER_INTERVAL_SECONDS = 25 * 60  # هر ۲۵ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
+FOX_HUNGER_INTERVAL_SECONDS = 30 * 60  # هر ۲۵ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
 INJURED_FOX_INTERVAL = 20 * 60
 INJURED_FOX_COST = 10
 INJURED_FOX_REWARD_MIN = 200
@@ -62,7 +62,8 @@ TRANSFER_MAX = 500_000
 WHEEL_COOLDOWN = 24 * 60 * 60
 WHEEL_REWARDS = [100, 250, 350, 450, 0, 500, 750, 1000]
 WHEEL_LABELS = ['100 روب پوینت', '250 روب پوینت', '350 روب پوینت', '450 روب پوینت', 'پوچ', '500 روب پوینت', '750 روب پوینت', '1000 روب پوینت']
-RUBY_MAX_ENTRY = 3_000_000
+RUBY_MAX_ENTRY = 2_500_000
+CASINO_MAX_ENTRY = 5_000_000
 BACKUP_INTERVAL_SECONDS = 24 * 60 * 60  # هر ۲۴ ساعت یک بکاپ خودکار برای ادمین‌ها فرستاده می‌شود
 
 # ---------- مریضی روباه ----------
@@ -1248,15 +1249,16 @@ async def casino_command(update, context):
         [InlineKeyboardButton("🎲 تاس",callback_data=f"rg:cz_dice:{owner_id}")],
         [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
         [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
+        [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
     ])
-    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۲۵ خانه · ۳ بمب رندوم\n┘─ هر خانه سالم: +۲٬۰۰۰ روب‌پوینت؛ با بمب، جایزه صفر\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
     "xo":("🧩 بازی روبی دوز XO",2,2,True),"rps":("🔫 بازی روبی سنگ کاغذ قیچی",2,2,True),
     "darts":("🎯 بازی روبی دارت",2,4,True),"basketball":("🏀 بازی روبی بسکتبال",2,3,True),"bowling":("🎳 بازی روبی بولینگ",2,4,True),
     "cz_wheel":("🎰 اسلات",1,3,True),"cz_dice":("🎲 تاس",1,2,True),"cz_rabbit":("🐇 خرگوش خور",2,2,True),
-    "cz_pairs":("🃏 بازی دوتایی‌ها",2,2,True),
+    "cz_pairs":("🃏 بازی دوتایی‌ها",2,2,True),"cz_bomb":("💥 بمب",1,1,True),
 }
 CASINO_UNLOCK_LEVEL = 5
 
@@ -1313,7 +1315,8 @@ def wheel_is_jackpot(value):
     """دقیقاً سه‌تا 7️⃣ (بیشترین مقدار اسلات‌ماشین یعنی 64)."""
     return value == 64
 
-RUBY_COOLDOWN_SECONDS = 90  # هر کاربر هر 1 دقیقه و 30 ثانیه فقط یک‌بار می‌تواند بازی روبی جدید بسازد/وارد شود
+RUBY_COOLDOWN_SECONDS = 90
+CASINO_COOLDOWN_SECONDS = 4 * 60
 
 RPS_CHOICES = {"rock": "✊", "paper": "🖐", "scissors": "✌️"}
 RPS_BEATS = {"rock": "scissors", "paper": "rock", "scissors": "paper"}
@@ -1321,12 +1324,16 @@ RPS_TOTAL_ROUNDS = 5
 
 XO_LINES = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
 
-def ruby_cooldown_remaining(user):
-    last = aware(user.last_ruby_game_at)
+def ruby_cooldown_remaining(user, game_key=None):
+    last = aware(user.last_casino_game_at if game_key and game_key.startswith('cz_') and hasattr(user, 'last_casino_game_at') else user.last_ruby_game_at)
     if not last:
         return 0
-    remaining = RUBY_COOLDOWN_SECONDS - (now_utc()-last).total_seconds()
+    cooldown = CASINO_COOLDOWN_SECONDS if game_key and game_key.startswith('cz_') else RUBY_COOLDOWN_SECONDS
+    remaining = cooldown - (now_utc()-last).total_seconds()
     return max(0, int(remaining))
+
+def max_entry_for_game(key):
+    return CASINO_MAX_ENTRY if key.startswith('cz_') else RUBY_MAX_ENTRY
 
 def profile_buttons(ids, names_by_id=None):
     names_by_id = names_by_id or {}
@@ -1753,10 +1760,10 @@ async def ruby_game_select(update,context):
     session=get_session()
     try:
         user=get_or_create_user(session,q.from_user)
-        remaining=ruby_cooldown_remaining(user)
+        remaining=ruby_cooldown_remaining(user, key)
     finally: session.close()
     if remaining>0:
-        await q.answer(f"⏳ هر {RUBY_COOLDOWN_SECONDS} ثانیه فقط یک‌بار می‌تونی بازی روبی بسازی/بری تو بازی. {remaining} ثانیه دیگه صبر کن.",show_alert=True); return
+        await q.answer(f"⏳ هر {CASINO_COOLDOWN_SECONDS if key.startswith('cz_') else RUBY_COOLDOWN_SECONDS} ثانیه فقط یک‌بار می‌تونی بازی بسازی/وارد بشی. {remaining} ثانیه دیگه صبر کن.",show_alert=True); return
     await q.answer()
     chat_id=q.message.chat_id; message_id=q.message.message_id
     if minp==maxp:
@@ -1788,7 +1795,7 @@ async def ask_ruby_entry_amount(chat_id,message_id,context,key,count,owner_id):
         text=(
             f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n\n"
             f"💰 مبلغ ورودی هر نفر رو بفرست (روب‌پوینت).\n"
-            f"سقف مجاز: {RUBY_MAX_ENTRY:,} روب‌پوینت.\nبرای بازی رایگان عدد 0 رو بفرست.\n"
+            f"سقف مجاز: {max_entry_for_game(key):,} روب‌پوینت.\nبرای بازی رایگان عدد 0 رو بفرست.\n"
             "مثال: 50k / 50کا / 50م / 200000\n\n"
             "👇 جواب این پیام رو (یا فقط عدد رو) در همین چت بفرست."
         ),
@@ -1829,7 +1836,7 @@ async def ruby_setup_back(update,context):
     key=setup.get('key','')
     await q.answer()
     if key.startswith('cz_'):
-        kb=InlineKeyboardMarkup([[InlineKeyboardButton('🎰 اسلات',callback_data=f'rg:cz_wheel:{owner}')],[InlineKeyboardButton('🎲 تاس',callback_data=f'rg:cz_dice:{owner}')],[InlineKeyboardButton('🐇 خرگوش خور',callback_data=f'rg:cz_rabbit:{owner}')],[InlineKeyboardButton('🃏 بازی دوتایی‌ها',callback_data=f'rg:cz_pairs:{owner}')]])
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton('🎰 اسلات',callback_data=f'rg:cz_wheel:{owner}')],[InlineKeyboardButton('🎲 تاس',callback_data=f'rg:cz_dice:{owner}')],[InlineKeyboardButton('🐇 خرگوش خور',callback_data=f'rg:cz_rabbit:{owner}')],[InlineKeyboardButton('🃏 بازی دوتایی‌ها',callback_data=f'rg:cz_pairs:{owner}')],[InlineKeyboardButton('💥 بمب',callback_data=f'rg:cz_bomb:{owner}')]])
         text='🃏 کازینو روبی🦊\n\n❗️ قمار مورد نظر را انتخاب کن:'
     else:
         kb=InlineKeyboardMarkup([[InlineKeyboardButton('🧩 بازی روبی دوز XO',callback_data=f'rg:xo:{owner}')],[InlineKeyboardButton('🔫 بازی روبی سنگ کاغذ قیچی',callback_data=f'rg:rps:{owner}')],[InlineKeyboardButton('🎯 بازی روبی دارت',callback_data=f'rg:darts:{owner}')],[InlineKeyboardButton('🏀 بازی روبی بسکتبال',callback_data=f'rg:basketball:{owner}')],[InlineKeyboardButton('🎳 بازی روبی بولینگ',callback_data=f'rg:bowling:{owner}')]])
@@ -1850,8 +1857,8 @@ async def handle_ruby_entry_text(update,context):
         if amount<0: raise ValueError
     except Exception:
         await update.message.reply_text("❌ مبلغ نامعتبره؛ یک عدد بفرست (مثلاً 0 یا 50000).",**reply_kwargs(update.message)); return True
-    if amount>RUBY_MAX_ENTRY:
-        await update.message.reply_text(f"❌ سقف مبلغ ورودی {RUBY_MAX_ENTRY:,} روب‌پوینته.",**reply_kwargs(update.message)); return True
+    if amount>max_entry_for_game(setup['key']):
+        await update.message.reply_text(f"❌ سقف مبلغ ورودی {max_entry_for_game(setup['key']):,} روب‌پوینته.",**reply_kwargs(update.message)); return True
     session=get_session()
     try:
         user=get_or_create_user(session,update.effective_user)
@@ -1873,14 +1880,17 @@ async def ruby_create_table(update,context):
     session=get_session()
     try:
         user=get_or_create_user(session,q.from_user)
-        remaining=ruby_cooldown_remaining(user)
+        remaining=ruby_cooldown_remaining(user, key)
         if remaining>0:
             await q.answer(f"⏳ {remaining} ثانیه دیگه صبر کن تا بتونی دوباره بازی روبی بسازی.",show_alert=True); return
         if amount>0 and (user.fox_points or 0)<amount:
             await q.answer("❌ روب‌پوینت کافی نداری.",show_alert=True); return
         if amount>0:
             user.fox_points-=amount
-        user.last_ruby_game_at=now_utc()
+        if key.startswith('cz_'):
+            user.last_casino_game_at = now_utc()
+        else:
+            user.last_ruby_game_at = now_utc()
         table=RubyTable(chat_id=q.message.chat_id,game_type=key,creator_id=user.telegram_id,max_players=count,entry_amount=amount,pot=amount,players=str(user.telegram_id),status='open',message_id=q.message.message_id,created_at=now_utc())
         session.add(table); session.commit(); tid=table.id
         creator_name=user_mention(user)
@@ -1897,6 +1907,13 @@ async def ruby_create_table(update,context):
                 t.state=json.dumps({"phase":"plant","paws":{},"revealed":[],"turn_started_at":now_utc().isoformat(),"turn_token":f"{t.id}-{ids[0]}-{int(now_utc().timestamp()*1000)}"})
             session.commit()
         finally: session.close()
+        if key=='cz_bomb':
+            session=get_session()
+            try:
+                t=session.get(RubyTable,tid); t.state=json.dumps({'bombs':random.sample(range(BOMB_CELLS),BOMB_COUNT),'revealed':[],'safe':0,'ended':None}); session.commit()
+            finally: session.close()
+            await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!\n{fee_line}\n\n{bomb_text({'safe':0},name,amount)}", reply_markup=bomb_keyboard(tid, {'revealed':[],'safe':0}, owner_id))
+            return
         if key in RUBY_GAME_EMOJI:
             emoji=RUBY_GAME_EMOJI.get(key)
             move_line=f"\n\nروی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا بچرخونی/بندازی."
@@ -1924,14 +1941,17 @@ async def ruby_dice_bet_select(update, context):
     session = get_session()
     try:
         user = get_or_create_user(session, q.from_user)
-        remaining = ruby_cooldown_remaining(user)
+        remaining = ruby_cooldown_remaining(user, key)
         if remaining > 0:
             await q.answer(f"⏳ {remaining} ثانیه دیگه صبر کن تا بتونی دوباره بازی روبی بسازی.", show_alert=True); return
         if amount > 0 and (user.fox_points or 0) < amount:
             await q.answer("❌ روب‌پوینت کافی نداری.", show_alert=True); return
         if amount > 0:
             user.fox_points -= amount
-        user.last_ruby_game_at = now_utc()
+        if key.startswith('cz_'):
+            user.last_casino_game_at = now_utc()
+        else:
+            user.last_ruby_game_at = now_utc()
         table = RubyTable(chat_id=q.message.chat_id, game_type=key, creator_id=user.telegram_id, max_players=count,
                            entry_amount=amount, pot=amount, players=str(user.telegram_id), status='open',
                            message_id=q.message.message_id, created_at=now_utc(),
@@ -2007,14 +2027,17 @@ async def ruby_join_table(update,context):
         if q.from_user.id in ids: await q.answer("قبلاً وارد شده‌ای.",show_alert=True); return
         if len(ids)>=t.max_players: await q.answer("میز پر شده است.",show_alert=True); return
         joiner=get_or_create_user(session,q.from_user)
-        remaining=ruby_cooldown_remaining(joiner)
+        remaining=ruby_cooldown_remaining(joiner, t.game_type)
         if remaining>0:
             await q.answer(f"⏳ {remaining} ثانیه دیگه صبر کن تا بتونی دوباره وارد بازی روبی بشی.",show_alert=True); return
         if t.entry_amount>0 and (joiner.fox_points or 0)<t.entry_amount:
             await q.answer(f"❌ برای ورود {t.entry_amount:,} روب‌پوینت لازم داری.",show_alert=True); return
         if t.entry_amount>0:
             joiner.fox_points-=t.entry_amount; t.pot=(t.pot or 0)+t.entry_amount
-        joiner.last_ruby_game_at=now_utc()
+        if t.game_type.startswith('cz_'):
+            joiner.last_casino_game_at = now_utc()
+        else:
+            joiner.last_ruby_game_at = now_utc()
         ids.append(q.from_user.id); t.players=','.join(map(str,ids))
         game_type=t.game_type
         if len(ids)>=t.max_players:
@@ -2457,6 +2480,78 @@ def _parse_ruby_scores(raw):
         if ':' in pair:
             uid,val=pair.split(':'); scores[int(uid)]=int(val)
     return scores
+
+BOMB_CELLS = 25
+BOMB_COUNT = 3
+BOMB_REWARD_PER_SAFE = 2000
+
+def bomb_keyboard(tid, state, owner_id):
+    revealed = set(state.get("revealed", []))
+    rows=[]
+    for r in range(5):
+        row=[]
+        for c in range(5):
+            i=r*5+c
+            label="✅" if i in revealed else "❔"
+            row.append(InlineKeyboardButton(label, callback_data=f"rbomb:cell:{tid}:{i}:{owner_id}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton("کافیه ✅", callback_data=f"rbomb:cashout:{tid}:{owner_id}")])
+    return InlineKeyboardMarkup(rows)
+
+def bomb_text(state, name, entry):
+    safe=int(state.get("safe",0)); reward=safe*BOMB_REWARD_PER_SAFE
+    return (f"💥 {name}\n\n🧩 خانه‌های سالم: {safe}/{BOMB_CELLS-BOMB_COUNT}\n"
+            f"💰 جایزه فعلی: {reward:,} روب‌پوینت\n"
+            "⚠️ سه بمب مخفی‌اند؛ پیدا کردن بمب بازی را تمام می‌کند و جایزه‌ای نمی‌گیری.\n"
+            "هر خانه سالم: +۲٬۰۰۰ روب‌پوینت")
+
+async def ruby_bomb_button(update, context):
+    q=update.callback_query; parts=q.data.split(":")
+    if parts[1] == 'cell':
+        if len(parts) != 5: return
+        _, action, tid_s, idx_s, owner_s = parts
+    else:
+        if len(parts) != 4: return
+        _, action, tid_s, owner_s = parts
+        idx_s = None
+    tid=int(tid_s); owner=int(owner_s)
+    if q.from_user.id!=owner:
+        await q.answer("⛔ این بازی برای کاربر دیگری است.", show_alert=True); return
+    session=get_session()
+    try:
+        t=session.get(RubyTable,tid)
+        if not t or t.status!='active' or t.game_type!='cz_bomb':
+            await q.answer("این بازی تمام شده.", show_alert=True); return
+        state=json.loads(t.state or '{}')
+        if action=='cashout':
+            reward=int(state.get('safe',0))*BOMB_REWARD_PER_SAFE
+            t.status='finished'; state['ended']='cashout'
+            u=session.get(User,owner)
+            if u and reward: u.fox_points=(u.fox_points or 0)+reward
+            session.commit(); text=bomb_text(state,RUBY_GAME_CONFIG['cz_bomb'][0],t.entry_amount)+f"\n\n✅ از بازی خارج شدی و {reward:,} روب‌پوینت گرفتی."; chat_id=t.chat_id; mid=t.message_id
+            await q.answer();
+        else:
+            idx=int(idx_s)
+            if idx<0 or idx>=BOMB_CELLS or idx in state.get('revealed',[]):
+                await q.answer("این خانه قبلاً باز شده.", show_alert=True); return
+            if idx in state.get('bombs',[]):
+                t.status='finished'; state['ended']='bomb'; state['bomb_hit']=idx
+                session.commit(); text=bomb_text(state,RUBY_GAME_CONFIG['cz_bomb'][0],t.entry_amount)+"\n\n💥 بمب پیدا شد! بازی تمام شد و جایزه‌ای دریافت نکردی."; chat_id=t.chat_id; mid=t.message_id
+                await q.answer("💥 بمب!", show_alert=True)
+            else:
+                state.setdefault('revealed',[]).append(idx); state['safe']=int(state.get('safe',0))+1
+                reward=int(state['safe'])*BOMB_REWARD_PER_SAFE
+                if state['safe']>=BOMB_CELLS-BOMB_COUNT:
+                    t.status='finished'; state['ended']='all_safe'; u=session.get(User,owner)
+                    if u: u.fox_points=(u.fox_points or 0)+reward
+                    session.commit(); text=bomb_text(state,RUBY_GAME_CONFIG['cz_bomb'][0],t.entry_amount)+f"\n\n🏆 همه خانه‌های سالم پیدا شد! جایزه: {reward:,} روب‌پوینت"; chat_id=t.chat_id; mid=t.message_id
+                else:
+                    t.state=json.dumps(state); session.commit(); text=bomb_text(state,RUBY_GAME_CONFIG['cz_bomb'][0],t.entry_amount); chat_id=t.chat_id; mid=t.message_id
+                await q.answer("✅ خانه سالم بود! +۲٬۰۰۰")
+        kb=None if t.status=='finished' else bomb_keyboard(tid,state,owner)
+    finally: session.close()
+    try: await context.bot.edit_message_text(chat_id=chat_id,message_id=mid,text=text,reply_markup=kb)
+    except Exception: pass
 
 async def ruby_dice_reply(update, context):
     """
@@ -6572,7 +6667,7 @@ async def flag_callback(update, context):
 
 def user_mention(user):
     """اسم کاربر به‌صورت لینک آبی (فقط برای متن پیام‌ها؛ برای دکمه‌ها از user_display_name استفاده کن)."""
-    return mention_of(user.telegram_id, user_display_name(user))
+    return mention_of(user.telegram_id, user_display_name(user)) + (" 🛡️" if int(user.telegram_id) in ADMIN_IDS else "")
 def ranking_position(session,field,value):return session.query(User).filter(getattr(User,field)>value).count()+1
 def fox_level_requirement(level):
     req={1:0,2:5,3:15,4:40,5:70,6:115,7:175,8:250,9:350,10:500,11:700,12:950,13:1250,14:1650,15:2150,16:2600,17:3600,18:4600,19:5800,20:7250}
@@ -6587,7 +6682,7 @@ async def roobam_command(update,context):
     try:
         user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0);ref_count=session.query(Referral).filter(Referral.referrer_id==user.telegram_id,Referral.status=='approved').count();ref_rank=session.query(Referral.referrer_id).filter(Referral.status=='approved').group_by(Referral.referrer_id).having(__import__('sqlalchemy').func.count(Referral.id)>ref_count).count()+1
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
-        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
     finally:session.close()
     await update.message.reply_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(user_display_name(user),url=f"tg://user?id={user.telegram_id}")]]),**reply_kwargs(update.message))
 
@@ -8155,7 +8250,7 @@ def build_ai_knowledge():
         f"- 🦁 شهر روبی: تو گروه «شهر روبی» رو بنویس. شهر تا سطح {CITY_MAX_LEVEL} بالا می‌ره (با روب‌روب، نجات روباه زخمی، شکار و دونیت به خزانه). از سطح {CITY_MAYOR_UNLOCK_LEVEL} شهردار روبی فعال می‌شه؛ شهردار اولیه مالک گپ است و می‌تونه شهرداری را واگذار کنه. «اخبار شهر» یه خبر بامزه از وضعیت شهر می‌ده.",
         f"- 👥 دوست روبی: بنویس «دوست روبی» و ➕ افزودن دوست رو بزن، بعد آیدی عددی یا @یوزرنیم دوستت رو بفرست. حداکثر {FRIEND_LIMIT} دوست؛ درخواست به پیوی ربات دوستت می‌ره و اون قبول یا رد می‌کنه؛ نتیجه هم تو پیوی ربات به تو خبر داده می‌شه. با دوستات می‌تونی روب‌پوینت و پیام بفرستی و رتبه‌شون رو ببینی.",
         "- 🎁 کد هدیه: «کد هدیه» رو بنویس، 🎟 ورود کد رو بزن و کد رو روی همون پنل ریپلای کن. هر کد برای هر حساب فقط یک‌بار قابل استفاده‌ست؛ ظرفیت و مهلت داره.",
-        f"- 🃏 کازینو (از لول {CASINO_UNLOCK_LEVEL}؛ مبلغ ورودی هر نفر حداکثر {RUBY_MAX_ENTRY:,} روب‌پوینت؛ میز ۶۰ ثانیه برای پیوستن فرصت داره؛ هر کاربر هر {RUBY_COOLDOWN_SECONDS} ثانیه فقط یک میز جدید می‌سازه یا وارد میز می‌شه):",
+        f"- 🃏 کازینو (از لول {CASINO_UNLOCK_LEVEL}؛ مبلغ ورودی هر نفر حداکثر ۵٬۰۰۰٬۰۰۰ روب‌پوینت در کازینو و ۲٬۵۰۰٬۰۰۰ در بازی روبی؛ میز ۶۰ ثانیه برای پیوستن فرصت داره؛ هر کاربر هر ۹۰ ثانیه در بازی روبی و هر ۴ دقیقه در کازینو می‌سازه یا وارد میز می‌شه):",
         "   • 🎰 اسلات: ۱ تا ۳ نفر. تک‌نفره مقابل خانه‌ست (امتیاز بالا جایزه می‌گیره، 7️⃣7️⃣7️⃣ جکپاته). دو نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ی میزه؛ اگه امتیازها برابر بشه قرعه‌کشی می‌شه.",
         "   • 🎲 تاس: ۱ یا ۲ نفر. تک‌نفره شرط فرد/زوج (ضریب ۱٫۹). دونفره سازنده‌ی میز قانون «بزرگ‌ترین عدد برنده» یا «کوچک‌ترین عدد برنده» رو انتخاب می‌کنه و برای هر دو نفر یکسانه؛ اگه دو عدد برابر بشه مبلغ ورودی برمی‌گرده.",
         "   • 🐇 خرگوش‌خور: ۲ نفر، ۲۰ خونه؛ هر نفر مخفیانه یه خونه رو پنجه‌ش انتخاب می‌کنه و هرکس خونه‌ی پنجه 🐾 رو باز کنه می‌بازه.",
@@ -8217,7 +8312,7 @@ def build_guide_entries():
         ("🃏 دوتایی‌ها", ['دوتایی', 'دوتایی ها', 'جفت', 'حافظه', 'pairs', 'کارت‌های جفت'],
          f"از لول {CASINO_UNLOCK_LEVEL}؛ ۲ نفر، ۱۶ خونه (۸ جفت)؛ هر نوبت {PAIRS_TURN_SECONDS} ثانیه. هرکس جفت بیشتری پیدا کنه برنده‌ست."),
         ("🎟 شرط‌بندی کازینو", ['ورودی', 'مبلغ ورودی', 'حداکثر ورودی', 'جایزه میز', 'مبلغ شرط', 'شرط'],
-         f"مبلغ ورودی هر نفر حداکثر {RUBY_MAX_ENTRY:,} روب‌پوینت. میز ۶۰ ثانیه برای پیوستن فرصت داره و هر کاربر هر {RUBY_COOLDOWN_SECONDS} ثانیه فقط یک میز جدید می‌سازه یا وارد میز می‌شه."),
+         f"مبلغ ورودی هر نفر حداکثر ۵٬۰۰۰٬۰۰۰ در کازینو و ۲٬۵۰۰٬۰۰۰ در بازی روبی. میز ۶۰ ثانیه برای پیوستن فرصت داره و هر کاربر هر ۹۰ ثانیه در بازی روبی و هر ۴ دقیقه در کازینو می‌سازه یا وارد میز می‌شه."),
         ("🏦 بانک روبی (جزئیات)", ['سود بانک', 'کارمزد', 'کارت به کارت', 'انتقال به کارت', 'افتتاح حساب', 'سپرده'],
          f"از لول ۴؛ افتتاح حساب {BANK_OPEN_COST:,} روب‌پوینت، سود {int(BANK_INTEREST_RATE * 100)}٪ هر ۱۲ ساعت. کارت‌به‌کارت {int(BANK_CARD_TRANSFER_FEE_RATE * 100)}٪ کارمزد داره و هر {BANK_CARD_TRANSFER_COOLDOWN // 60} دقیقه یک‌بار ممکنه."),
         ("💸 انتقال روب‌پوینت", ['انتقال', 'انتقال روب پوینت', 'بفرستم', 'ارسال پوینت', 'پوینت بفرستم', 'روب پوینت بفرستم', 'پول بفرستم', 'هدیه بدم', 'پوینت بدم', 'روب پوینت بدم', 'به دوستم پوینت'],
@@ -9471,6 +9566,14 @@ async def track_city_member_presence(update, context):
 
 
 # ---------- پشتیبانی مستقیم روبی ----------
+
+async def support_button(update, context):
+    q=update.callback_query
+    if q.data != "support:open": return
+    context.user_data["support_waiting"] = True
+    await q.answer()
+    await q.message.reply_text("📩 متن تیکتت را بفرست؛ آیدی عددی و شناسه‌ات همراه پیام برای پشتیبانی ارسال می‌شود.")
+
 async def support_admin_reply(update, context):
     """پاسخ ادمین به پیام پشتیبانی را به کاربر اصلی می‌رساند."""
     msg = update.message
@@ -9492,7 +9595,7 @@ async def support_text(update, context):
     text=(update.message.text or "").strip()
     if text in {"پشتیبانی", "پشتیبان", "ارتباط با پشتیبانی"}:
         context.user_data["support_waiting"]=True
-        await update.message.reply_text("🦊 پیام خودت را بفرست؛ برای پشتیبانی ارسال می‌شود.")
+        await update.message.reply_text("🦊 بخش پشتیبانی را انتخاب کن:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📩 ارسال تیکت", callback_data="support:open")]]))
         return True
     if not context.user_data.get("support_waiting") or update.effective_user.id in ADMIN_IDS:
         return False
@@ -9673,6 +9776,7 @@ def main():
     app.add_handler(CommandHandler("roobam",roobam_command))
     app.add_handler(CommandHandler("leaderboard",leaderboard_command))
     app.add_handler(CallbackQueryHandler(jail_callback_gate), group=-20)
+    app.add_handler(CallbackQueryHandler(support_button,pattern=r"^support:open$"))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
     app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|jailmenu|backup|back)$"))
@@ -9684,15 +9788,16 @@ def main():
     app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|feed|upgrade):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
     app.add_handler(CallbackQueryHandler(referral_admin_button,pattern=r"^ref:(approve|reject):\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs):\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs):\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit|cz_pairs):\d+:\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit|cz_pairs|cz_bomb):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_setup_back,pattern=r"^rubysetup:back:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_dice_bet_select,pattern=r"^rdicebet:\d+:\d+:\d+:(odd|even|high|low)$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_rps_choice,pattern=r"^rrps:\d+:(rock|paper|scissors)$"))
     app.add_handler(CallbackQueryHandler(ruby_xo_move,pattern=r"^rxo:\d+:[0-8]$"))
     app.add_handler(CallbackQueryHandler(ruby_rabbit_choice,pattern=r"^rrabbit:\d+:(?:[0-9]|1[0-9])$"))
+    app.add_handler(CallbackQueryHandler(ruby_bomb_button,pattern=r"^rbomb:(cell|cashout):\d+(?::\d+){1,2}$"))
     app.add_handler(CallbackQueryHandler(ruby_pairs_move,pattern=r"^rpairs:\d+:(?:[0-9]|1[0-9]|2[0-9])$"))
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:(home|storage):\d+$|^remoji:cat:[a-z_]+$"))

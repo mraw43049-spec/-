@@ -25,12 +25,12 @@ def grid(cat,owned):
   row.append(InlineKeyboardButton(f'{e}{"✅" if key(cat,i) in owned else ""}',callback_data=f'remoji:item:{cat}:{i}'))
   if len(row)==4: rows.append(row); row=[]
  if row: rows.append(row)
- rows.append([InlineKeyboardButton('🔙 برگشت',callback_data='remoji:home')]); return InlineKeyboardMarkup(rows)
+ rows.append([InlineKeyboardButton('🔙 برگشت',callback_data='remoji:home:0')]); return InlineKeyboardMarkup(rows)
 def storage_kb(items):
  rows=[]
  for it in items:
   cat,idx=it.item_key.split(':'); rows.append([InlineKeyboardButton(f'{it.emoji}',callback_data=f'remoji:item:{cat}:{idx}')])
- rows += [[InlineKeyboardButton('⬆️ ارتقای ظرفیت (۱۰۰٬۰۰۰)',callback_data='remoji:upgrade:0')],[InlineKeyboardButton('🔙 برگشت',callback_data='remoji:home')]]
+ rows += [[InlineKeyboardButton('⬆️ ارتقای ظرفیت (۱۰۰٬۰۰۰)',callback_data='remoji:upgrade:0')],[InlineKeyboardButton('🔙 برگشت',callback_data='remoji:home:0')]]
  return InlineKeyboardMarkup(rows)
 async def emoji_command(update,context):
  await update.message.reply_text('🛍 ایموجی روبی\n\nیک بخش را انتخاب کن:',reply_markup=main_kb())
@@ -61,18 +61,18 @@ async def emoji_action(update,context):
   if not u: return await q.answer('کاربر پیدا نشد.',show_alert=True)
   if action=='upgrade':
    if (u.fox_points or 0)<STORAGE_UPGRADE_COST: return await q.answer('روب‌پوینت کافی نیست.',show_alert=True)
-   u.fox_points-=STORAGE_UPGRADE_COST; u.emoji_storage_capacity=(u.emoji_storage_capacity or 3)+3; s.commit(); return await q.edit_message_text(f'✅ ظرفیت انبار به {u.emoji_storage_capacity} رسید.')
+   u.fox_points-=STORAGE_UPGRADE_COST; u.emoji_storage_capacity=(u.emoji_storage_capacity or 3)+3; s.commit(); return await q.edit_message_text(f'✅ ظرفیت انبار به {u.emoji_storage_capacity} رسید.', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 برگشت',callback_data='remoji:home:0')]]))
   cat,idx=parts[2],int(parts[3]); t,p,items=CATEGORIES[cat]; e=items[idx]; k=key(cat,idx)
-  if action=='buyno': return await q.edit_message_text('❌ خرید لغو شد.')
+  if action=='buyno': return await q.edit_message_text('❌ خرید لغو شد.', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 برگشت',callback_data='remoji:home:0')]]))
   if action=='buyyes':
    count=s.query(RubyEmojiItem).filter_by(owner_id=u.telegram_id).count(); cap=u.emoji_storage_capacity or 3
    if count>=cap: return await q.answer('📦 انبار شکلک‌ها پر است؛ ارتقا بده یا شکلکی را بفروش.',show_alert=True)
    if (u.fox_points or 0)<p: return await q.answer('روب‌پوینت کافی نیست.',show_alert=True)
-   u.fox_points-=p; s.add(RubyEmojiItem(owner_id=u.telegram_id,item_key=k,emoji=e,category=cat)); s.commit(); return await q.edit_message_text(f'✅ {e} خریداری شد.')
+   u.fox_points-=p; s.add(RubyEmojiItem(owner_id=u.telegram_id,item_key=k,emoji=e,category=cat)); s.commit(); return await q.edit_message_text(f'✅ {e} خریداری شد.', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 برگشت',callback_data=f'remoji:cat:{cat}')]]))
   item=s.query(RubyEmojiItem).filter_by(owner_id=u.telegram_id,item_key=k).first()
   if action=='select':
    if not item:return await q.answer('در انبار نیست.',show_alert=True)
-   u.name_emoji=e; s.commit(); return await q.edit_message_text(f'✅ {e} انتخاب شد.')
+   u.name_emoji=e; s.commit(); return await q.edit_message_text(f'✅ {e} انتخاب شد.', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 برگشت',callback_data=f'remoji:cat:{cat}')]]))
   if action=='sell':
    if not item:return await q.answer('در انبار نیست.',show_alert=True)
    kb=InlineKeyboardMarkup([[InlineKeyboardButton('✅ بله',callback_data=f'remoji:sellyes:{cat}:{idx}'),InlineKeyboardButton('❌ خیر',callback_data=f'remoji:item:{cat}:{idx}')]])
@@ -81,18 +81,22 @@ async def emoji_action(update,context):
    if not item:return await q.answer('در انبار نیست.',show_alert=True)
    s.delete(item); u.fox_points+=(p//2)
    if u.name_emoji==e:u.name_emoji=''
-   s.commit(); return await q.edit_message_text(f'✅ {e} فروخته شد.')
+   s.commit(); return await q.edit_message_text(f'✅ {e} فروخته شد.', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 برگشت',callback_data=f'remoji:cat:{cat}')]]))
   if action=='transfer':
-   context.user_data['emoji_transfer']={'key':k,'cat':cat,'idx':idx,'emoji':e}; return await q.edit_message_text(f'آیدی عددی یا @شناسه مقصد را بفرست.\nکارمزد انتقال: {TRANSFER_FEE:,} روب‌پوینت')
+   context.user_data['emoji_transfer']={'key':k,'cat':cat,'idx':idx,'emoji':e}; return await q.edit_message_text(f'آیدی عددی یا @شناسه مقصد را بفرست.\nکارمزد انتقال: {TRANSFER_FEE:,} روب‌پوینت', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 برگشت',callback_data='remoji:home:0')]]))
   if action in ('transferyes','transferno'):
    data=context.user_data.get('emoji_transfer_confirm')
-   if action=='transferno' or not data: context.user_data.pop('emoji_transfer_confirm',None); return await q.edit_message_text('❌ لغو شد.')
+   if action=='transferno' or not data: context.user_data.pop('emoji_transfer_confirm',None); return await q.edit_message_text('❌ لغو شد.', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 برگشت',callback_data='remoji:home:0')]]))
    item=s.query(RubyEmojiItem).filter_by(owner_id=u.telegram_id,item_key=data['key']).first(); target=s.get(User,int(data['target_id']))
    if not item or not target:return await q.answer('شکلک یا مقصد پیدا نشد.',show_alert=True)
    if (u.fox_points or 0)<TRANSFER_FEE:return await q.answer('برای انتقال ۲۵٬۰۰۰ روب‌پوینت لازم است.',show_alert=True)
    u.fox_points-=TRANSFER_FEE; item.owner_id=target.telegram_id
    if u.name_emoji==data['emoji']:u.name_emoji=''
-   s.commit(); context.user_data.pop('emoji_transfer_confirm',None); return await q.edit_message_text('✅ انتقال انجام شد.')
+   s.commit(); context.user_data.pop('emoji_transfer_confirm',None); 
+   try:
+    await context.bot.send_message(chat_id=target.telegram_id, text=f'🎁 یک شکلک روبی {data["emoji"]} از طرف کاربر {u.username or u.telegram_id} برایت ارسال شد!')
+   except Exception: pass
+   return await q.edit_message_text('✅ انتقال انجام شد.', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 برگشت',callback_data='remoji:home:0')]]))
  finally:s.close()
 async def emoji_transfer_text(update,context):
  data=context.user_data.get('emoji_transfer')
@@ -109,5 +113,5 @@ async def emoji_transfer_text(update,context):
   item=s.query(RubyEmojiItem).filter_by(owner_id=sender.telegram_id,item_key=data['key']).first()
   if not item: await update.message.reply_text('❌ این شکلک در انبار تو نیست.'); return True
   data['target_id']=target.telegram_id; context.user_data['emoji_transfer_confirm']=data
-  await update.message.reply_text(f'آیا از انتقال {data["emoji"]} به {target.username or target.telegram_id} با کارمزد {TRANSFER_FEE:,} مطمئنی؟',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('✅ بله',callback_data=f'remoji:transferyes:{data["cat"]}:{data["idx"]}'),InlineKeyboardButton('❌ خیر',callback_data=f'remoji:transferno:{data["cat"]}:{data["idx"]}')]])); return True
+  await update.message.reply_text(f'آیا از انتقال {data["emoji"]} به {target.username or target.telegram_id} با کارمزد {TRANSFER_FEE:,} مطمئنی؟',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('✅ بله',callback_data=f'remoji:transferyes:{data["cat"]}:{data["idx"]}'),InlineKeyboardButton('❌ خیر',callback_data=f'remoji:transferno:{data["cat"]}:{data["idx"]}')],[InlineKeyboardButton('🔙 برگشت',callback_data='remoji:home:0')]])); return True
  finally:s.close()

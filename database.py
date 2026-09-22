@@ -72,6 +72,7 @@ class User(Base):
     wheel_last_spin_at = Column(DateTime(timezone=True), nullable=True)
     wheel_last_reward = Column(Integer, nullable=True)
     last_ruby_game_at = Column(DateTime(timezone=True), nullable=True)
+    last_casino_game_at = Column(DateTime(timezone=True), nullable=True)
 
     # مریضی روباه (از لول 6 به بعد، هر 48 ساعت یک‌بار)
     fox_sick_since = Column(DateTime(timezone=True), nullable=True)
@@ -500,6 +501,7 @@ def init_db():
         'fox_last_hunger_at': DT_SQL_TYPE,
         'wheel_last_spin_at': DT_SQL_TYPE,
         'wheel_last_reward': 'INTEGER',
+        'last_casino_game_at': DT_SQL_TYPE,
         'last_ruby_game_at': DT_SQL_TYPE,
         'fox_sick_since': DT_SQL_TYPE,
         'fox_sick_reason': 'VARCHAR',
