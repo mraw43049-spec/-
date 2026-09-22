@@ -43,6 +43,7 @@ class User(Base):
     username = Column(String, nullable=True)
     name_flag = Column(String, nullable=False, default='')
     name_emoji = Column(String, nullable=False, default='')
+    emoji_storage_capacity = Column(Integer, nullable=False, default=3)
     first_name = Column(String, nullable=True)
     points = Column(Integer, nullable=False, default=0)
     total_earned = Column(Integer, nullable=False, default=0)
@@ -479,6 +480,7 @@ def init_db():
         'total_earned': 'INTEGER NOT NULL DEFAULT 0',
         'name_flag': "VARCHAR NOT NULL DEFAULT ''",
         'name_emoji': "VARCHAR NOT NULL DEFAULT ''",
+        'emoji_storage_capacity': 'INTEGER NOT NULL DEFAULT 3',
         'fox_name': "VARCHAR DEFAULT 'مکار'",
         'fox_level': 'INTEGER NOT NULL DEFAULT 1',
         'fox_belly': 'INTEGER NOT NULL DEFAULT 3',

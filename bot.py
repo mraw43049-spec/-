@@ -1290,9 +1290,7 @@ def dice_bet_wins(bet, my_value, other_value):
 
 # اسلات: بر اساس اسلات‌ماشین تلگرام (dice.value از 1 تا 64).
 # value=43 یعنی سه‌تا لیمو 🍋 و value=64 یعنی سه‌تا هفت 7️⃣ (جکپات).
-WHEEL_WIN_THRESHOLD = 50  # بالای این امتیاز، جایزه‌ی عادی تعلق می‌گیره.
-WHEEL_WIN_MULTIPLIER = 1.5  # ضریب جایزه‌ی عادی (امتیاز بالای 50).
-WHEEL_JACKPOT_MULTIPLIER = 2.7  # ضریب جایزه وقتی دقیقاً 7️⃣7️⃣7️⃣ (جکپات) بیاد.
+# ضرایب اسلات تک‌نفره بر اساس امتیاز نهایی
 # دیکد مقدار اسلات‌ماشین تلگرام (1 تا 64) به سه مهره‌ی هر ردیف.
 # فرمول استاندارد: v=value-1 در مبنای 4 نوشته می‌شه؛ رقم‌ها: 0=BAR ، 1=🍇 ، 2=🍋 ، 3=7️⃣
 WHEEL_REEL_SYMBOL = {0: "🅱️BAR", 1: "🍇", 2: "🍋", 3: "7️⃣"}
@@ -2492,7 +2490,7 @@ async def ruby_dice_reply(update, context):
         finished = all(i in scores for i in ids)
 
         if game_type == 'cz_wheel':
-            wheel_wins = {}; wheel_winner = None; wheel_tiebreak = False; wheel_pot = t.pot or 0
+            wheel_wins = {}; wheel_multipliers = {}; wheel_winner = None; wheel_tiebreak = False; wheel_pot = t.pot or 0
             wheel_multi = len(ids) > 1
             if finished:
                 t.status = 'finished'
@@ -2509,15 +2507,27 @@ async def ruby_dice_reply(update, context):
                         u = session.get(User, wheel_winner)
                         if u: u.fox_points = (u.fox_points or 0) + wheel_pot
                 else:
-                    # تک‌نفره: مقابل خانه؛ امتیاز بالای آستانه جایزه می‌گیره.
+                    # تک‌نفره: ضریب دقیق بر اساس امتیاز نهایی
                     for uid, v in scores.items():
                         pts, _combo = wheel_score(v)
-                        if pts > WHEEL_WIN_THRESHOLD:
-                            multiplier = WHEEL_JACKPOT_MULTIPLIER if wheel_is_jackpot(v) else WHEEL_WIN_MULTIPLIER
-                            win_amount = int(round(t.entry_amount * multiplier))
+                        if pts < 30:
+                            multiplier = 0.0
+                        elif pts <= 39:
+                            multiplier = 0.5
+                        elif pts <= 45:
+                            multiplier = 1.0
+                        elif pts <= 49:
+                            multiplier = 1.5
+                        elif pts <= 53:
+                            multiplier = 1.7
+                        else:
+                            multiplier = 2.0
+                        wheel_multipliers[uid] = multiplier
+                        win_amount = int(round(t.entry_amount * multiplier))
+                        if win_amount > 0:
                             wheel_wins[uid] = win_amount
                             u = session.get(User, uid)
-                            if u and win_amount > 0: u.fox_points = (u.fox_points or 0) + win_amount
+                            if u: u.fox_points = (u.fox_points or 0) + win_amount
             players = [session.get(User, i) for i in ids]
             name = RUBY_GAME_CONFIG[t.game_type][0]
             entry = t.entry_amount; chat_id = t.chat_id; message_id = t.message_id
@@ -2597,10 +2607,15 @@ async def ruby_dice_reply(update, context):
                         lines.append(f"{i+1}️⃣ {uname} — {combo} ({_pts} امتیاز) {mark}")
                     else:
                         lines.append(f"{i+1}️⃣ {uname} — {combo} ({_pts} امتیاز)")
-                elif uid in wheel_wins:
-                    lines.append(f"{i+1}️⃣ {uname} — {combo} 🎉 برد {wheel_wins[uid]:,} روب‌پوینت")
+                elif uid in wheel_multipliers:
+                    mult = wheel_multipliers[uid]
+                    reward = wheel_wins.get(uid, 0)
+                    if reward > 0:
+                        lines.append(f"{i+1}️⃣ {uname} — {combo} ({_pts} امتیاز | ضریب {mult:g}) 🎉 برد {reward:,} روب‌پوینت")
+                    else:
+                        lines.append(f"{i+1}️⃣ {uname} — {combo} ({_pts} امتیاز | ضریب {mult:g}) ❌ بدون جایزه")
                 else:
-                    lines.append(f"{i+1}️⃣ {uname} — {combo} ❌ باخت")
+                    lines.append(f"{i+1}️⃣ {uname} — {combo} ({_pts} امتیاز) ❌ باخت")
             else:
                 lines.append(f"{i+1}️⃣ {uname} — ⏳ در انتظار چرخوندن")
         if wheel_multi:
@@ -6572,7 +6587,7 @@ async def roobam_command(update,context):
     try:
         user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0);ref_count=session.query(Referral).filter(Referral.referrer_id==user.telegram_id,Referral.status=='approved').count();ref_rank=session.query(Referral.referrer_id).filter(Referral.status=='approved').group_by(Referral.referrer_id).having(__import__('sqlalchemy').func.count(Referral.id)>ref_count).count()+1
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
-        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
     finally:session.close()
     await update.message.reply_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(user_display_name(user),url=f"tg://user?id={user.telegram_id}")]]),**reply_kwargs(update.message))
 
@@ -9680,9 +9695,9 @@ def main():
     app.add_handler(CallbackQueryHandler(ruby_rabbit_choice,pattern=r"^rrabbit:\d+:(?:[0-9]|1[0-9])$"))
     app.add_handler(CallbackQueryHandler(ruby_pairs_move,pattern=r"^rpairs:\d+:(?:[0-9]|1[0-9]|2[0-9])$"))
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
-    app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:(home|cat):[a-z_]+$"))
+    app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:(home|storage):\d+$|^remoji:cat:[a-z_]+$"))
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:item:[a-z_]+:\d+$"))
-    app.add_handler(CallbackQueryHandler(emoji_action, pattern=r"^remoji:(buyyes|buyno|select|transfer|sell|sellyes|transferyes|transferno):[a-z_0-9]+:\d+$"))
+    app.add_handler(CallbackQueryHandler(emoji_action, pattern=r"^remoji:(buyyes|buyno|select|transfer|sell|sellyes|transferyes|transferno):[a-z_0-9]+:\d+$|^remoji:upgrade:\d+$"))
     app.add_handler(CallbackQueryHandler(education_topic, pattern=r"^edutopic:(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_unlock, pattern=r"^eduunlock:(yes|no):(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_certificate, pattern=r"^educert:(yes|no)$"))
