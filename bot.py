@@ -1295,8 +1295,8 @@ def dice_bet_wins(bet, my_value, other_value):
 # ضرایب اسلات تک‌نفره بر اساس امتیاز نهایی
 # دیکد مقدار اسلات‌ماشین تلگرام (1 تا 64) به سه مهره‌ی هر ردیف.
 # فرمول استاندارد: v=value-1 در مبنای 4 نوشته می‌شه؛ رقم‌ها: 0=BAR ، 1=🍇 ، 2=🍋 ، 3=7️⃣
-WHEEL_REEL_SYMBOL = {0: "🅱️BAR", 1: "🍇", 2: "🍋", 3: "7️⃣"}
-WHEEL_REEL_POINTS = {0: 10, 1: 15, 2: 18, 3: 20}
+WHEEL_REEL_SYMBOL = {0: "bar", 1: "🍇", 2: "🍋", 3: "7️⃣"}
+WHEEL_REEL_POINTS = {0: 2, 1: 9, 2: 13, 3: 20}
 
 def wheel_decode(value):
     v = value - 1
@@ -2483,7 +2483,12 @@ def _parse_ruby_scores(raw):
 
 BOMB_CELLS = 25
 BOMB_COUNT = 3
-BOMB_REWARD_PER_SAFE = 2000
+BOMB_REWARD_FIRST = 2000
+
+def bomb_reward(safe):
+    """پاداش تجمعی: خانه اول ۲۰۰۰، خانه دوم ۴۰۰۰ و هر بار دو برابر افزایش می‌یابد."""
+    safe = max(0, int(safe or 0))
+    return BOMB_REWARD_FIRST * ((2 ** safe) - 1)
 
 def bomb_keyboard(tid, state, owner_id):
     revealed = set(state.get("revealed", []))
@@ -2499,11 +2504,11 @@ def bomb_keyboard(tid, state, owner_id):
     return InlineKeyboardMarkup(rows)
 
 def bomb_text(state, name, entry):
-    safe=int(state.get("safe",0)); reward=safe*BOMB_REWARD_PER_SAFE
+    safe=int(state.get("safe",0)); reward=bomb_reward(safe)
     return (f"💥 {name}\n\n🧩 خانه‌های سالم: {safe}/{BOMB_CELLS-BOMB_COUNT}\n"
             f"💰 جایزه فعلی: {reward:,} روب‌پوینت\n"
             "⚠️ سه بمب مخفی‌اند؛ پیدا کردن بمب بازی را تمام می‌کند و جایزه‌ای نمی‌گیری.\n"
-            "هر خانه سالم: +۲٬۰۰۰ روب‌پوینت")
+            "پاداش خانه‌ها تجمعی است: ۲٬۰۰۰، سپس ۴٬۰۰۰، سپس ۸٬۰۰۰ و ...")
 
 async def ruby_bomb_button(update, context):
     q=update.callback_query; parts=q.data.split(":")
@@ -2524,7 +2529,7 @@ async def ruby_bomb_button(update, context):
             await q.answer("این بازی تمام شده.", show_alert=True); return
         state=json.loads(t.state or '{}')
         if action=='cashout':
-            reward=int(state.get('safe',0))*BOMB_REWARD_PER_SAFE
+            reward=bomb_reward(state.get('safe',0))
             t.status='finished'; state['ended']='cashout'
             u=session.get(User,owner)
             if u and reward: u.fox_points=(u.fox_points or 0)+reward
@@ -2540,14 +2545,14 @@ async def ruby_bomb_button(update, context):
                 await q.answer("💥 بمب!", show_alert=True)
             else:
                 state.setdefault('revealed',[]).append(idx); state['safe']=int(state.get('safe',0))+1
-                reward=int(state['safe'])*BOMB_REWARD_PER_SAFE
+                reward=bomb_reward(state['safe'])
                 if state['safe']>=BOMB_CELLS-BOMB_COUNT:
                     t.status='finished'; state['ended']='all_safe'; u=session.get(User,owner)
                     if u: u.fox_points=(u.fox_points or 0)+reward
                     session.commit(); text=bomb_text(state,RUBY_GAME_CONFIG['cz_bomb'][0],t.entry_amount)+f"\n\n🏆 همه خانه‌های سالم پیدا شد! جایزه: {reward:,} روب‌پوینت"; chat_id=t.chat_id; mid=t.message_id
                 else:
                     t.state=json.dumps(state); session.commit(); text=bomb_text(state,RUBY_GAME_CONFIG['cz_bomb'][0],t.entry_amount); chat_id=t.chat_id; mid=t.message_id
-                await q.answer("✅ خانه سالم بود! +۲٬۰۰۰")
+                await q.answer(f"✅ خانه سالم بود! جایزه کل: {reward:,}", show_alert=True)
         kb=None if t.status=='finished' else bomb_keyboard(tid,state,owner)
     finally: session.close()
     try: await context.bot.edit_message_text(chat_id=chat_id,message_id=mid,text=text,reply_markup=kb)
@@ -2699,18 +2704,18 @@ async def ruby_dice_reply(update, context):
                 if wheel_multi:
                     if finished:
                         mark = "🏆" if uid == wheel_winner else "❌"
-                        lines.append(f"{i+1}️⃣ {uname} — {combo} ({_pts} امتیاز) {mark}")
+                        lines.append(f"{i+1}️⃣ {uname} — امتیاز کل: {_pts} {mark}")
                     else:
-                        lines.append(f"{i+1}️⃣ {uname} — {combo} ({_pts} امتیاز)")
+                        lines.append(f"{i+1}️⃣ {uname} — امتیاز کل: {_pts}")
                 elif uid in wheel_multipliers:
                     mult = wheel_multipliers[uid]
                     reward = wheel_wins.get(uid, 0)
                     if reward > 0:
-                        lines.append(f"{i+1}️⃣ {uname} — {combo} ({_pts} امتیاز | ضریب {mult:g}) 🎉 برد {reward:,} روب‌پوینت")
+                        lines.append(f"{i+1}️⃣ {uname} — امتیاز کل: {_pts} | ضریب {mult:g} 🎉 برد {reward:,} روب‌پوینت")
                     else:
-                        lines.append(f"{i+1}️⃣ {uname} — {combo} ({_pts} امتیاز | ضریب {mult:g}) ❌ بدون جایزه")
+                        lines.append(f"{i+1}️⃣ {uname} — امتیاز کل: {_pts} | ضریب {mult:g} ❌ بدون جایزه")
                 else:
-                    lines.append(f"{i+1}️⃣ {uname} — {combo} ({_pts} امتیاز) ❌ باخت")
+                    lines.append(f"{i+1}️⃣ {uname} — امتیاز کل: {_pts} ❌ باخت")
             else:
                 lines.append(f"{i+1}️⃣ {uname} — ⏳ در انتظار چرخوندن")
         if wheel_multi:
@@ -5953,7 +5958,7 @@ async def _send_to_user_safe(bot, uid, text, max_retries=3):
     return False
 
 
-async def broadcast_to_users(bot, user_ids, text, delay=0.05):
+async def broadcast_to_users(bot, user_ids, text, delay=0.04):
     """
     پیام رو یکی‌یکی به کاربرا می‌فرسته، با یه فاصله‌ی کوچیک بین هر ارسال تا به
     محدودیت نرخ ارسال تلگرام (حدود ۳۰ پیام در ثانیه) نخوریم. قبلاً همه‌ی پیام‌ها
@@ -6178,10 +6183,13 @@ async def admin_text(update, context):
     context.user_data["ai_skip_msg"]=update.message.message_id   # همین پیام ورودی فرم ادمینه؛ چت هوشمند جوابش نده
     if action == "broadcast":
         session=get_session()
-        try: users=[u.telegram_id for u in session.query(User).all()]
+        try:
+            users=[u.telegram_id for u in session.query(User).all()]
+            groups=[c.chat_id for c in session.query(GroupChat).filter(GroupChat.active == 1).all()]
         finally: session.close()
-        await update.message.reply_text(f"📣 در حال ارسال به {len(users)} کاربر... ممکنه چند دقیقه طول بکشه.", **reply_kwargs(update.message))
-        ok, fail = await broadcast_to_users(context.bot, users, "📢 پیام مدیریت:\n\n"+text)
+        recipients = list(dict.fromkeys(users + groups))
+        await update.message.reply_text(f"📣 در حال ارسال به {len(recipients)} مقصد (کاربر و گپ)... ممکنه چند دقیقه طول بکشه.", **reply_kwargs(update.message))
+        ok, fail = await broadcast_to_users(context.bot, recipients, "📢 پیام مدیریت:\n\n"+text)
         await update.message.reply_text(f"✅ ارسال شد: {ok}\n❌ ناموفق (بلاک/حذف حساب): {fail}", **reply_kwargs(update.message)); return
     if action == "giftall":
         cleaned = text.replace(",", "").replace("،", "").strip()
@@ -9607,10 +9615,19 @@ async def support_text(update, context):
             f"👤 شناسه کاربری: {username}\n"
             f"📛 نام: {u.full_name}\n\n"
             f"💬 پیام کاربر:")
+    delivered = 0
     for aid in ADMIN_IDS:
-        sent=await context.bot.send_message(chat_id=aid,text=header+"\n"+(update.message.text or ""),parse_mode="Markdown")
-        context.application.bot_data.setdefault("support_message_map",{})[sent.message_id]=u.id
-    await update.message.reply_text("✅ پیام تو برای پشتیبانی ارسال شد. پاسخ در همین ربات برایت می‌آید.")
+        try:
+            sent=await context.bot.send_message(chat_id=aid,text=header+"\n"+(update.message.text or ""),parse_mode="Markdown")
+            context.application.bot_data.setdefault("support_message_map",{})[sent.message_id]=u.id
+            delivered += 1
+        except Exception as exc:
+            logger.warning("support ticket delivery failed for admin %s: %s", aid, exc)
+    if delivered:
+        await update.message.reply_text("✅ تیکت برای پشتیبانی ارسال شد. در اسرع وقت جواب خواهد داد. منتظر بمانید.")
+    else:
+        context.user_data["support_waiting"] = True
+        await update.message.reply_text("⚠️ فعلاً ارسال تیکت با مشکل روبه‌رو شد؛ لطفاً دوباره چند لحظه بعد تلاش کن.")
     return True
 
 async def admin_message_router(update, context):
