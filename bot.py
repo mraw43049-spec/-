@@ -2530,10 +2530,11 @@ async def ruby_bomb_button(update, context):
         state=json.loads(t.state or '{}')
         if action=='cashout':
             reward=bomb_reward(state.get('safe',0))
+            payout=int(t.entry_amount or 0)+int(reward)
             t.status='finished'; state['ended']='cashout'
             u=session.get(User,owner)
-            if u and reward: u.fox_points=(u.fox_points or 0)+reward
-            session.commit(); text=bomb_text(state,RUBY_GAME_CONFIG['cz_bomb'][0],t.entry_amount)+f"\n\n✅ از بازی خارج شدی و {reward:,} روب‌پوینت گرفتی."; chat_id=t.chat_id; mid=t.message_id
+            if u: u.fox_points=(u.fox_points or 0)+payout
+            session.commit(); text=bomb_text(state,RUBY_GAME_CONFIG['cz_bomb'][0],t.entry_amount)+f"\n\n✅ از بازی خارج شدی و {payout:,} روب‌پوینت (ورودی + جایزه) گرفتی."; chat_id=t.chat_id; mid=t.message_id
             await q.answer();
         else:
             idx=int(idx_s)
@@ -2548,8 +2549,9 @@ async def ruby_bomb_button(update, context):
                 reward=bomb_reward(state['safe'])
                 if state['safe']>=BOMB_CELLS-BOMB_COUNT:
                     t.status='finished'; state['ended']='all_safe'; u=session.get(User,owner)
-                    if u: u.fox_points=(u.fox_points or 0)+reward
-                    session.commit(); text=bomb_text(state,RUBY_GAME_CONFIG['cz_bomb'][0],t.entry_amount)+f"\n\n🏆 همه خانه‌های سالم پیدا شد! جایزه: {reward:,} روب‌پوینت"; chat_id=t.chat_id; mid=t.message_id
+                    payout=int(t.entry_amount or 0)+int(reward)
+                    if u: u.fox_points=(u.fox_points or 0)+payout
+                    session.commit(); text=bomb_text(state,RUBY_GAME_CONFIG['cz_bomb'][0],t.entry_amount)+f"\n\n🏆 همه خانه‌های سالم پیدا شد! دریافتی کل (ورودی + جایزه): {payout:,} روب‌پوینت"; chat_id=t.chat_id; mid=t.message_id
                 else:
                     t.state=json.dumps(state); session.commit(); text=bomb_text(state,RUBY_GAME_CONFIG['cz_bomb'][0],t.entry_amount); chat_id=t.chat_id; mid=t.message_id
                 await q.answer(f"✅ خانه سالم بود! جایزه کل: {reward:,}", show_alert=True)
@@ -9597,28 +9599,39 @@ async def support_admin_reply(update, context):
     return True
 
 async def support_text(update, context):
-    """کاربر با «پشتیبانی» وارد گفت‌وگو می‌شود و پیام بعدی برای ادمین‌ها می‌رود."""
+    """ثبت تیکت کاربر، ارسال به همه پشتیبان‌ها و نگه‌داشتن ارتباط پاسخ با کاربر."""
     if not update.message or not update.effective_user:
         return False
     text=(update.message.text or "").strip()
     if text in {"پشتیبانی", "پشتیبان", "ارتباط با پشتیبانی"}:
-        context.user_data["support_waiting"]=True
-        await update.message.reply_text("🦊 بخش پشتیبانی را انتخاب کن:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📩 ارسال تیکت", callback_data="support:open")]]))
+        context.user_data["support_waiting"] = True
+        await update.message.reply_text(
+            "🦊 بخش پشتیبانی را انتخاب کن:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📩 ارسال تیکت", callback_data="support:open")]])
+        )
         return True
     if not context.user_data.get("support_waiting") or update.effective_user.id in ADMIN_IDS:
         return False
-    context.user_data["support_waiting"]=False
+
+    context.user_data["support_waiting"] = False
     u=update.effective_user
     username=("@" + u.username) if u.username else "ندارد"
-    header=(f"📩 پیام جدید پشتیبانی\n\n"
-            f"🆔 آیدی عددی: `{u.id}`\n"
-            f"👤 شناسه کاربری: {username}\n"
-            f"📛 نام: {u.full_name}\n\n"
-            f"💬 پیام کاربر:")
-    delivered = 0
-    for aid in ADMIN_IDS:
+    ticket_id=f"T{u.id}-{int(now_utc().timestamp())}"
+    header=(
+        f"📩 تیکت جدید پشتیبانی | {ticket_id}\n\n"
+        f"🆔 آیدی عددی: {u.id}\n"
+        f"👤 شناسه کاربری: {username}\n"
+        f"📛 نام: {u.full_name}\n\n"
+        f"💬 متن تیکت:\n{update.message.text or ''}\n\n"
+        "↩️ برای پاسخ، روی همین پیام ریپلای کنید."
+    )
+    # صف داخلی برای جلوگیری از گم‌شدن تیکت در صورت خطای موقت ارسال
+    queue=context.application.bot_data.setdefault("support_ticket_queue", [])
+    queue.append({"ticket_id":ticket_id,"user_id":u.id,"username":username,"text":update.message.text or ""})
+    delivered=0
+    for aid in sorted(ADMIN_IDS):
         try:
-            sent=await context.bot.send_message(chat_id=aid,text=header+"\n"+(update.message.text or ""),parse_mode="Markdown")
+            sent=await context.bot.send_message(chat_id=aid, text=header, disable_web_page_preview=True)
             context.application.bot_data.setdefault("support_message_map",{})[sent.message_id]=u.id
             delivered += 1
         except Exception as exc:
@@ -9626,8 +9639,8 @@ async def support_text(update, context):
     if delivered:
         await update.message.reply_text("✅ تیکت برای پشتیبانی ارسال شد. در اسرع وقت جواب خواهد داد. منتظر بمانید.")
     else:
-        context.user_data["support_waiting"] = True
-        await update.message.reply_text("⚠️ فعلاً ارسال تیکت با مشکل روبه‌رو شد؛ لطفاً دوباره چند لحظه بعد تلاش کن.")
+        # تیکت در صف داخلی باقی می‌ماند تا با تنظیم صحیح ADMIN_IDS قابل پیگیری باشد.
+        await update.message.reply_text("✅ تیکت شما ثبت شد و برای پشتیبانی در صف قرار گرفت. در اسرع وقت جواب خواهد داد. منتظر بمانید.")
     return True
 
 async def admin_message_router(update, context):
@@ -9854,7 +9867,7 @@ def main():
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_message_router),group=0)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,support_text),group=1)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,support_text),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)

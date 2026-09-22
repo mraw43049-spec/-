@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""روباهیو درس: پنج موضوع، سؤال‌های سه‌گزینه‌ای، زمان ۱۵ ثانیه و مدارک."""
+"""روباهیو درس: پنج موضوع، سؤال‌های سه‌گزینه‌ای، زمان ۱۵ ثانیه و فاصله ۲۵ دقیقه‌ای و مدارک."""
 import json, random
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import Column, BigInteger, Integer, String, DateTime
@@ -117,8 +117,8 @@ async def education_command(update, context):
         lines.append("\n"+_progress_text(p))
         if p.pending_certificate:
             lines.append(f"\n🎓 برای دریافت مدرک {_name(p.certificates+1)} باید { _tuition(p.certificates):,} روب‌پوینت شهریه پرداخت کنی.")
-        if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1800:
-            left=1800-int((_now()-_aware(p.last_play_at)).total_seconds())
+        if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1500:
+            left=1500-int((_now()-_aware(p.last_play_at)).total_seconds())
             return await update.message.reply_text("\n".join(lines)+f"\n\n⏳ سؤال بعدی تا {left//60} دقیقه دیگر.")
         await update.message.reply_text("\n".join(lines)+"\n\nبرای شروع، موضوع را انتخاب کن:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(TOPICS[k][0],callback_data=f"edutopic:{k}")] for k in TOPICS]))
     finally: s.close()
@@ -130,7 +130,7 @@ async def education_topic(update, context):
         if not p or not u: return await q.answer("ابتدا ربات را استارت کن.",show_alert=True)
         if topic not in set((p.unlocked or "general").split(",")):
             return await q.edit_message_text(f"🔒 {TOPICS[topic][0]}\n\nبرای بازکردن این موضوع ۳۰٬۰۰۰ روب‌پوینت لازم است.\nآیا خرید را تأیید می‌کنی؟", reply_markup=_confirm_unlock(topic))
-        if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1800: return await q.answer("هر ۳۰ دقیقه یک سؤال مجاز است.",show_alert=True)
+        if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1500: return await q.answer("هر ۲۵ دقیقه یک سؤال مجاز است.",show_alert=True)
         return await _start_question(q,s,p,topic)
     finally: s.close()
 
@@ -153,7 +153,7 @@ async def education_unlock(update, context):
         unlocked=set((p.unlocked or "general").split(","))
         if topic not in unlocked: unlocked.add(topic); p.unlocked=",".join(sorted(unlocked)); u.fox_points-=30000
         s.commit(); await q.answer("موضوع با موفقیت خریداری شد ✅")
-        if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1800: return await q.edit_message_text("✅ موضوع باز شد. هر ۳۰ دقیقه یک سؤال مجاز است.")
+        if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1500: return await q.edit_message_text("✅ موضوع باز شد. هر ۲۵ دقیقه یک سؤال مجاز است.")
         await _start_question(q,s,p,topic)
     finally: s.close()
 
@@ -168,7 +168,7 @@ async def education_answer(update, context):
         seen=json.loads(p.answered or "{}"); seen.setdefault(topic,[]).append(qid); p.answered=json.dumps(seen)
         p.active_topic=None; p.active_question=None; p.active_expires=None
         if choice!=correct:
-            s.commit(); return await q.edit_message_text("❌ پاسخ اشتباه بود؛ بازی تمام شد. ۳۰ دقیقه بعد دوباره تلاش کن.")
+            s.commit(); return await q.edit_message_text("❌ پاسخ اشتباه بود؛ بازی تمام شد. ۲۵ دقیقه بعد دوباره تلاش کن.")
         p.correct_answers=int(p.correct_answers or 0)+1; p.correct=int(p.correct or 0)+2
         msg=f"✅ درست! +۲ واحد\n📊 مجموع واحدها: {p.correct}\n🎯 پاسخ‌های درست: {p.correct_answers}"
         if p.certificates<15 and p.correct_answers>=_threshold(p.certificates):
