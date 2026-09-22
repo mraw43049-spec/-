@@ -1459,7 +1459,7 @@ def render_rabbit_panel(tid,name,pot_line,ids,names_by_id,state):
 PAIRS_TOTAL_CELLS = 16   # ۴×۴
 PAIRS_TOTAL_PAIRS = 8
 PAIRS_TURN_SECONDS = 60
-PAIRS_MISMATCH_REVEAL_SECONDS = 0.15
+PAIRS_MISMATCH_REVEAL_SECONDS = 1.3
 PAIRS_SYMBOLS = ["🍒","🍋","🍇","🍉","🍊","🥝","🍎","🍓","🍌","🥥","🍍","🥕","🌟","💎","🦊"]
 
 def pairs_keyboard(tid, state):
@@ -1546,7 +1546,13 @@ async def pairs_turn_timeout(context):
         if not t or t.status!='active' or t.game_type!='cz_pairs':
             return
         state=json.loads(t.state or '{}')
-        if state.get("turn_token")!=token or state.get("lock"):
+        if state.get("turn_token")!=token:
+            return
+        if state.get("lock"):
+            # این نوبت درست همین حین نمایش دو کارت نامنقی تموم شده؛ کمی بعد دوباره چک کن
+            # (خودِ pairs_mismatch_next_turn به‌زودی توکن رو عوض می‌کنه یا نوبت واقعاً تمومه)
+            if context.job_queue:
+                context.job_queue.run_once(pairs_turn_timeout,PAIRS_MISMATCH_REVEAL_SECONDS+0.5,data=data)
             return
         left=pairs_remaining_seconds(state)
         if left>0:
@@ -1555,28 +1561,31 @@ async def pairs_turn_timeout(context):
             return
         ids=[int(x) for x in (t.players or '').split(',') if x]
         current=state.get("turn")
-        other=[uid for uid in ids if uid!=current][0]
-        state["turn"]=other
-        state["turn_started_at"]=now_utc().isoformat()
-        state["turn_token"]=f"{tid}-{other}-{int(now_utc().timestamp()*1000)}"
+        if current not in ids or len(ids)<2:
+            return
+        winner=[uid for uid in ids if uid!=current][0]
+        t.status='finished'
+        state["turn_token"]=None
+        pot=t.pot or 0
+        if pot:
+            u=session.get(User,winner)
+            if u: u.fox_points=(u.fox_points or 0)+pot
         t.state=json.dumps(state)
         players=[session.get(User,i) for i in ids]
         names={u.telegram_id:user_mention(u) for u in players if u}
-        chat_id=t.chat_id; message_id=t.message_id; newtoken=state["turn_token"]
-        pot=t.pot; entry=t.entry_amount
+        chat_id=t.chat_id; message_id=t.message_id
+        scores=state.get("scores",{})
         session.commit()
     finally:
         session.close()
-    text,kb=render_pairs_panel(tid,RUBY_GAME_CONFIG['cz_pairs'][0],
-        f"\n🏆 جایزه میز: {pot:,} روب‌پوینت" if entry>0 else "",ids,names,state,
-        extra=f"⏰ نوبت {names.get(current,str(current))} تمام شد؛ نوبت {names.get(other,str(other))} است.")
+    score_lines="\n".join(f"👤 {names.get(uid,str(uid))} — {scores.get(str(uid),0)} جفت" for uid in ids)
+    text=(f"🃏 {RUBY_GAME_CONFIG['cz_pairs'][0]}\n\n⏰ نوبت {names.get(current,str(current))} تمام شد و در {PAIRS_TURN_SECONDS} ثانیه حرکت نکرد.\n"
+          f"🏁 بازی تمام شد!\n\n{score_lines}\n\n🏆 {names.get(winner,str(winner))} برنده شد!"
+          + (f"\n💰 جایزه: {pot:,} روب‌پوینت" if pot else ""))
     try:
-        await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+        await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=None)
     except Exception:
         pass
-    if context.job_queue:
-        context.job_queue.run_once(pairs_turn_timeout,PAIRS_TURN_SECONDS,data={"tid":tid,"token":newtoken})
-        context.job_queue.run_once(_pairs_refresh,1,data={"tid":tid,"token":newtoken})
 
 async def pairs_mismatch_next_turn(context):
     data=context.job.data
@@ -1638,6 +1647,7 @@ async def ruby_pairs_move(update,context):
             await q.answer("⏳ نتیجه این دو کارت در حال نمایش است.",show_alert=True); return
         if pairs_remaining_seconds(state)<=0:
             await q.answer("⏰ زمان این نوبت تمام شده؛ صبر کن تا نوبت بعدی شروع شود.",show_alert=True); return
+        original_token=state.get("turn_token")
         deck=state.get("deck",[])
         matched=set(state.get("matched",[]))
         opened=list(state.get("open",[]))
@@ -1714,7 +1724,10 @@ async def ruby_pairs_move(update,context):
         if context.job_queue:
             context.job_queue.run_once(pairs_mismatch_next_turn,PAIRS_MISMATCH_REVEAL_SECONDS,
                                        data={"tid":tid,"token":state_snapshot["turn_token"]})
-    elif newtoken and context.job_queue:
+    elif newtoken and newtoken!=original_token and context.job_queue:
+        # فقط وقتی نوبت واقعاً عوض شده (جفت پیدا شد) تایمر و رفرش جدید بساز؛
+        # برای «باز کردن کارت اول» توکن عوض نمی‌شه و تایمرِ همون نوبت که از قبل زمان‌بندی شده کافیه
+        # (ساختن تایمر تکراری با توکن قدیمی همون چیزیه که باعث گیر کردن گاه‌به‌گاه میز می‌شد)
         context.job_queue.run_once(pairs_turn_timeout,PAIRS_TURN_SECONDS,data={"tid":tid,"token":newtoken})
         context.job_queue.run_once(_pairs_refresh,1,data={"tid":tid,"token":newtoken})
 
