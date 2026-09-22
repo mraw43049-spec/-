@@ -26,7 +26,7 @@ from database import (
 import ai_service as ai
 import fox_brain as brain
 import fox_spell as spell
-from education import education_command, education_topic, education_answer
+from education import education_command, education_topic, education_answer, education_unlock, education_certificate, education_profile_line
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
     fox_production_interval, fox_production_per_second, fox_rank, fox_upgrade_cost, fox_storage_capacity, get_level_for_points,
@@ -6518,7 +6518,41 @@ async def membership_callback(update, context):
     else: await q.answer("هنوز عضویتت تأیید نشده.",show_alert=True)
 
 
-def user_display_name(user):return user.username or user.first_name or str(user.telegram_id)
+FLAG_OPTIONS = [
+    ("🇮🇷", "ایران"), ("🇦🇿", "آذربایجان"), ("🇹🇷", "ترکیه"), ("🇮🇶", "عراق"), ("🇦🇫", "افغانستان"),
+    ("🇵🇰", "پاکستان"), ("🇮🇳", "هند"), ("🇨🇳", "چین"), ("🇯🇵", "ژاپن"), ("🇰🇷", "کره جنوبی"),
+    ("🇷🇺", "روسیه"), ("🇺🇦", "اوکراین"), ("🇩🇪", "آلمان"), ("🇫🇷", "فرانسه"), ("🇬🇧", "بریتانیا"),
+    ("🇮🇹", "ایتالیا"), ("🇪🇸", "اسپانیا"), ("🇵🇹", "پرتغال"), ("🇺🇸", "آمریکا"), ("🇨🇦", "کانادا"),
+    ("🇧🇷", "برزیل"), ("🇦🇷", "آرژانتین"), ("🇲🇽", "مکزیک"), ("🇪🇬", "مصر"), ("🇸🇦", "عربستان"),
+    ("🇦🇪", "امارات"), ("🇶🇦", "قطر"), ("🇿🇦", "آفریقای جنوبی"), ("🇦🇺", "استرالیا"), ("🇬🇷", "یونان"),
+]
+
+def user_display_name(user):
+    base = user.username or user.first_name or str(user.telegram_id)
+    flag = getattr(user, 'name_flag', '') or ''
+    return f"{flag} {base}".strip()
+
+async def flag_command(update, context):
+    if not await require_membership(update, context): return
+    rows=[]
+    for i,(emoji,country) in enumerate(FLAG_OPTIONS):
+        rows.append([InlineKeyboardButton(f"{emoji} {country}", callback_data=f"flag:set:{i}")])
+    rows.append([InlineKeyboardButton("❌ حذف پرچم", callback_data="flag:clear:0")])
+    await update.message.reply_text("🌍 پرچم روباهیو را انتخاب کن؛ کنار نامت در نمایش‌های داخل ربات دیده می‌شود.", reply_markup=InlineKeyboardMarkup(rows), **reply_kwargs(update.message))
+
+async def flag_callback(update, context):
+    q=update.callback_query; parts=q.data.split(":"); action=parts[1]; s=get_session()
+    try:
+        u=s.get(User,q.from_user.id)
+        if not u: return await q.answer("ابتدا ربات را استارت کن.", show_alert=True)
+        if action == 'clear': u.name_flag=''; label='بدون پرچم'
+        else:
+            idx=int(parts[2]);
+            if idx<0 or idx>=len(FLAG_OPTIONS): return await q.answer("انتخاب نامعتبر است.",show_alert=True)
+            u.name_flag=FLAG_OPTIONS[idx][0]; label=f"{u.name_flag} {FLAG_OPTIONS[idx][1]}"
+        s.commit(); await q.answer("ذخیره شد ✅"); await q.edit_message_text(f"✅ انتخابت ذخیره شد: {label}\nاز این به بعد پرچم کنار نامت در بخش‌های نمایشی روبی می‌آید.")
+    finally: s.close()
+
 def user_mention(user):
     """اسم کاربر به‌صورت لینک آبی (فقط برای متن پیام‌ها؛ برای دکمه‌ها از user_display_name استفاده کن)."""
     return mention_of(user.telegram_id, user_display_name(user))
@@ -6536,7 +6570,7 @@ async def roobam_command(update,context):
     try:
         user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0);ref_count=session.query(Referral).filter(Referral.referrer_id==user.telegram_id,Referral.status=='approved').count();ref_rank=session.query(Referral.referrer_id).filter(Referral.status=='approved').group_by(Referral.referrer_id).having(__import__('sqlalchemy').func.count(Referral.id)>ref_count).count()+1
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
-        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
     finally:session.close()
     await update.message.reply_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(user_display_name(user),url=f"tg://user?id={user.telegram_id}")]]),**reply_kwargs(update.message))
 
@@ -9482,8 +9516,10 @@ async def text_router(update, context):
     if await handle_market_text(update, context): return
     if await handle_city_donate_text(update, context): return
     text=update.message.text.strip()
-    if text in {"روباهیو درس"}:
+    if text in {"روباهیو درس", "روباهیو درس!"}:
         await education_command(update, context); return
+    if text in {"پرچم", "پرچم روباهیو", "🌍 پرچم"}:
+        await flag_command(update, context); return
     if text in FOX_CLAIM_ALIASES:
         await collect_fox_points(update,context); return
     if text in {"روبام","روبام!","روباش","روباش!"}: await roobam_command(update,context); return
@@ -9562,7 +9598,7 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?|رفرال|زیرمجموعه(?:\s+گیری)?)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?|رفرال|زیرمجموعه(?:\s+گیری)?|پرچم)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
@@ -9580,6 +9616,7 @@ async def persian_slash_router(update, context):
         elif cmd in {"دوست روبی","دوست","فرند روب"}: await friends_command(update,context)
         elif cmd in {"کد هدیه","کد جایزه","giftcode"}: await gift_code_command(update,context)
         elif cmd in {"شهردار روبی","شهردار"}: await city_mayor_command(update,context)
+        elif cmd == "پرچم": await flag_command(update,context)
         elif cmd in {"شهر روبی","شهر"}: await city_command(update,context)
         else: await leaderboard_command(update,context)
         return
@@ -9639,7 +9676,10 @@ def main():
     app.add_handler(CallbackQueryHandler(ruby_pairs_move,pattern=r"^rpairs:\d+:(?:[0-9]|1[0-9]|2[0-9])$"))
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
     app.add_handler(CallbackQueryHandler(education_topic, pattern=r"^edutopic:(general|religion|history_geo|literature|math_iq)$"))
+    app.add_handler(CallbackQueryHandler(education_unlock, pattern=r"^eduunlock:(yes|no):(general|religion|history_geo|literature|math_iq)$"))
+    app.add_handler(CallbackQueryHandler(education_certificate, pattern=r"^educert:(yes|no)$"))
     app.add_handler(CallbackQueryHandler(education_answer, pattern=r"^edu:(general|religion|history_geo|literature|math_iq):\d+:\d$"))
+    app.add_handler(CallbackQueryHandler(flag_callback, pattern=r"^flag:(set|clear):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_change_confirm,pattern=r"^bankchange:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))

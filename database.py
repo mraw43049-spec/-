@@ -41,6 +41,7 @@ class User(Base):
     __tablename__ = 'users'
     telegram_id = Column(BigInteger, primary_key=True)
     username = Column(String, nullable=True)
+    name_flag = Column(String, nullable=False, default='')
     first_name = Column(String, nullable=True)
     points = Column(Integer, nullable=False, default=0)
     total_earned = Column(Integer, nullable=False, default=0)
@@ -454,8 +455,19 @@ def init_db():
     cols = {c['name'] for c in inspector.get_columns('users')}
     injured_cols = {c['name'] for c in inspector.get_columns('injured_foxes')}
     bank_cols = {c['name'] for c in inspector.get_columns('bank_accounts')}
+    if 'education_progress' in inspector.get_table_names():
+        education_cols = {c['name'] for c in inspector.get_columns('education_progress')}
+        education_additions = {
+            'correct_answers': 'INTEGER NOT NULL DEFAULT 0',
+            'pending_certificate': 'INTEGER NOT NULL DEFAULT 0',
+        }
+        with engine.begin() as conn:
+            for name, definition in education_additions.items():
+                if name not in education_cols:
+                    conn.execute(text(f'ALTER TABLE education_progress ADD COLUMN {name} {definition}'))
     additions = {
         'total_earned': 'INTEGER NOT NULL DEFAULT 0',
+        'name_flag': "VARCHAR NOT NULL DEFAULT ''",
         'fox_name': "VARCHAR DEFAULT 'مکار'",
         'fox_level': 'INTEGER NOT NULL DEFAULT 1',
         'fox_belly': 'INTEGER NOT NULL DEFAULT 3',
