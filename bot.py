@@ -27,6 +27,7 @@ import ai_service as ai
 import fox_brain as brain
 import fox_spell as spell
 from education import education_command, education_topic, education_answer, education_unlock, education_certificate, education_profile_line
+from ruby_emojis import emoji_command, emoji_callback, emoji_action, emoji_transfer_text
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
     fox_production_interval, fox_production_per_second, fox_rank, fox_upgrade_cost, fox_storage_capacity, get_level_for_points,
@@ -6530,7 +6531,8 @@ FLAG_OPTIONS = [
 def user_display_name(user):
     base = user.username or user.first_name or str(user.telegram_id)
     flag = getattr(user, 'name_flag', '') or ''
-    return f"{flag} {base}".strip()
+    chosen = getattr(user, 'name_emoji', '') or ''
+    return f"{chosen} {flag} {base}".strip()
 
 async def flag_command(update, context):
     if not await require_membership(update, context): return
@@ -6570,7 +6572,7 @@ async def roobam_command(update,context):
     try:
         user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0);ref_count=session.query(Referral).filter(Referral.referrer_id==user.telegram_id,Referral.status=='approved').count();ref_rank=session.query(Referral.referrer_id).filter(Referral.status=='approved').group_by(Referral.referrer_id).having(__import__('sqlalchemy').func.count(Referral.id)>ref_count).count()+1
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
-        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
     finally:session.close()
     await update.message.reply_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(user_display_name(user),url=f"tg://user?id={user.telegram_id}")]]),**reply_kwargs(update.message))
 
@@ -9308,7 +9310,7 @@ async def ai_admin_selftest(update, context):
 
 # ── غلط تایپی دستورها («گازینو» → «آیا منظورت کازینو بود؟») + غلط‌گیر املایی ──
 FOX_COMMAND_PHRASES = [
-    "روبام", "روباش", "گردونه", "چرخ شانس", "دوست روبی", "فرند روب", "دوست روباهیو", "کد هدیه", "کد جایزه",
+    "روبام", "روباش", "ایموجی روبی", "شکلک روبی", "گردونه", "چرخ شانس", "دوست روبی", "فرند روب", "دوست روباهیو", "کد هدیه", "کد جایزه",
     "لیدربرد", "لیدر برد", "شهر روبی", "شهر روباهیو", "شهر روباه", "شهردار روبی", "روباه", "روبی", "روباهیو",
     "زندان روبی", "زندان روباهیو", "قاچاق روبی", "قاچاق روباهیو", "شکار", "یخچال روبی", "کارخونه روبی", "کارخونه",
     "رفرال", "زیرمجموعه", "زیرمجموعه گیری", "بانک", "بانک روبی", "شاپ روبی", "فروشگاه روبی", "بازی روبی",
@@ -9504,6 +9506,7 @@ async def admin_message_router(update, context):
 async def text_router(update, context):
     if await support_admin_reply(update, context): return
     if await support_text(update, context): return
+    if await emoji_transfer_text(update, context): return
     if not update.message or not update.message.text: return
     if await handle_jail_memory_text(update, context): return
     if await handle_friend_text(update, context): return
@@ -9516,6 +9519,8 @@ async def text_router(update, context):
     if await handle_market_text(update, context): return
     if await handle_city_donate_text(update, context): return
     text=update.message.text.strip()
+    if text in {"ایموجی روبی", "شکلک روبی"}:
+        await emoji_command(update, context); return
     if text in {"روباهیو درس", "روباهیو درس!"}:
         await education_command(update, context); return
     if text in {"پرچم", "پرچم روباهیو", "🌍 پرچم"}:
@@ -9675,6 +9680,9 @@ def main():
     app.add_handler(CallbackQueryHandler(ruby_rabbit_choice,pattern=r"^rrabbit:\d+:(?:[0-9]|1[0-9])$"))
     app.add_handler(CallbackQueryHandler(ruby_pairs_move,pattern=r"^rpairs:\d+:(?:[0-9]|1[0-9]|2[0-9])$"))
     app.add_handler(MessageHandler(filters.REPLY & filters.Dice.ALL, ruby_dice_reply), group=0)
+    app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:(home|cat):[a-z_]+$"))
+    app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:item:[a-z_]+:\d+$"))
+    app.add_handler(CallbackQueryHandler(emoji_action, pattern=r"^remoji:(buyyes|buyno|select|transfer|sell|sellyes|transferyes|transferno):[a-z_0-9]+:\d+$"))
     app.add_handler(CallbackQueryHandler(education_topic, pattern=r"^edutopic:(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_unlock, pattern=r"^eduunlock:(yes|no):(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_certificate, pattern=r"^educert:(yes|no)$"))

@@ -42,6 +42,7 @@ class User(Base):
     telegram_id = Column(BigInteger, primary_key=True)
     username = Column(String, nullable=True)
     name_flag = Column(String, nullable=False, default='')
+    name_emoji = Column(String, nullable=False, default='')
     first_name = Column(String, nullable=True)
     points = Column(Integer, nullable=False, default=0)
     total_earned = Column(Integer, nullable=False, default=0)
@@ -102,6 +103,15 @@ class User(Base):
     injured_fox_stock = Column(Integer, nullable=False, default=0)
     spam_window_at = Column(DateTime(timezone=True), nullable=True)
     spam_count = Column(Integer, nullable=False, default=0)
+
+class RubyEmojiItem(Base):
+    __tablename__ = 'ruby_emoji_items'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False, index=True)
+    item_key = Column(String, nullable=False)
+    emoji = Column(String, nullable=False)
+    category = Column(String, nullable=False)
+    purchased_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class Challenge(Base):
     __tablename__ = 'challenges'
@@ -468,6 +478,7 @@ def init_db():
     additions = {
         'total_earned': 'INTEGER NOT NULL DEFAULT 0',
         'name_flag': "VARCHAR NOT NULL DEFAULT ''",
+        'name_emoji': "VARCHAR NOT NULL DEFAULT ''",
         'fox_name': "VARCHAR DEFAULT 'مکار'",
         'fox_level': 'INTEGER NOT NULL DEFAULT 1',
         'fox_belly': 'INTEGER NOT NULL DEFAULT 3',

@@ -195,4 +195,4 @@ async def education_certificate(update, context):
 def education_profile_line(session,user_id):
     p=session.get(EducationProgress,user_id)
     if not p: return "🎓 تحصیلات: هنوز مدرکی دریافت نکرده"
-    return f"🎓 تحصیلات: {_name(p.certificates)}\n🏅 مدارک: {p.certificates}/۱۵\n📚 پاسخ‌های درست: {int(p.correct_answers or 0)}\n📈 تا مدرک بعدی: {max(0,_threshold(p.certificates)-p.correct_answers) if p.certificates<15 else 0} پاسخ درست"
+    return f"🎓 تحصیلات: {_name(p.certificates)}"
