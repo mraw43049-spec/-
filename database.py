@@ -240,6 +240,14 @@ class FoxMoodChannel(Base):
     added_by = Column(BigInteger, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+class MediaRotation(Base):
+    """نوبت پخش آهنگ/عکس/ویدیو: برای هر «گروه» (مثلاً حال شاد، یا یک کلید مدیا) شناسه‌ی
+    آیتم‌هایی که در دور فعلی پخش شده‌اند نگه می‌دارد تا تا پخش شدن همه، تکراری نیاید."""
+    __tablename__ = 'media_rotation'
+    scope = Column(String, primary_key=True)
+    played = Column(String, nullable=False, default='')     # شناسه‌های پخش‌شده در این دور، با ویرگول
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class GiftCodeRedemption(Base):
     __tablename__ = 'gift_code_redemptions'
     id = Column(Integer, primary_key=True, autoincrement=True)

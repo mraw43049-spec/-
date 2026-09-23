@@ -21,7 +21,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, MediaRotation, get_session, init_db
 )
 import ai_service as ai
 import fox_brain as brain
@@ -2895,7 +2895,7 @@ def fox_gender_pick_keyboard(user_id):
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("♀️ زن",callback_data=f"fox:genderpick_female:{user_id}"),
         InlineKeyboardButton("♂️ مرد",callback_data=f"fox:genderpick_male:{user_id}"),
-    ]])
+    ],[InlineKeyboardButton("🔙 بازگشت",callback_data=f"fox:renamemenu:{user_id}")]])
 
 def fox_gender_confirm_keyboard(user_id, gender):
     return InlineKeyboardMarkup([[
@@ -2911,6 +2911,21 @@ def fox_rename_confirm_keyboard(user_id):
 
 def fox_gender_label(gender):
     return {"male":"مرد 👦","female":"زن 👧"}.get((gender or "").strip(), "نامشخص")
+
+
+async def _safe_edit(message, text, markup=None):
+    """ویرایش پیام پنل؛ خطای «message is not modified» نادیده گرفته می‌شود."""
+    try:
+        await message.edit_text(text, reply_markup=markup)
+    except BadRequest as e:
+        if "not modified" not in str(e).lower():
+            raise
+
+
+async def fox_show_panel(message, user, note=None):
+    """پنل اصلی روباه را در همان پیام (ویرایش درجا) نشان می‌دهد؛ note یک خط وضعیت زیر پنل است."""
+    text = fox_profile_text(user) + (f"\n\n{note}" if note else "")
+    await _safe_edit(message, text, fox_keyboard(user.telegram_id, user.level, user.fox_level, user.fox_prestige_count))
 
 
 def fox_profile_text(user):
@@ -2966,18 +2981,20 @@ def settle_fox_hunger(user):
     return lost
 
 
-def update_fox_production(user):
-    """
-    تولید امن روباه:
-    - لول 1 تا 20: به‌ترتیب 1 تا 20 روب‌پوینت در ثانیه.
-    - لول 21 تا 25 نیز دقیقاً 20 در ثانیه.
-    - تولید هیچ‌وقت از فضای خالی مخزن بیشتر محاسبه نمی‌شود.
-    - وقتی مخزن پر است، زمان تولید فریز می‌شود.
-    - بعد از برداشت، ساعت تولید دقیقاً از همان لحظه دوباره شروع می‌شود؛
-      بنابراین زمان قدیمی نمی‌تواند باعث تولید ناگهانی هزاران روب‌پوینت شود.
-    """
-    settle_fox_hunger(user)
-    now = now_utc()
+def _fox_active_seconds(user, start, now):
+    """چند ثانیه از بازه‌ی [start, now] شکم روباه حداقل ۲ واحد غذا داشته است.
+    گرسنگی روی شبکه‌ی زمانی fox_last_hunger_at + k*۳۵دقیقه کم می‌شود؛ پس زمانی که شکم
+    به زیر ۲ می‌رسد از قبل معلوم است و تولید تا همان لحظه حساب می‌شود."""
+    belly = max(0, int(user.fox_belly or 0))
+    if belly < 2:
+        return 0.0
+    hunger_at = aware(user.fox_last_hunger_at) or now
+    starve_at = hunger_at + timedelta(seconds=(belly - 1) * FOX_HUNGER_INTERVAL_SECONDS)
+    end = min(now, starve_at)
+    return max(0.0, (end - start).total_seconds())
+
+
+def _fox_produce(user, now):
     level = max(1, min(FOX_MAX_LEVEL, int(user.fox_level or 1)))
     storage_cap = fox_storage_capacity(level)
     storage = max(0, int(user.fox_storage or 0))
@@ -3003,29 +3020,41 @@ def update_fox_production(user):
         user.fox_production_remainder = 0.0
         return 0.0
 
-    elapsed = max(0.0, (now - aware(user.fox_last_production_at)).total_seconds())
+    start = aware(user.fox_last_production_at)
+    # فقط مدتی حساب می‌شود که شکم واقعاً غذا داشته (قبل از کم شدن گرسنگی)
+    elapsed = _fox_active_seconds(user, start, now)
     rate = fox_production_per_second(level)
 
-    # حداکثر تعداد قابل تولید فقط به اندازه‌ی فضای خالی مخزن است.
     room = max(0, storage_cap - storage)
-    if room <= 0:
-        user.fox_last_production_at = now
-        user.fox_production_remainder = 0.0
-        return 0.0
-
     total = float(user.fox_production_remainder or 0.0) + elapsed * rate
     whole = min(room, int(total))
 
     if whole >= room:
         # مخزن همین الان پر شد؛ باقی‌مانده‌ی زمان عمداً دور ریخته می‌شود
-        # تا بعد از برداشت، تولید از زمان برداشت شروع شود.
         user.fox_production_remainder = 0.0
-        user.fox_last_production_at = now
     else:
         user.fox_production_remainder = total - whole
-        user.fox_last_production_at = now
-
+    user.fox_last_production_at = now
     return float(max(0, whole))
+
+
+def update_fox_production(user):
+    """
+    تولید امن روباه:
+    - لول 1 تا 20: به‌ترتیب 1 تا 20 روب‌پوینت در ثانیه.
+    - لول 21 تا 25 نیز دقیقاً 20 در ثانیه.
+    - تولید هیچ‌وقت از فضای خالی مخزن بیشتر محاسبه نمی‌شود.
+    - وقتی مخزن پر است، زمان تولید فریز می‌شود.
+    - تولید ابتدا با شکمِ «قبل از گرسنگی» حساب می‌شود و بعد گرسنگی اعمال می‌شود؛
+      (قبلاً برعکس بود و اگر کاربر چند ساعت سر نمی‌زد، شکم اول خالی می‌شد و کل
+      مدتی که روباه سیر بود بدون تولید حساب می‌شد.)
+    """
+    now = now_utc()
+    if user.fox_last_hunger_at is None:
+        user.fox_last_hunger_at = now
+    produced = _fox_produce(user, now)
+    settle_fox_hunger(user)
+    return produced
 
 def settle_fox_production(user):
     """محاسبه تولید معوق روباه و ذخیره آن در انبار روباه تا سقف ظرفیت (جدا از موجودی قابل‌خرج کاربر)."""
@@ -3160,8 +3189,14 @@ async def fox_button(update, context):
             return
         elif action == "rename":
             context.user_data["fox_rename"] = True
+            context.user_data.pop("fox_rename_pending", None)
+            context.user_data["fox_panel_ref"] = (q.message.chat_id, q.message.message_id)
             await q.answer()
-            await q.message.reply_text("✏️ اسم جدید روباه را بفرست.\nحداکثر 16 کاراکتر.")
+            await _safe_edit(
+                q.message,
+                fox_profile_text(user) + "\n\n✏️ اسم جدید روباه را بفرست.\nحداکثر 16 کاراکتر.",
+                InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data=f"fox:renameno:{user.telegram_id}")]]),
+            )
             return
         elif action == "renameyes":
             pending = context.user_data.pop("fox_rename_pending", None)
@@ -3170,27 +3205,32 @@ async def fox_button(update, context):
                 return
             user.fox_name = pending
             session.commit()
+            context.user_data.pop("fox_panel_ref", None)
             await q.answer("✅ اسم روباه تغییر کرد.")
-            await q.message.edit_text(f"✅ اسم روباه تغییر کرد به: 🦊 {pending}")
+            await fox_show_panel(q.message, user, f"✅ اسم روباه تغییر کرد به: 🦊 {pending}")
             return
         elif action == "renameno":
             context.user_data.pop("fox_rename_pending", None)
+            context.user_data.pop("fox_rename", None)
+            context.user_data.pop("fox_panel_ref", None)
             await q.answer("لغو شد.")
-            await q.message.edit_text("❌ تغییر اسم لغو شد.")
+            await fox_show_panel(q.message, user, "❌ تغییر اسم لغو شد.")
             return
         elif action == "gendermenu":
             await q.answer()
-            await q.message.edit_text(
+            await _safe_edit(
+                q.message,
                 fox_profile_text(user) + "\n\n⚧ جنسیت روباه را انتخاب کن:",
-                reply_markup=fox_gender_pick_keyboard(user.telegram_id),
+                fox_gender_pick_keyboard(user.telegram_id),
             )
             return
         elif action in ("genderpick_male", "genderpick_female"):
             gender = "male" if action == "genderpick_male" else "female"
             await q.answer()
-            await q.message.edit_text(
-                f"❓ آیا مطمئنی می‌خوای جنسیت روباه رو «{fox_gender_label(gender)}» کنی؟",
-                reply_markup=fox_gender_confirm_keyboard(user.telegram_id, gender)
+            await _safe_edit(
+                q.message,
+                fox_profile_text(user) + f"\n\n❓ آیا مطمئنی می‌خوای جنسیت روباه رو «{fox_gender_label(gender)}» کنی؟",
+                fox_gender_confirm_keyboard(user.telegram_id, gender),
             )
             return
         elif action in ("genderyes_male", "genderyes_female"):
@@ -3198,11 +3238,11 @@ async def fox_button(update, context):
             user.fox_gender = gender
             session.commit()
             await q.answer("✅ جنسیت روباه تغییر کرد.")
-            await q.message.edit_text(f"✅ جنسیت روباه شد: {fox_gender_label(gender)}")
+            await fox_show_panel(q.message, user, f"✅ جنسیت روباه شد: {fox_gender_label(gender)}")
             return
         elif action in ("genderno_male", "genderno_female"):
             await q.answer("لغو شد.")
-            await q.message.edit_text("❌ تغییر جنسیت لغو شد.")
+            await fox_show_panel(q.message, user, "❌ تغییر جنسیت لغو شد.")
             return
         session.commit()
     finally:
@@ -3800,27 +3840,44 @@ async def handle_bank_text(update, context):
 async def handle_fox_rename_text(update, context):
     if not context.user_data.get("fox_rename"):
         return False
-    context.user_data.pop("fox_rename", None)
+    ref = context.user_data.get("fox_panel_ref")
+    # اسم فقط در همان چتی که پنل باز شده قبول می‌شود، نه هر پیام دیگری در جای دیگر.
+    if ref and update.effective_chat and update.effective_chat.id != ref[0]:
+        return False
     if not await require_membership(update, context):
+        context.user_data.pop("fox_rename", None)
         return True
-    name = update.message.text.strip()
+    uid = update.effective_user.id
+    name = (update.message.text or "").strip()
+
+    async def show(text, markup):
+        # همان پیام پنل روباه را ویرایش می‌کند؛ اگر پیام دیگر در دسترس نبود، پیام تازه می‌فرستد.
+        if ref:
+            try:
+                await context.bot.edit_message_text(chat_id=ref[0], message_id=ref[1], text=text, reply_markup=markup)
+                return
+            except BadRequest as e:
+                logger.warning("fox rename panel edit failed: %s", e)
+        await update.message.reply_text(text, reply_markup=markup, **reply_kwargs(update.message))
+
     if not name or len(name) > 16:
-        await update.message.reply_text("❌ اسم باید بین 1 تا 16 کاراکتر باشد.", **reply_kwargs(update.message))
+        await show(
+            "❌ اسم باید بین 1 تا 16 کاراکتر باشد.\n✏️ دوباره اسم روباه را بفرست.",
+            InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data=f"fox:renameno:{uid}")]]),
+        )
         return True
     session = get_session()
     try:
         user = get_or_create_user(session, update.effective_user)
         if user.level < FOX_UNLOCK_LEVEL:
+            context.user_data.pop("fox_rename", None)
             await update.message.reply_text("🔒 روباه در سطح 3 باز می‌شود.", **reply_kwargs(update.message))
             return True
     finally:
         session.close()
+    context.user_data.pop("fox_rename", None)
     context.user_data["fox_rename_pending"] = name
-    await update.message.reply_text(
-        f"❓ آیا مطمئنی می‌خوای اسم روباه رو به «{name}» تغییر بدی؟",
-        reply_markup=fox_rename_confirm_keyboard(update.effective_user.id),
-        **reply_kwargs(update.message)
-    )
+    await show(f"❓ آیا مطمئنی می‌خوای اسم روباه رو به «{name}» تغییر بدی؟", fox_rename_confirm_keyboard(uid))
     return True
 
 async def fridge_command(update, context):
@@ -6770,16 +6827,42 @@ def fox_level_requirement(level):
     value=7250;step=900
     for _ in range(21,level+1):value+=step;step+=250
     return value
+async def _send_roobam_panel(msg,text,label,uid,username):
+    """پنل روبام/روباش. دکمه‌ی tg://user?id=... برای کاربرانی که حریم خصوصی‌شان اجازه‌ی لینک
+    نمی‌دهد (BUTTON_USER_PRIVACY_RESTRICTED) یا ربات هنوز نمی‌شناسدشان، از تلگرام BadRequest
+    می‌گیرد و قبلاً کل پنل ارسال نمی‌شد. حالا اگر دکمه رد شد، با لینک t.me/username و اگر
+    نبود بدون دکمه ارسال می‌شود تا پنل حتماً بیاید."""
+    label=strip_mentions(label) or str(uid)
+    attempts=[InlineKeyboardMarkup([[InlineKeyboardButton(label,url=f"tg://user?id={uid}")]])]
+    if username:
+        attempts.append(InlineKeyboardMarkup([[InlineKeyboardButton(label,url=f"https://t.me/{username}")]]))
+    attempts.append(None)
+    last_err=None
+    for markup in attempts:
+        try:
+            await msg.reply_text(text,reply_markup=markup,**reply_kwargs(msg))
+            return
+        except BadRequest as e:
+            last_err=e
+            logger.warning("roobam panel rejected (%s); retrying with simpler markup",e)
+    # آخرین تلاش: شاید پیام مبدأ پاک شده باشد
+    try:
+        await msg.chat.send_message(text)
+    except Exception:
+        logger.exception("roobam panel could not be sent: %s",last_err)
+
 async def roobam_command(update,context):
     if not await require_membership(update,context):return
     target=update.message.reply_to_message.from_user if update.message.reply_to_message and update.message.reply_to_message.from_user else update.effective_user
+    target_id=target.id;target_username=getattr(target,'username',None)
     session=get_session()
     try:
         user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0);ref_count=session.query(Referral).filter(Referral.referrer_id==user.telegram_id,Referral.status=='approved').count();ref_rank=session.query(Referral.referrer_id).filter(Referral.status=='approved').group_by(Referral.referrer_id).having(__import__('sqlalchemy').func.count(Referral.id)>ref_count).count()+1
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
-        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 🦊 روباه : {user.fox_name or 'مکار'}\n┘─ ⚧ جنسیت روباه : {fox_gender_label(user.fox_gender)}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 🦊 روباه : {user.fox_name or 'مکار'}\n┘─ ⚧ جنسیت روباه : {fox_gender_label(user.fox_gender)}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points or 0):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
+        label=user_display_name(user)
     finally:session.close()
-    await update.message.reply_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(user_display_name(user),url=f"tg://user?id={user.telegram_id}")]]),**reply_kwargs(update.message))
+    await _send_roobam_panel(update.message,text,label,target_id,target_username)
 
 # ---------- دوستان روباهیو 🦊 ----------
 FRIEND_LIMIT = 3
@@ -8795,6 +8878,42 @@ def mood_question_view(uid, eday, picks):
     return text, kb
 
 
+def rotation_pick(scope, ids):
+    """انتخاب نوبتی و بدون تکرار: از بین ids اولین آیتمی را برمی‌گرداند که در دور فعلی پخش نشده
+    (به ترتیب شناسه). وقتی همه‌ی آیتم‌ها یک بار پخش شدند، دور از اول شروع می‌شود. وضعیت در
+    دیتابیس نگه داشته می‌شود، پس با ری‌استارت/دیپلوی ربات هم از دست نمی‌رود."""
+    ids = sorted({int(i) for i in ids})
+    if not ids:
+        return None
+    if len(ids) == 1:
+        return ids[0]
+    session = get_session()
+    try:
+        row = session.query(MediaRotation).filter(MediaRotation.scope == scope).with_for_update().first()
+        played = set()
+        if row and row.played:
+            played = {int(x) for x in row.played.split(',') if x.strip().isdigit()}
+        left = [i for i in ids if i not in played]
+        if not left:                       # همه پخش شدن → دور تازه از اولین آیتم
+            played = set()
+            left = ids
+        chosen = left[0]
+        played = (played & set(ids)) | {chosen}
+        value = ','.join(str(i) for i in sorted(played))
+        if row:
+            row.played = value; row.updated_at = now_utc()
+        else:
+            session.add(MediaRotation(scope=scope, played=value))
+        session.commit()
+        return chosen
+    except Exception:
+        session.rollback()
+        logger.exception('rotation_pick failed (scope=%s)', scope)
+        return random.choice(ids)
+    finally:
+        session.close()
+
+
 def mood_pick_song(mood, uid):
     """آهنگی که به حال کاربر می‌خوره؛ اگه برای این حال آهنگی نبود از نزدیک‌ترین حال‌ها. None = هیچ آهنگی تو ربات نیست."""
     session = get_session()
@@ -8805,19 +8924,17 @@ def mood_pick_song(mood, uid):
         session.close()
     if not songs:
         return None
-    pool = []
+    pool = []; scope = 'all'
     for mk in [mood] + FOX_MOOD_NEAR.get(mood, []):
         pool = [x for x in songs if mk in x['moods']]
         if pool:
+            scope = mk
             break
-    pool = pool or songs
-    if len(pool) > 1 and uid in _MOOD_LAST_SONG:
-        pool = [x for x in pool if x['id'] != _MOOD_LAST_SONG[uid]] or pool
-    song = random.choice(pool)
-    _MOOD_LAST_SONG[uid] = song['id']
-    while len(_MOOD_LAST_SONG) > 5000:
-        _MOOD_LAST_SONG.pop(next(iter(_MOOD_LAST_SONG)))
-    return song
+    if not pool:
+        pool = songs
+    # نوبتی و بدون تکرار: تا همه‌ی آهنگ‌های این حال پخش نشدن تکراری نمیاد؛ بعدش از اول شروع می‌شه.
+    chosen = rotation_pick(f'song:{scope}', [x['id'] for x in pool])
+    return next((x for x in pool if x['id'] == chosen), pool[0])
 
 
 def mood_is_start(text, chat_type):
@@ -9181,10 +9298,17 @@ async def ai_chat_run(update, context, mode, prompt):
             session.close()
         # آهنگ/ویدیو/گیف/استیکرِ یادگرفته‌شده توسط ادمین: اولویت با خودشه (قبل از API و مغز متنی)
         if mode == 'chat' and brain.ENABLED:
-            entry = brain.media_lookup(prompt)
-            if entry:
+            cands = brain.media_candidates(prompt)
+            if cands:
                 if not brain.gate(tg_user.id):
                     return
+                scope, entries = cands
+                ids = [e.get('id') for e in entries]
+                if all(i is not None for i in ids):
+                    pick = rotation_pick(scope, ids)      # نوبتی: تا همه پخش نشدن تکراری نمیاد
+                    entry = next((e for e in entries if e.get('id') == pick), entries[0])
+                else:
+                    entry = random.choice(entries)
                 sent = None
                 try:
                     try: await context.bot.send_chat_action(chat.id, 'typing')
@@ -9674,12 +9798,36 @@ async def track_city_member_presence(update, context):
 
 # ---------- پشتیبانی مستقیم روبی ----------
 
+SUPPORT_PANEL_TEXT = "🦊 بخش پشتیبانی را انتخاب کن:"
+
+def support_panel_keyboard(uid):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📩 ارسال تیکت", callback_data=f"support:open:{uid}"),
+        InlineKeyboardButton("🆔 آیدی پشتیبانی", url="https://t.me/escotch"),
+    ]])
+
 async def support_button(update, context):
     q=update.callback_query
-    if q.data != "support:open": return
-    context.user_data["support_waiting"] = True
-    await q.answer()
-    await q.message.reply_text("📩 متن تیکتت را بفرست؛ آیدی عددی و شناسه‌ات همراه پیام برای پشتیبانی ارسال می‌شود.")
+    m=re.fullmatch(r"support:(open|cancel)(?::(\d+))?", q.data or "")
+    if not m: return
+    action,owner=m.group(1),m.group(2)
+    if owner and int(owner) != q.from_user.id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.", show_alert=True)
+        return
+    if action == "open":
+        context.user_data["support_waiting"] = True
+        context.user_data["support_panel_ref"] = (q.message.chat_id, q.message.message_id)
+        await q.answer()
+        await _safe_edit(
+            q.message,
+            "📩 متن تیکتت را بفرست؛ آیدی عددی و شناسه‌ات همراه پیام برای پشتیبانی ارسال می‌شود.",
+            InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data=f"support:cancel:{q.from_user.id}")]]),
+        )
+    else:
+        context.user_data["support_waiting"] = False
+        context.user_data.pop("support_panel_ref", None)
+        await q.answer()
+        await _safe_edit(q.message, SUPPORT_PANEL_TEXT, support_panel_keyboard(q.from_user.id))
 
 async def support_admin_reply(update, context):
     """پاسخ ادمین به پیام پشتیبانی را به کاربر اصلی می‌رساند."""
@@ -9701,19 +9849,24 @@ async def support_text(update, context):
         return False
     text=(update.message.text or "").strip()
     if text in {"پشتیبانی", "پشتیبان", "ارتباط با پشتیبانی"}:
-        context.user_data["support_waiting"] = True
+        # تیکت فقط بعد از زدن دکمه‌ی «ارسال تیکت» منتظر متن می‌شود، نه با خودِ باز شدن پنل.
+        context.user_data["support_waiting"] = False
+        context.user_data.pop("support_panel_ref", None)
         await update.message.reply_text(
-            "🦊 بخش پشتیبانی را انتخاب کن:",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("📩 ارسال تیکت", callback_data="support:open"),
-                InlineKeyboardButton("🆔 آیدی پشتیبانی", url="https://t.me/escotch"),
-            ]])
+            SUPPORT_PANEL_TEXT,
+            reply_markup=support_panel_keyboard(update.effective_user.id),
+            **reply_kwargs(update.message)
         )
         return True
     if not context.user_data.get("support_waiting"):
         return False
+    ref=context.user_data.get("support_panel_ref")
+    # متن تیکت فقط در همان چتی که پنل باز شده قبول می‌شود.
+    if ref and update.effective_chat and update.effective_chat.id != ref[0]:
+        return False
 
     context.user_data["support_waiting"] = False
+    context.user_data.pop("support_panel_ref", None)
     u=update.effective_user
     username=("@" + u.username) if u.username else "ندارد"
     ticket_id=f"T{u.id}-{int(now_utc().timestamp())}"
@@ -9737,10 +9890,18 @@ async def support_text(update, context):
         except Exception as exc:
             logger.warning("support ticket delivery failed for admin %s: %s", aid, exc)
     if delivered:
-        await update.message.reply_text("✅ تیکت برای پشتیبانی ارسال شد. در اسرع وقت جواب خواهد داد. منتظر بمانید.")
+        done_text="✅ تیکت برای پشتیبانی ارسال شد. در اسرع وقت جواب خواهد داد. منتظر بمانید."
     else:
         # تیکت در صف داخلی باقی می‌ماند تا با تنظیم صحیح ADMIN_IDS قابل پیگیری باشد.
-        await update.message.reply_text("✅ تیکت شما ثبت شد و برای پشتیبانی در صف قرار گرفت. در اسرع وقت جواب خواهد داد. منتظر بمانید.")
+        done_text="✅ تیکت شما ثبت شد و برای پشتیبانی در صف قرار گرفت. در اسرع وقت جواب خواهد داد. منتظر بمانید."
+    # تأیید در همان پیام پنل پشتیبانی نوشته می‌شود؛ اگر آن پیام در دسترس نبود، پیام تازه.
+    if ref:
+        try:
+            await context.bot.edit_message_text(chat_id=ref[0], message_id=ref[1], text=done_text, reply_markup=support_panel_keyboard(u.id))
+            return True
+        except BadRequest as e:
+            logger.warning("support panel edit failed: %s", e)
+    await update.message.reply_text(done_text, **reply_kwargs(update.message))
     return True
 
 async def admin_message_router(update, context):
@@ -9960,7 +10121,7 @@ def main():
     app.add_handler(CommandHandler("roobam",roobam_command))
     app.add_handler(CommandHandler("leaderboard",leaderboard_command))
     app.add_handler(CallbackQueryHandler(jail_callback_gate), group=-20)
-    app.add_handler(CallbackQueryHandler(support_button,pattern=r"^support:open$"))
+    app.add_handler(CallbackQueryHandler(support_button,pattern=r"^support:(?:open|cancel)(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
     app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|jailmenu|backup|back)$"))

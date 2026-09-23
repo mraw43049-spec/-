@@ -106,14 +106,15 @@ def format_answer(template, ctx=None):
     return _fmt(template, ctx)
 
 
-def _lookup(text, media, exact=False):
-    """media=False → فقط جواب‌های متنی؛ media=True → فقط جواب‌های مدیا (آهنگ/ویدیو/گیف/استیکر/...).
+def _lookup_all(text, media, exact=False):
+    """(کلید برنده، لیست آیتم‌های هم‌کلید) یا None. media=False → فقط جواب‌های متنی؛
+    media=True → فقط جواب‌های مدیا (آهنگ/ویدیو/گیف/استیکر/عکس/...).
     exact=True → کل پیام باید دقیقاً خودِ کلید باشه (برای واکنش مستقیم تو گروه بدون صدا زدن روباه)."""
     norm = normalize(text)
     if not norm or not _CUSTOM:
         return None
     padded = f' {norm} '
-    best = []; best_len = 0
+    best = []; best_len = 0; best_kw = None
     for e in _CUSTOM:
         if bool(e.get('file_id')) != media:
             continue
@@ -125,10 +126,15 @@ def _lookup(text, media, exact=False):
             if not hit:
                 continue
             if len(kw) > best_len:
-                best, best_len = [e], len(kw)
+                best, best_len, best_kw = [e], len(kw), kw
             elif len(kw) == best_len and e not in best:
-                best.append(e)          # چند جواب برای یک کلید → یکی به‌صورت تصادفی (مثلاً چند جوک / چند آهنگ)
-    return random.choice(best) if best else None
+                best.append(e)          # چند جواب برای یک کلید (چند جوک / چند آهنگ / چند عکس)
+    return (best_kw, best) if best else None
+
+
+def _lookup(text, media, exact=False):
+    found = _lookup_all(text, media, exact)
+    return random.choice(found[1]) if found else None
 
 
 def custom_lookup(text):
@@ -138,10 +144,21 @@ def custom_lookup(text):
 
 def media_lookup(text, exact=False):
     """مثل custom_lookup ولی برای آیتم‌های مدیا. پیام‌های نگران‌کننده هیچ‌وقت مدیا نمی‌گیرن (جواب همدلانه‌ی متنی اولویت داره)."""
-    e = _lookup(text, media=True, exact=exact)
-    if e and 'distress' in _match_intents(normalize(text)):
+    found = _lookup_all(text, media=True, exact=exact)
+    if found and 'distress' in _match_intents(normalize(text)):
         return None
-    return e
+    return found[1][0] if found else None
+
+
+def media_candidates(text, exact=False):
+    """(scope, لیست آیتم‌ها به ترتیب شناسه) برای مدیای هم‌کلید، یا None. انتخاب نوبتیِ بدون تکرار
+    را bot.py با rotation_pick انجام می‌دهد (اینجا چیزی انتخاب یا ثبت نمی‌شود)."""
+    found = _lookup_all(text, media=True, exact=exact)
+    if not found or 'distress' in _match_intents(normalize(text)):
+        return None
+    kw, entries = found
+    entries = sorted(entries, key=lambda e: (e.get('id') is None, e.get('id') or 0))
+    return f'media:{kw}', entries
 
 
 # ═════════════════════════ ۱) گفتگوی شخصیت‌دار ═════════════════════════
