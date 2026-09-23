@@ -53,6 +53,7 @@ class User(Base):
 
     # داده‌های روباه؛ همه nullable/default هستند تا دیتابیس قبلی بدون حذف کاربران مهاجرت کند.
     fox_name = Column(String, nullable=False, default='مکار')
+    fox_gender = Column(String, nullable=False, default='')  # '' نامشخص، 'male' مرد، 'female' زن
     fox_level = Column(Integer, nullable=False, default=1)
     fox_belly = Column(Integer, nullable=False, default=3)
     fox_belly_capacity = Column(Integer, nullable=False, default=3)
@@ -526,6 +527,7 @@ def init_db():
         'injured_fox_stock': 'INTEGER NOT NULL DEFAULT 0',
         'spam_window_at': DT_SQL_TYPE,
         'spam_count': 'INTEGER NOT NULL DEFAULT 0',
+        'fox_gender': "VARCHAR NOT NULL DEFAULT ''",
     }
     with engine.begin() as conn:
         added_user_cols = set()

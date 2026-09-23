@@ -2872,8 +2872,35 @@ def fox_keyboard(user_id, user_level, fox_level=None, fox_prestige_count=0):
     lvl = max(1, min(FOX_MAX_LEVEL, int(fox_level or 1)))
     if lvl < FOX_MAX_LEVEL:
         rows.append([InlineKeyboardButton("⭐ ارتقای سطح روباه",callback_data=f"fox:upgrade:{user_id}")])
-    rows.append([InlineKeyboardButton("✏️ تغییر اسم روباه",callback_data=f"fox:rename:{user_id}")])
+    rows.append([InlineKeyboardButton("✏️",callback_data=f"fox:renamemenu:{user_id}")])
     return InlineKeyboardMarkup(rows)
+
+def fox_edit_menu_keyboard(user_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🐾 تغییر نام روبی",callback_data=f"fox:rename:{user_id}")],
+        [InlineKeyboardButton("⚧ تغییر جنسیت",callback_data=f"fox:gendermenu:{user_id}")],
+    ])
+
+def fox_gender_pick_keyboard(user_id):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("♀️ زن",callback_data=f"fox:genderpick_female:{user_id}"),
+        InlineKeyboardButton("♂️ مرد",callback_data=f"fox:genderpick_male:{user_id}"),
+    ]])
+
+def fox_gender_confirm_keyboard(user_id, gender):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ بله",callback_data=f"fox:genderyes_{gender}:{user_id}"),
+        InlineKeyboardButton("❌ خیر",callback_data=f"fox:genderno_{gender}:{user_id}"),
+    ]])
+
+def fox_rename_confirm_keyboard(user_id):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ بله",callback_data=f"fox:renameyes:{user_id}"),
+        InlineKeyboardButton("❌ خیر",callback_data=f"fox:renameno:{user_id}"),
+    ]])
+
+def fox_gender_label(gender):
+    return {"male":"مرد 👦","female":"زن 👧"}.get((gender or "").strip(), "نامشخص")
 
 
 def fox_profile_text(user):
@@ -2887,6 +2914,7 @@ def fox_profile_text(user):
         f"🦊 روباه {user.fox_name or 'مکار'}",
         "",
         f"💕 نام : {user.fox_name or 'مکار'}",
+        f"⚧ جنسیت : {fox_gender_label(user.fox_gender)}",
         f"🍖 شکم : {int(user.fox_belly or 0)} / {belly_cap}",
         "",
         f"🌟 مقام : {fox_rank(lvl)}",
@@ -3115,10 +3143,52 @@ async def fox_button(update, context):
             await q.answer()
             await q.message.reply_text(fridge_text(user, items), reply_markup=fridge_keyboard(user, items))
             return
+        elif action == "renamemenu":
+            await q.answer()
+            await q.message.reply_text("✏️ کدوم رو می‌خوای تغییر بدی؟", reply_markup=fox_edit_menu_keyboard(user.telegram_id))
+            return
         elif action == "rename":
             context.user_data["fox_rename"] = True
             await q.answer()
             await q.message.reply_text("✏️ اسم جدید روباه را بفرست.\nحداکثر 16 کاراکتر.")
+            return
+        elif action == "renameyes":
+            pending = context.user_data.pop("fox_rename_pending", None)
+            if not pending:
+                await q.answer("⛔ درخواستی برای تغییر نام پیدا نشد.", show_alert=True)
+                return
+            user.fox_name = pending
+            session.commit()
+            await q.answer("✅ اسم روباه تغییر کرد.")
+            await q.message.edit_text(f"✅ اسم روباه تغییر کرد به: 🦊 {pending}")
+            return
+        elif action == "renameno":
+            context.user_data.pop("fox_rename_pending", None)
+            await q.answer("لغو شد.")
+            await q.message.edit_text("❌ تغییر اسم لغو شد.")
+            return
+        elif action == "gendermenu":
+            await q.answer()
+            await q.message.reply_text("⚧ جنسیت روباه را انتخاب کن:", reply_markup=fox_gender_pick_keyboard(user.telegram_id))
+            return
+        elif action in ("genderpick_male", "genderpick_female"):
+            gender = "male" if action == "genderpick_male" else "female"
+            await q.answer()
+            await q.message.edit_text(
+                f"❓ آیا مطمئنی می‌خوای جنسیت روباه رو «{fox_gender_label(gender)}» کنی؟",
+                reply_markup=fox_gender_confirm_keyboard(user.telegram_id, gender)
+            )
+            return
+        elif action in ("genderyes_male", "genderyes_female"):
+            gender = "male" if action == "genderyes_male" else "female"
+            user.fox_gender = gender
+            session.commit()
+            await q.answer("✅ جنسیت روباه تغییر کرد.")
+            await q.message.edit_text(f"✅ جنسیت روباه شد: {fox_gender_label(gender)}")
+            return
+        elif action in ("genderno_male", "genderno_female"):
+            await q.answer("لغو شد.")
+            await q.message.edit_text("❌ تغییر جنسیت لغو شد.")
             return
         session.commit()
     finally:
@@ -3731,11 +3801,14 @@ async def handle_fox_rename_text(update, context):
         if user.level < FOX_UNLOCK_LEVEL:
             await update.message.reply_text("🔒 روباه در سطح 3 باز می‌شود.", **reply_kwargs(update.message))
             return True
-        user.fox_name = name
-        session.commit()
     finally:
         session.close()
-    await update.message.reply_text(f"✅ اسم روباه تغییر کرد به: 🦊 {name}", **reply_kwargs(update.message))
+    context.user_data["fox_rename_pending"] = name
+    await update.message.reply_text(
+        f"❓ آیا مطمئنی می‌خوای اسم روباه رو به «{name}» تغییر بدی؟",
+        reply_markup=fox_rename_confirm_keyboard(update.effective_user.id),
+        **reply_kwargs(update.message)
+    )
     return True
 
 async def fridge_command(update, context):
@@ -6692,7 +6765,7 @@ async def roobam_command(update,context):
     try:
         user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0);ref_count=session.query(Referral).filter(Referral.referrer_id==user.telegram_id,Referral.status=='approved').count();ref_rank=session.query(Referral.referrer_id).filter(Referral.status=='approved').group_by(Referral.referrer_id).having(__import__('sqlalchemy').func.count(Referral.id)>ref_count).count()+1
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
-        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 🦊 روباه : {user.fox_name or 'مکار'}\n┘─ ⚧ جنسیت روباه : {fox_gender_label(user.fox_gender)}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
     finally:session.close()
     await update.message.reply_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(user_display_name(user),url=f"tg://user?id={user.telegram_id}")]]),**reply_kwargs(update.message))
 
@@ -9649,14 +9722,16 @@ async def support_text(update, context):
 async def admin_message_router(update, context):
     """Single group-0 router for admin replies and admin panel text actions."""
     if await support_admin_reply(update, context):
-        return True
+        raise ApplicationHandlerStop
     if await admin_text(update, context):
-        return True
+        raise ApplicationHandlerStop
     # ادمین‌ها هم باید بتونن تیکت پشتیبانی خودشون رو بفرستن؛ چون این هندلر
     # در گروه ۰ زودتر از support_text اجرا می‌شه، اگه اینجا امتحانش نکنیم
-    # پیام ادمین بدون هیچ پاسخی گم می‌شه.
+    # پیام ادمین بدون هیچ پاسخی گم می‌شه. وقتی موفق می‌شه، پردازش را همینجا
+    # با ApplicationHandlerStop متوقف می‌کنیم تا text_router (گروه ۲) دوباره
+    # همون تیکت/پیام پشتیبانی را دوبار پردازش نکنه (باعث پیام تکراری می‌شد).
     if await support_text(update, context):
-        return True
+        raise ApplicationHandlerStop
     return False
 
 async def text_router(update, context):
@@ -9821,7 +9896,7 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_jailset_callback,pattern=r"^admin:jailset:(?:add|free)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
-    app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|resetask|resetyes|resetno):\d+$"))
+    app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|renamemenu|renameyes|renameno|gendermenu|genderpick_male|genderpick_female|genderyes_male|genderyes_female|genderno_male|genderno_female|resetask|resetyes|resetno):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|feed|upgrade):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
@@ -9875,7 +9950,6 @@ def main():
     # دستورهای فارسی با MessageHandler ثبت می‌شوند؛ CommandHandler آن‌ها را رد می‌کند.
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_message_router),group=0)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,support_text),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
