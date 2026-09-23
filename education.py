@@ -85,8 +85,9 @@ class EducationProgress(Base):
 
 def _now(): return datetime.now(timezone.utc)
 def _aware(d): return d.replace(tzinfo=timezone.utc) if d and d.tzinfo is None else d
-# تعداد سؤالِ درستِ لازم برای هر مدرک: مدرک اول ۱۰ سؤال، دوم ۱۵، سوم ۲۵ و از این‌جا هر مرحله جمع دو مرحله قبل
-_CERT_THRESHOLDS = [10, 15, 25, 40, 65, 105, 170, 275, 445, 720, 1165, 1885, 3050, 4935, 7985]
+# تعداد کل پاسخ‌های درستِ لازم برای هر مدرک (تجمعی، نه فقط برای همون مرحله):
+# شروع از ۱۰ و ۱۵ و ۲۵ و بعد رشدِ ملایم و پیوسته تا مدرک آخر (پونزدهم) که ۷۵۰ می‌شود.
+_CERT_THRESHOLDS = [10, 15, 25, 40, 63, 95, 135, 183, 239, 304, 377, 458, 547, 645, 750]
 def _threshold(certificates): return _CERT_THRESHOLDS[min(certificates, len(_CERT_THRESHOLDS)-1)]
 def _tuition(certificates): return 50000 + (20000 * certificates)
 def _reward(certificates): return 150000 + (50000 * certificates)

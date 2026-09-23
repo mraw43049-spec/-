@@ -9613,7 +9613,7 @@ async def support_text(update, context):
             ]])
         )
         return True
-    if not context.user_data.get("support_waiting") or update.effective_user.id in ADMIN_IDS:
+    if not context.user_data.get("support_waiting"):
         return False
 
     context.user_data["support_waiting"] = False
@@ -9651,6 +9651,11 @@ async def admin_message_router(update, context):
     if await support_admin_reply(update, context):
         return True
     if await admin_text(update, context):
+        return True
+    # ادمین‌ها هم باید بتونن تیکت پشتیبانی خودشون رو بفرستن؛ چون این هندلر
+    # در گروه ۰ زودتر از support_text اجرا می‌شه، اگه اینجا امتحانش نکنیم
+    # پیام ادمین بدون هیچ پاسخی گم می‌شه.
+    if await support_text(update, context):
         return True
     return False
 
