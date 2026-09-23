@@ -9607,7 +9607,10 @@ async def support_text(update, context):
         context.user_data["support_waiting"] = True
         await update.message.reply_text(
             "🦊 بخش پشتیبانی را انتخاب کن:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📩 ارسال تیکت", callback_data="support:open")]])
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📩 ارسال تیکت", callback_data="support:open"),
+                InlineKeyboardButton("🆔 آیدی پشتیبانی", url="https://t.me/escotch"),
+            ]])
         )
         return True
     if not context.user_data.get("support_waiting") or update.effective_user.id in ADMIN_IDS:
