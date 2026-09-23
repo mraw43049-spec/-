@@ -7,7 +7,7 @@ import random
 import re
 from datetime import datetime, timezone, timedelta
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto, MessageEntity, User as TgUser, BotCommand, MenuButtonCommands
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto, MessageEntity, User as TgUser, BotCommand, BotCommandScopeAllPrivateChats, MenuButtonCommands
 from telegram.error import RetryAfter, Forbidden, BadRequest, TimedOut, NetworkError
 from telegram.ext import (
     ApplicationBuilder, ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, ChatMemberHandler,
@@ -964,6 +964,12 @@ def guide_item_text(idx):
 
 def guide_item_keyboard(idx):
     return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به راهنما", callback_data="guide:main")]])
+
+
+async def help_command(update, context):
+    if not await require_membership(update, context):
+        return
+    await update.message.reply_text(guide_list_text(), reply_markup=guide_list_keyboard(), **reply_kwargs(update.message))
 
 
 async def start_command(update, context):
@@ -9908,21 +9914,23 @@ async def persian_slash_router(update, context):
 
 async def post_init(application):
     """منوی دستورهای کنار کادر پیام را مثل منوی ربات‌های تلگرام فعال می‌کند."""
+    # فقط دستورهای درخواستی کاربر در منوی سه‌خطی نمایش داده می‌شوند.
     commands = [
         BotCommand("start", "شروع بازی"),
         BotCommand("help", "راهنمای کامل بازی"),
         BotCommand("shop", "فروشگاه"),
-        BotCommand("account", "بازیابی اکانت"),
         BotCommand("referral", "رفرال جمع کن"),
         BotCommand("fox", "پنل روباه"),
-        BotCommand("games", "بازی‌های روبی"),
-        BotCommand("profile", "پروفایل روبی"),
     ]
     try:
+        # ثبت در حالت پیش‌فرض و همچنین برای همهٔ چت‌های خصوصی؛
+        # این کار باعث می‌شود دکمهٔ «منو» در پی‌وی کاربران نمایش داده شود.
         await application.bot.set_my_commands(commands)
+        await application.bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
         await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
-    except Exception:
-        logger.exception("Could not configure Telegram command menu")
+        logger.info("Telegram command menu configured successfully")
+    except Exception as exc:
+        logger.exception("Could not configure Telegram command menu: %s", exc)
 
 
 def main():
@@ -9937,6 +9945,8 @@ def main():
     if app.job_queue is None:
         raise RuntimeError("JobQueue is unavailable. Install python-telegram-bot[job-queue].")
     app.add_handler(CommandHandler("start",start_command))
+    app.add_handler(CommandHandler("help",help_command))
+    app.add_handler(CommandHandler("shop",gift_shop_command))
     app.add_handler(CommandHandler("profile",profile_command))
     app.add_handler(CommandHandler("games",games_command))
     app.add_handler(CommandHandler("game",game_command))
