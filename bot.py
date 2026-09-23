@@ -7,7 +7,7 @@ import random
 import re
 from datetime import datetime, timezone, timedelta
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto, MessageEntity, User as TgUser
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto, MessageEntity, User as TgUser, BotCommand, MenuButtonCommands
 from telegram.error import RetryAfter, Forbidden, BadRequest, TimedOut, NetworkError
 from telegram.ext import (
     ApplicationBuilder, ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, ChatMemberHandler,
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 FOX_UNLOCK_LEVEL = 3
 FOX_MAX_LEVEL = 25
-FOX_HUNGER_INTERVAL_SECONDS = 30 * 60  # هر ۲۵ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
+FOX_HUNGER_INTERVAL_SECONDS = 35 * 60  # هر ۳۵ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
 INJURED_FOX_INTERVAL = 20 * 60
 INJURED_FOX_COST = 10
 INJURED_FOX_REWARD_MIN = 200
@@ -2868,11 +2868,15 @@ async def wheel_command(update, context):
 # ---------- روباه ----------
 
 def fox_keyboard(user_id, user_level, fox_level=None, fox_prestige_count=0):
+    # تنظیمات نام و جنسیت مستقیماً در همان پنل روباه قرار دارند؛ پنل جداگانه ساخته نمی‌شود.
     rows=[[InlineKeyboardButton("🧲 برداشت روب پوینت ها",callback_data=f"fox:collect:{user_id}")]]
     lvl = max(1, min(FOX_MAX_LEVEL, int(fox_level or 1)))
     if lvl < FOX_MAX_LEVEL:
         rows.append([InlineKeyboardButton("⭐ ارتقای سطح روباه",callback_data=f"fox:upgrade:{user_id}")])
-    rows.append([InlineKeyboardButton("✏️",callback_data=f"fox:renamemenu:{user_id}")])
+    rows.append([
+        InlineKeyboardButton("✏️ تغییر نام", callback_data=f"fox:rename:{user_id}"),
+        InlineKeyboardButton("⚧ تغییر جنسیت", callback_data=f"fox:gendermenu:{user_id}"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 def fox_edit_menu_keyboard(user_id):
@@ -2936,7 +2940,7 @@ def fox_profile_text(user):
 
 
 def settle_fox_hunger(user):
-    """هر FOX_HUNGER_INTERVAL_SECONDS (۲۵ دقیقه) یک واحد غذا از شکم روباه کم می‌شود؛
+    """هر FOX_HUNGER_INTERVAL_SECONDS (۳۵ دقیقه) یک واحد غذا از شکم روباه کم می‌شود؛
     این کار مدام و بدون توقف ادامه دارد (زیر صفر نمی‌رود)."""
     now = now_utc()
     if user.fox_last_hunger_at is None:
@@ -3144,8 +3148,9 @@ async def fox_button(update, context):
             await q.message.reply_text(fridge_text(user, items), reply_markup=fridge_keyboard(user, items))
             return
         elif action == "renamemenu":
+            # سازگاری با دکمه‌های نسخه‌های قدیمی؛ تنظیمات اکنون در همان پنل هستند.
             await q.answer()
-            await q.message.reply_text("✏️ کدوم رو می‌خوای تغییر بدی؟", reply_markup=fox_edit_menu_keyboard(user.telegram_id))
+            await q.message.edit_text(fox_profile_text(user), reply_markup=fox_keyboard(user.telegram_id, user.level, user.fox_level, user.fox_prestige_count))
             return
         elif action == "rename":
             context.user_data["fox_rename"] = True
@@ -3169,7 +3174,10 @@ async def fox_button(update, context):
             return
         elif action == "gendermenu":
             await q.answer()
-            await q.message.reply_text("⚧ جنسیت روباه را انتخاب کن:", reply_markup=fox_gender_pick_keyboard(user.telegram_id))
+            await q.message.edit_text(
+                fox_profile_text(user) + "\n\n⚧ جنسیت روباه را انتخاب کن:",
+                reply_markup=fox_gender_pick_keyboard(user.telegram_id),
+            )
             return
         elif action in ("genderpick_male", "genderpick_female"):
             gender = "male" if action == "genderpick_male" else "female"
@@ -3708,9 +3716,7 @@ async def collect_fox_points(update,context):
         if await guard_fox_sickness(update, context, session, user): return
         if user.level<1:
             await update.message.reply_text("🔒 دریافت روب‌پوینت از سطح 1 باز می‌شود.",**reply_kwargs(update.message));return
-        claim_cooldown = FOX_CLAIM_COOLDOWN
-        if chat and is_group_chat_id(chat.id) and session.get(GroupChat, chat.id):
-            claim_cooldown = max(30, FOX_CLAIM_COOLDOWN - CITY_CLAIM_COOLDOWN_BONUS)  # باف شهر: روب روب سریعتر
+        claim_cooldown = city_claim_cooldown(session, chat.id if chat else None)
         left=seconds_left(user.last_fox_claim_at,claim_cooldown)
         if left:
             await update.message.reply_text(f"⏳ دریافت بعدی روب‌پوینت: {format_duration(left)} دیگر.",**reply_kwargs(update.message));return
@@ -3721,7 +3727,7 @@ async def collect_fox_points(update,context):
         rewards=apply_level_rewards(session,user,old_level,user.level)
         if chat: bump_city_stat(session, chat.id, chat.title, city_claim_total=1)
         session.commit()
-        text=f"🦊 +{earned:,} روب‌پوینت دریافت کردی!\n💰 موجودی روب‌پوینت: {user.fox_points:,}\n🐾 روب روب‌ها: {user.fox_claim_count:,}\n⏱ دریافت بعدی: 5 دقیقه دیگر"
+        text=f"🦊 +{earned:,} روب‌پوینت دریافت کردی!\n💰 موجودی روب‌پوینت: {user.fox_points:,}\n🐾 روب روب‌ها: {user.fox_claim_count:,}\n⏱ دریافت بعدی: {format_duration(claim_cooldown)} دیگر"
         if user.level>old_level: text += "\n\n"+level_up_message(old_level,user.level,rewards)
         await update.message.reply_text(text,**reply_kwargs(update.message))
     finally:session.close()
@@ -7094,7 +7100,17 @@ CITY_TREASURY_REQ = {
     9: 75_000_000,      # ارتقا از سطح ۹ به آخرین سطح (۱۰)
 }
 CITY_MAX_LEVEL = 10         # آخرین سطح شهر ۱۰ است
-CITY_CLAIM_COOLDOWN_BONUS = 10  # ثانیه؛ باف «روب روب سریع‌تر»
+CITY_CLAIM_COOLDOWN_BONUS = 10  # ثانیه کاهش در هر سطح شهر
+
+def city_claim_cooldown(session, chat_id):
+    """زمان روب‌روب بر اساس سطح شهر: سطح ۱=۵ دقیقه و هر سطح ۱۰ ثانیه کمتر، تا سطح ۱۰."""
+    base = FOX_CLAIM_COOLDOWN
+    if not is_group_chat_id(chat_id):
+        return base
+    row = session.get(GroupChat, chat_id)
+    level = max(1, min(CITY_MAX_LEVEL, int(row.city_level or 1))) if row else 1
+    reduction = (level - 1) * CITY_CLAIM_COOLDOWN_BONUS
+    return max(30, base - reduction)
 CITY_DONATE_REWARD = 200    # پاداش هر دونیت‌کننده هنگام ارتقای شهر
 
 # ---------- شهردار و مارکت روبی ----------
@@ -7192,6 +7208,8 @@ def city_panel_text(session, row):
     r_hunt = city_ranking_position(session, 'city_hunt_total', hunt_total)
     r_treasury = city_ranking_position(session, 'city_treasury', treasury)
     mayor = city_mayor_display_label(row)
+    cooldown_reduction = (max(1, min(CITY_MAX_LEVEL, int(level))) - 1) * CITY_CLAIM_COOLDOWN_BONUS
+    current_claim_cooldown = max(30, FOX_CLAIM_COOLDOWN - cooldown_reduction)
     mayor_hint = "\n┘─ 🦁 مدیریت شهرداری: «شهردار روبی»" if level >= CITY_MAYOR_UNLOCK_LEVEL else ""
     if level >= CITY_MAX_LEVEL:
         goals_block = "🏆 شهر به بالاترین سطح ممکن رسیده!"
@@ -7217,7 +7235,7 @@ def city_panel_text(session, row):
         f"🏦 خزانه : {fa_compact_number(treasury)} 🪙\n"
         f"┘─ 🎖️ رتبه شهر از نظر خزانه (#{r_treasury:,})\n\n"
         "⏫ باف های شهر ⬇️\n"
-        f"┘─ 🐾 روب روب سریعتر : -{CITY_CLAIM_COOLDOWN_BONUS} ثانیه ⏳\n"
+        f"┘─ 🐾 زمان روب روب : {format_duration(current_claim_cooldown)} (کاهش {cooldown_reduction} ثانیه) ⏳\n"
         "┘─ 🦊 افزایش جمعیت شهر (روباه های زخمی)\n\n"
         f"{goals_block}"
     )
@@ -9734,6 +9752,29 @@ async def admin_message_router(update, context):
         raise ApplicationHandlerStop
     return False
 
+async def handle_named_fox_text(update, context):
+    """اگر کاربر نام روباه خودش را بنویسد، پنل روباه باز می‌شود.
+    نمونه: «احمد» یا «احمد روباه» یا «روباه احمد».
+    """
+    if not update.message or not update.message.text:
+        return False
+    raw = update.message.text.strip()
+    normalized = re.sub(r"\s+", " ", raw.replace("\u200c", " ")).strip().casefold()
+    if not normalized or len(normalized) > 40:
+        return False
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        name = (user.fox_name or "مکار").strip()
+        name_norm = re.sub(r"\s+", " ", name.replace("\u200c", " ")).strip().casefold()
+        candidates = {name_norm, f"{name_norm} روباه", f"روباه {name_norm}"}
+        if normalized not in candidates:
+            return False
+    finally:
+        session.close()
+    await fox_command(update, context)
+    return True
+
 async def text_router(update, context):
     if await support_admin_reply(update, context): return
     if await support_text(update, context): return
@@ -9750,6 +9791,7 @@ async def text_router(update, context):
     if await handle_market_text(update, context): return
     if await handle_city_donate_text(update, context): return
     text=update.message.text.strip()
+    if await handle_named_fox_text(update, context): return
     if text in {"ایموجی روبی", "شکلک روبی"}:
         await emoji_command(update, context); return
     if text in {"روباهیو درس", "روباهیو درس!"}:
@@ -9864,6 +9906,25 @@ async def persian_slash_router(update, context):
         await transfer_command(update, context)
 
 
+async def post_init(application):
+    """منوی دستورهای کنار کادر پیام را مثل منوی ربات‌های تلگرام فعال می‌کند."""
+    commands = [
+        BotCommand("start", "شروع بازی"),
+        BotCommand("help", "راهنمای کامل بازی"),
+        BotCommand("shop", "فروشگاه"),
+        BotCommand("account", "بازیابی اکانت"),
+        BotCommand("referral", "رفرال جمع کن"),
+        BotCommand("fox", "پنل روباه"),
+        BotCommand("games", "بازی‌های روبی"),
+        BotCommand("profile", "پروفایل روبی"),
+    ]
+    try:
+        await application.bot.set_my_commands(commands)
+        await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    except Exception:
+        logger.exception("Could not configure Telegram command menu")
+
+
 def main():
     if not BOT_TOKEN: raise RuntimeError('BOT_TOKEN is missing. Add BOT_TOKEN in Railway Variables.')
     init_db()
@@ -9872,7 +9933,7 @@ def main():
     logger.info("پاسخ‌های دستی یادگرفته‌شده: %s", load_custom_entries())
     logger.info("مغز قانون‌محور: %s | هوش مصنوعی خارجی: %s", "فعال" if brain.ENABLED else "خاموش",
                 f"فعال ({ai.AI_PROVIDER} / {ai.AI_MODEL})" if ai.AI_ENABLED else "غیرفعال (AI_API_KEY تنظیم نشده)")
-    app=ApplicationBuilder().token(BOT_TOKEN).build()
+    app=ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
     if app.job_queue is None:
         raise RuntimeError("JobQueue is unavailable. Install python-telegram-bot[job-queue].")
     app.add_handler(CommandHandler("start",start_command))
