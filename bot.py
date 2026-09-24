@@ -27,7 +27,7 @@ import ai_service as ai
 import fox_brain as brain
 import fox_spell as spell
 import education as education_module
-from education import education_command, education_topic, education_answer, education_unlock, education_certificate, education_profile_line, eduq_button, eduq_admin_button, handle_edu_question_text, EducationProgress
+from education import education_command, education_topic, education_answer, education_unlock, education_certificate, education_profile_line, eduq_button, eduq_admin_button, handle_edu_question_text, start_design_question, EducationProgress, EduUserQuestion, TOPICS
 from ruby_emojis import emoji_command, emoji_callback, emoji_action, emoji_transfer_text
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
@@ -982,6 +982,10 @@ async def start_command(update, context):
             context.user_data['pending_referral'] = payload
     if not await require_membership(update, context):
         return
+    # لینک «طراحی سؤال» مستقیماً کاربر را به جریان خصوصی طراحی سؤال می‌برد.
+    if context.args and context.args[0].strip().lower() == "design_question":
+        if await start_design_question(update, context):
+            return
     session = get_session()
     try:
         existing = session.get(User, update.effective_user.id)
@@ -6190,6 +6194,7 @@ def admin_main_keyboard():
         [InlineKeyboardButton("🎟 ساخت کد هدیه", callback_data="admin:giftcode")],
         [InlineKeyboardButton("⭐ تنظیم سطح", callback_data="admin:setlevel")],
         [InlineKeyboardButton("🐾 تنظیم روب روب", callback_data="admin:setclaims")],
+        [InlineKeyboardButton("📚 سوالات درس", callback_data="admin:eduq")],
         [InlineKeyboardButton("⚽ پیش‌بینی فوتبال", callback_data="admin:football")],
         [InlineKeyboardButton("⛓️ زندان روبی", callback_data="admin:jailmenu")],
         [InlineKeyboardButton("📦 دریافت بکاپ اطلاعات", callback_data="admin:backup")],
@@ -6209,6 +6214,122 @@ async def admin_command(update, context):
     if not admin_only(update.effective_user.id): await update.message.reply_text("⛔ دسترسی نداری.", **reply_kwargs(update.message)); return
     await update.message.reply_text("🛠 پنل مدیریت\n\nبرای عملیات متنی، بعد از زدن گزینه مربوطه مقدار را بفرست.", reply_markup=admin_main_keyboard(), **reply_kwargs(update.message))
 
+
+
+def _eduq_admin_list_keyboard(status="pending", page=0):
+    page=max(0,int(page)); per_page=5
+    session=get_session()
+    try:
+        q=session.query(EduUserQuestion)
+        if status != "all":
+            q=q.filter(EduUserQuestion.status==status)
+        total=q.count()
+        rows=q.order_by(EduUserQuestion.id.desc()).offset(page*per_page).limit(per_page).all()
+    finally:
+        session.close()
+    buttons=[]
+    for row in rows:
+        title=TOPICS.get(row.topic,(row.topic,))[0]
+        short=(row.question or "").replace("\n"," ")[:45]
+        buttons.append([InlineKeyboardButton(
+            f"Q{row.id} | {title} | {short}",
+            callback_data=f"eduadmin:view:{row.id}"
+        )])
+    nav=[]
+    if page>0: nav.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"eduadmin:list:{status}:{page-1}"))
+    if (page+1)*per_page<total: nav.append(InlineKeyboardButton("بعدی ➡️", callback_data=f"eduadmin:list:{status}:{page+1}"))
+    if nav: buttons.append(nav)
+    buttons.append([
+        InlineKeyboardButton("⏳ در انتظار", callback_data="eduadmin:list:pending:0"),
+        InlineKeyboardButton("✅ تاییدشده", callback_data="eduadmin:list:approved:0"),
+    ])
+    buttons.append([
+        InlineKeyboardButton("❌ ردشده", callback_data="eduadmin:list:rejected:0"),
+        InlineKeyboardButton("📚 همه", callback_data="eduadmin:list:all:0"),
+    ])
+    buttons.append([InlineKeyboardButton("🔙 پنل مدیریت", callback_data="admin:back")])
+    return InlineKeyboardMarkup(buttons), len(rows), total
+
+async def eduq_admin_panel_message(message, status="pending", page=0):
+    session=get_session()
+    try:
+        counts={
+            st: session.query(EduUserQuestion).filter(EduUserQuestion.status==st).count()
+            for st in ("pending","approved","rejected")
+        }
+        total=sum(counts.values())
+    finally:
+        session.close()
+    kb, shown, filtered_total=_eduq_admin_list_keyboard(status,page)
+    status_label={"pending":"در انتظار بررسی","approved":"تاییدشده","rejected":"ردشده","all":"همه"}[status]
+    text=(
+        "📚 پنل سوالات روباهیو درس\n\n"
+        f"⏳ در انتظار: {counts['pending']:,}\n"
+        f"✅ تاییدشده: {counts['approved']:,}\n"
+        f"❌ ردشده: {counts['rejected']:,}\n"
+        f"📦 مجموع: {total:,}\n\n"
+        f"نمایش: {status_label} | صفحه {page+1}"
+    )
+    await message.reply_text(text, reply_markup=kb)
+
+async def eduq_admin_panel_callback(update, context):
+    q=update.callback_query
+    if not admin_only(q.from_user.id):
+        return await q.answer("⛔ فقط پشتیبانی دسترسی دارد.", show_alert=True)
+    parts=(q.data or "").split(":")
+    if len(parts)>=2 and parts[1]=="list":
+        status=parts[2] if len(parts)>2 else "pending"
+        page=int(parts[3]) if len(parts)>3 and parts[3].isdigit() else 0
+        if status not in {"pending","approved","rejected","all"}:
+            return await q.answer("انتخاب نامعتبر است.", show_alert=True)
+        await q.answer()
+        # برای جلوگیری از باقی ماندن چند پنل، همان پیام را ویرایش می‌کنیم.
+        session=get_session()
+        try:
+            counts={st: session.query(EduUserQuestion).filter(EduUserQuestion.status==st).count() for st in ("pending","approved","rejected")}
+            total=sum(counts.values())
+        finally:
+            session.close()
+        kb, shown, filtered_total=_eduq_admin_list_keyboard(status,page)
+        status_label={"pending":"در انتظار بررسی","approved":"تاییدشده","rejected":"ردشده","all":"همه"}[status]
+        await q.edit_message_text(
+            "📚 پنل سوالات روباهیو درس\n\n"
+            f"⏳ در انتظار: {counts['pending']:,}\n"
+            f"✅ تاییدشده: {counts['approved']:,}\n"
+            f"❌ ردشده: {counts['rejected']:,}\n"
+            f"📦 مجموع: {total:,}\n\n"
+            f"نمایش: {status_label} | صفحه {page+1}",
+            reply_markup=kb
+        )
+        return
+    if len(parts)>=2 and parts[1]=="view" and len(parts)>2 and parts[2].isdigit():
+        qid=int(parts[2]); session=get_session()
+        try:
+            row=session.get(EduUserQuestion,qid)
+            if not row:
+                return await q.answer("این سؤال پیدا نشد.", show_alert=True)
+            author=session.get(User,row.author_id)
+            title=TOPICS.get(row.topic,(row.topic,))[0]
+            status={"pending":"⏳ در انتظار بررسی","approved":"✅ تاییدشده","rejected":"❌ ردشده"}.get(row.status,row.status)
+            text=(
+                f"📝 سؤال Q{row.id}\n\n📚 موضوع: {title}\n"
+                f"👤 طراح: {user_mention(author) if author else row.author_id} | {row.author_id}\n\n"
+                f"❓ {row.question}\n\n"
+                f"✅ درست: {row.correct_opt}\n❌ نادرست ۱: {row.wrong1}\n❌ نادرست ۲: {row.wrong2}\n\n{status}"
+            )
+        finally:
+            session.close()
+        buttons=[]
+        if row.status=="pending":
+            buttons.append([
+                InlineKeyboardButton(f"✅ تایید (+{education_module.USER_Q_REWARD:,})", callback_data=f"eduqa:ok:{row.id}"),
+                InlineKeyboardButton("❌ رد", callback_data=f"eduqa:no:{row.id}")
+            ])
+        buttons.append([InlineKeyboardButton("🔙 بازگشت به لیست", callback_data="eduadmin:list:pending:0")])
+        await q.answer()
+        await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    await q.answer()
 
 async def admin_callback(update, context):
     q = update.callback_query
@@ -6241,6 +6362,8 @@ async def admin_callback(update, context):
         context.user_data["gc_draft"]["panel"] = (sent.chat_id, sent.message_id)
     elif action == "setlevel": context.user_data["admin_action"]="setlevel"; await q.message.reply_text("⭐ فرمت: آیدی عددی یا @شناسه کاربر + سطح")
     elif action == "setclaims": context.user_data["admin_action"]="setclaims"; await q.message.reply_text("🐾 فرمت: آیدی عددی یا @شناسه کاربر + تعداد روب روب\nمثال: 123456789 500\n(سطح کاربر هم بر اساس همین تعداد تنظیم می‌شود.)")
+    elif action == "eduq":
+        await eduq_admin_panel_message(q.message, "pending", 0)
     elif action == "jailmenu":
         await q.message.reply_text("⛓️ زندان روبی\n\nکاربر را با مدت و دلیل به زندان بینداز یا آزادش کن:", reply_markup=jail_menu_keyboard())
     elif action == "backup":
@@ -6828,16 +6951,33 @@ def fox_level_requirement(level):
     value=7250;step=900
     for _ in range(21,level+1):value+=step;step+=250
     return value
-async def _send_roobam_panel(msg,text,label,uid,username):
-    """پنل روبام/روباش. دکمه‌ی tg://user?id=... برای کاربرانی که حریم خصوصی‌شان اجازه‌ی لینک
-    نمی‌دهد (BUTTON_USER_PRIVACY_RESTRICTED) یا ربات هنوز نمی‌شناسدشان، از تلگرام BadRequest
-    می‌گیرد و قبلاً کل پنل ارسال نمی‌شد. حالا اگر دکمه رد شد، با لینک t.me/username و اگر
-    نبود بدون دکمه ارسال می‌شود تا پنل حتماً بیاید."""
+async def _send_roobam_panel(msg,text,label,uid,username,bot=None):
+    """همان متن روبام/روباش را با عکس پروفایل تلگرامی کاربر نشان می‌دهد؛ اگر عکس قابل دریافت نباشد، متن بدون عکس ارسال می‌شود."""
     label=strip_mentions(label) or str(uid)
     attempts=[InlineKeyboardMarkup([[InlineKeyboardButton(label,url=f"tg://user?id={uid}")]])]
     if username:
         attempts.append(InlineKeyboardMarkup([[InlineKeyboardButton(label,url=f"https://t.me/{username}")]]))
     attempts.append(None)
+
+    # اول تلاش می‌کنیم عکس پروفایل تلگرام کاربر را بگیریم.
+    photo_file_id=None
+    if bot is not None:
+        try:
+            photos=await bot.get_user_profile_photos(user_id=uid, limit=1)
+            if photos.total_count and photos.photos and photos.photos[0]:
+                photo_file_id=photos.photos[0][-1].file_id
+        except Exception as e:
+            logger.info("could not read Telegram profile photo for %s: %s",uid,e)
+
+    if photo_file_id:
+        for markup in attempts:
+            try:
+                await msg.reply_photo(photo=photo_file_id, caption=text, reply_markup=markup, **reply_kwargs(msg))
+                return
+            except BadRequest as e:
+                last_err=e
+                logger.warning("roobam photo panel rejected (%s); retrying",e)
+
     last_err=None
     for markup in attempts:
         try:
@@ -6846,7 +6986,6 @@ async def _send_roobam_panel(msg,text,label,uid,username):
         except BadRequest as e:
             last_err=e
             logger.warning("roobam panel rejected (%s); retrying with simpler markup",e)
-    # آخرین تلاش: شاید پیام مبدأ پاک شده باشد
     try:
         await msg.chat.send_message(text)
     except Exception:
@@ -6863,7 +7002,7 @@ async def roobam_command(update,context):
         text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 🦊 روباه : {user.fox_name or 'مکار'}\n┘─ ⚧ جنسیت روباه : {fox_gender_label(user.fox_gender)}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points or 0):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
         label=user_display_name(user)
     finally:session.close()
-    await _send_roobam_panel(update.message,text,label,target_id,target_username)
+    await _send_roobam_panel(update.message,text,label,target_id,target_username,context.bot)
 
 # ---------- دوستان روباهیو 🦊 ----------
 FRIEND_LIMIT = 3
@@ -9975,6 +10114,17 @@ async def text_router(update, context):
         await emoji_command(update, context); return
     if text in {"روباهیو درس", "روباهیو درس!"}:
         await education_command(update, context); return
+    if text in {"طراحی سوال", "طراحی سؤال", "طرح سوال", "طرح سؤال", "✍️ طراحی سوال", "✍️ طراحی سؤال"}:
+        if update.effective_chat and update.effective_chat.type != "private":
+            me = await context.bot.get_me()
+            await update.message.reply_text(
+                "✍️ طراحی سؤال فقط در پیوی ربات انجام می‌شود.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✍️ طراحی سؤال در پیوی", url=f"https://t.me/{me.username}?start=design_question")]]),
+                **reply_kwargs(update.message)
+            )
+        else:
+            await start_design_question(update, context)
+        return
     if text in {"پرچم", "پرچم روباهیو", "🌍 پرچم"}:
         await flag_command(update, context); return
     if text in FOX_CLAIM_ALIASES:
@@ -10137,7 +10287,7 @@ def main():
     app.add_handler(CallbackQueryHandler(support_button,pattern=r"^support:(?:open|cancel)(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|jailmenu|backup|back)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|eduq|jailmenu|backup|back)$"))
     app.add_handler(CallbackQueryHandler(admin_jailset_callback,pattern=r"^admin:jailset:(?:add|free)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
@@ -10165,6 +10315,7 @@ def main():
     app.add_handler(CallbackQueryHandler(education_unlock, pattern=r"^eduunlock:(yes|no):(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_certificate, pattern=r"^educert:(yes|no)$"))
     app.add_handler(CallbackQueryHandler(eduq_button, pattern=r"^eduq:"))
+    app.add_handler(CallbackQueryHandler(eduq_admin_panel_callback, pattern=r"^eduadmin:(?:list:(?:pending|approved|rejected|all):\d+|view:\d+)$"))
     app.add_handler(CallbackQueryHandler(eduq_admin_button, pattern=r"^eduqa:(?:ok|no):\d+$"))
     app.add_handler(CallbackQueryHandler(education_answer, pattern=r"^edu:(general|religion|history_geo|literature|math_iq):\d+:\d$"))
     app.add_handler(CallbackQueryHandler(flag_callback, pattern=r"^flag:(set|clear):\d+$"))

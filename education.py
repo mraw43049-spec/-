@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """روباهیو درس: پنج موضوع، سؤال‌های سه‌گزینه‌ای، زمان ۱۵ ثانیه و فاصله ۲۵ دقیقه‌ای و مدارک."""
-import json, random, logging
+import json, random, logging, re
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import Column, BigInteger, Integer, String, DateTime, Text
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -103,7 +103,7 @@ class EduUserQuestion(Base):
 
 USER_Q_OFFSET = 1_000_000     # شناسه‌ی سؤال کاربر در callback_data: OFFSET + id ردیف (سؤال‌های داخلی زیر OFFSET هستند)
 USER_Q_DAILY_LIMIT = 3        # حداکثر سؤال در روز برای هر موضوع
-USER_Q_REWARD = 1500          # جایزه‌ی هر سؤالِ تأییدشده (روب‌پوینت)
+USER_Q_REWARD = 500          # جایزه‌ی هر سؤالِ تأییدشده (روب‌پوینت)
 mention_hook = None           # bot.py آن را با user_mention (لینک آبی اسم) جایگزین می‌کند
 
 def _author_name(u):
@@ -150,7 +150,7 @@ def _edu_panel(s, u, p):
     lines.append("\n"+_progress_text(p))
     if p.pending_certificate:
         lines.append(f"\n🎓 برای دریافت مدرک {_name(p.certificates+1)} باید { _tuition(p.certificates):,} روب‌پوینت شهریه پرداخت کنی.")
-    ask_row=[InlineKeyboardButton("✍️ طرح سوال (۱٬۵۰۰ روب‌پوینت جایزه)",callback_data="eduq:menu")]
+    ask_row=[InlineKeyboardButton("✍️ طراحی سؤال در پیوی",callback_data="eduq:menu")]
     if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1500:
         left=1500-int((_now()-_aware(p.last_play_at)).total_seconds())
         return "\n".join(lines)+f"\n\n⏳ سؤال بعدی تا {left//60} دقیقه دیگر.", InlineKeyboardMarkup([ask_row])
@@ -158,6 +158,17 @@ def _edu_panel(s, u, p):
     return "\n".join(lines)+"\n\nبرای شروع، موضوع را انتخاب کن:", InlineKeyboardMarkup(rows)
 
 async def education_command(update, context):
+    # پنل درس و تمام دکمه‌های آن فقط در پیوی قابل استفاده‌اند تا اعضای دیگر گروه
+    # نتوانند روی پنل شخصی یک کاربر کلیک کنند.
+    if update.effective_chat and update.effective_chat.type != "private":
+        me = await context.bot.get_me()
+        url = f"https://t.me/{me.username}"  # ورود مستقیم به پیوی ربات؛ پنل درس با «روباهیو درس» باز می‌شود.
+        await update.message.reply_text(
+            "📚 پنل درس و طراحی سؤال فقط در پیوی ربات فعال است.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📚 ورود به پنل درس", url=url)]]),
+            **({"reply_to_message_id": update.message.message_id} if update.message else {})
+        )
+        return
     s=get_session()
     try:
         u=s.get(User, update.effective_user.id)
@@ -169,6 +180,8 @@ async def education_command(update, context):
     finally: s.close()
 
 async def education_topic(update, context):
+    if update.effective_chat and update.effective_chat.type != "private":
+        return await update.callback_query.answer("این پنل فقط در پیوی ربات قابل استفاده است.", show_alert=True)
     q=update.callback_query; topic=q.data.split(":")[1]; s=get_session()
     try:
         p=s.get(EducationProgress,q.from_user.id); u=s.get(User,q.from_user.id)
@@ -199,6 +212,8 @@ async def _start_question(q,s,p,topic):
     await q.answer(); await q.edit_message_text(f"{TOPICS[topic][0]}\n\n❓ {question}{designer}\n\n⏱ ۱۵ ثانیه فرصت داری.",reply_markup=_kb(topic,qid,opts))
 
 async def education_unlock(update, context):
+    if update.effective_chat and update.effective_chat.type != "private":
+        return await update.callback_query.answer("این پنل فقط در پیوی ربات قابل استفاده است.", show_alert=True)
     q=update.callback_query; _,decision,topic=q.data.split(":"); s=get_session()
     try:
         p=s.get(EducationProgress,q.from_user.id); u=s.get(User,q.from_user.id)
@@ -213,6 +228,8 @@ async def education_unlock(update, context):
     finally: s.close()
 
 async def education_answer(update, context):
+    if update.effective_chat and update.effective_chat.type != "private":
+        return await update.callback_query.answer("این پنل فقط در پیوی ربات قابل استفاده است.", show_alert=True)
     q=update.callback_query; _,topic,qid_s,choice_s=q.data.split(":"); qid=int(qid_s); choice=int(choice_s); s=get_session()
     try:
         p=s.get(EducationProgress,q.from_user.id)
@@ -241,6 +258,8 @@ async def education_answer(update, context):
     finally: s.close()
 
 async def education_certificate(update, context):
+    if update.effective_chat and update.effective_chat.type != "private":
+        return await update.callback_query.answer("این پنل فقط در پیوی ربات قابل استفاده است.", show_alert=True)
     q=update.callback_query; decision=q.data.split(":")[1]; s=get_session()
     try:
         p=s.get(EducationProgress,q.from_user.id); u=s.get(User,q.from_user.id)
@@ -262,7 +281,7 @@ def education_profile_line(session,user_id):
 
 # ======================= طرح سؤال توسط کاربر =======================
 # جریان: موضوع → متن سؤال → گزینه‌ی درست → دو گزینه‌ی نادرست → تأیید → ارسال برای پشتیبانی.
-# همه‌ی مرحله‌ها روی همان پیامِ پنل ویرایش می‌شوند. پشتیبان تأیید کند: ۱۵۰۰ روب‌پوینت به طراح
+# همه‌ی مرحله‌ها روی همان پیامِ پنل ویرایش می‌شوند. پشتیبان تأیید کند: ۵۰۰ روب‌پوینت به طراح
 # داده می‌شود و سؤال (با اسم طراح) وارد چرخه‌ی همان موضوع می‌شود.
 _Q_PROMPTS = {
     "question": "❓ متن سؤال را بفرست (حداکثر ۲۰۰ کاراکتر).",
@@ -274,6 +293,27 @@ _Q_ORDER = ["question", "correct", "wrong1", "wrong2"]
 _Q_LIMITS = {"question": (5, 200), "correct": (1, 40), "wrong1": (1, 40), "wrong2": (1, 40)}
 
 def _norm_opt(t): return " ".join((t or "").split()).casefold()
+
+def _norm_question(t):
+    """نرمال‌سازی سؤال برای جلوگیری از ثبت دوباره‌ی همان سؤال با فاصله/نیم‌فاصله/علائم متفاوت."""
+    t = (t or "").replace("\u200c", " ").replace("ي", "ی").replace("ك", "ک").casefold()
+    t = re.sub(r"[\u064B-\u065F\u0670]", "", t)  # اعراب
+    t = re.sub(r"[^\w\s]+", " ", t, flags=re.UNICODE)
+    return " ".join(t.split())
+
+def _is_duplicate_question(session, topic, question):
+    """سؤال تکراری را در سؤال‌های داخلی و تمام سؤال‌های طراحی‌شده (حتی ردشده) پیدا می‌کند."""
+    target = _norm_question(question)
+    if not target:
+        return False
+    for built_in, _, _ in TOPICS.get(topic, ("", []))[1]:
+        if _norm_question(built_in) == target:
+            return True
+    rows = session.query(EduUserQuestion).filter(EduUserQuestion.topic == topic).all()
+    return any(_norm_question(r.question) == target for r in rows)
+
+def _design_deeplink(bot_username):
+    return f"https://t.me/{bot_username}?start=design_question"
 
 def _cancel_kb(): return InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو", callback_data="eduq:cancel")]])
 
@@ -299,6 +339,13 @@ async def _safe_edit_msg(message, text, markup=None):
 async def eduq_button(update, context):
     q = update.callback_query; parts = (q.data or "").split(":"); action = parts[1] if len(parts) > 1 else ""
     uid = q.from_user.id
+    if q.message and q.message.chat and q.message.chat.type != "private":
+        if action == "menu":
+            me = await context.bot.get_me()
+            await q.answer("در حال انتقال به پیوی ربات…", url=_design_deeplink(me.username))
+        else:
+            await q.answer("این پنل فقط در پیوی ربات قابل استفاده است.", show_alert=True)
+        return
     if action == "cancel":
         context.user_data.pop("edu_q", None)
         action = "back"
@@ -352,6 +399,9 @@ async def _submit_question(q, context, st):
         if _remaining(s, uid, topic) <= 0:
             context.user_data.pop("edu_q", None)
             return await q.answer(f"⛔ سقف {USER_Q_DAILY_LIMIT} سؤال در روز برای این موضوع پر شده.", show_alert=True)
+        if _is_duplicate_question(s, topic, d["question"]):
+            context.user_data.pop("edu_q", None)
+            return await q.answer("⛔ این سؤال قبلاً ثبت شده و امکان طرح سؤال تکراری وجود ندارد.", show_alert=True)
         row = EduUserQuestion(author_id=uid, topic=topic, question=d["question"], correct_opt=d["correct"],
                               wrong1=d["wrong1"], wrong2=d["wrong2"], status="pending", day_key=_day_key())
         s.add(row); s.commit()
@@ -421,8 +471,38 @@ async def eduq_admin_button(update, context):
     try: await context.bot.send_message(author_id, author_msg)
     except Exception: pass
 
+async def start_design_question(update, context):
+    """ورود امن به جریان طراحی سؤال از deep-link؛ فقط پیوی."""
+    if not update.message or not update.effective_chat or update.effective_chat.type != "private":
+        return False
+    uid = update.effective_user.id
+    s = get_session()
+    try:
+        u = s.get(User, uid)
+        if not u:
+            u = User(telegram_id=uid, username=update.effective_user.username,
+                     first_name=update.effective_user.first_name)
+            s.add(u); s.commit()
+        rows = [[InlineKeyboardButton(f"{TOPICS[k][0]} — {_remaining(s, uid, k)}/{USER_Q_DAILY_LIMIT} باقی", callback_data=f"eduq:t:{k}")] for k in TOPICS]
+    finally:
+        s.close()
+    rows.append([InlineKeyboardButton("❌ لغو", callback_data="eduq:cancel")])
+    context.user_data.pop("edu_q", None)
+    await update.message.reply_text(
+        "✍️ طراحی سؤال\n\nموضوع سؤالت را انتخاب کن.\n"
+        f"📌 روزی حداکثر {USER_Q_DAILY_LIMIT} سؤال برای هر موضوع.\n"
+        f"🎁 هر سؤالِ تأییدشده {USER_Q_REWARD:,} روب‌پوینت جایزه دارد.\n"
+        "⛔ سؤال تکراری ثبت نمی‌شود.",
+        reply_markup=InlineKeyboardMarkup(rows)
+    )
+    return True
+
+
 async def handle_edu_question_text(update, context):
     """متن‌های مرحله‌ی طرح سؤال. True یعنی پیام مصرف شد."""
+    # هیچ مرحله‌ای از طراحی سؤال در گروه پذیرفته نمی‌شود.
+    if not update.effective_chat or update.effective_chat.type != "private":
+        return False
     st = context.user_data.get("edu_q")
     if not st or st.get("step") not in _Q_ORDER or not update.message or not update.message.text:
         return False
