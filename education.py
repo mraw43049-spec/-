@@ -150,11 +150,10 @@ def _edu_panel(s, u, p):
     lines.append("\n"+_progress_text(p))
     if p.pending_certificate:
         lines.append(f"\n🎓 برای دریافت مدرک {_name(p.certificates+1)} باید { _tuition(p.certificates):,} روب‌پوینت شهریه پرداخت کنی.")
-    ask_row=[InlineKeyboardButton("✍️ طراحی سؤال در پیوی",callback_data="eduq:menu")]
+    rows=[[InlineKeyboardButton(TOPICS[k][0],callback_data=f"edutopic:{k}")] for k in TOPICS]
     if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1500:
         left=1500-int((_now()-_aware(p.last_play_at)).total_seconds())
-        return "\n".join(lines)+f"\n\n⏳ سؤال بعدی تا {left//60} دقیقه دیگر.", InlineKeyboardMarkup([ask_row])
-    rows=[[InlineKeyboardButton(TOPICS[k][0],callback_data=f"edutopic:{k}")] for k in TOPICS]+[ask_row]
+        return "\n".join(lines)+f"\n\n⏳ سؤال بعدی تا {left//60} دقیقه دیگر.", InlineKeyboardMarkup(rows)
     return "\n".join(lines)+"\n\nبرای شروع، موضوع را انتخاب کن:", InlineKeyboardMarkup(rows)
 
 async def education_command(update, context):
@@ -164,7 +163,7 @@ async def education_command(update, context):
         me = await context.bot.get_me()
         url = f"https://t.me/{me.username}"  # ورود مستقیم به پیوی ربات؛ پنل درس با «روباهیو درس» باز می‌شود.
         await update.message.reply_text(
-            "📚 پنل درس و طراحی سؤال فقط در پیوی ربات فعال است.",
+            "📚 پنل درس فقط در پیوی ربات فعال است.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📚 ورود به پنل درس", url=url)]]),
             **({"reply_to_message_id": update.message.message_id} if update.message else {})
         )
@@ -364,6 +363,9 @@ async def eduq_button(update, context):
         s = get_session()
         try:
             if not s.get(User, uid): return await q.answer("ابتدا ربات را استارت کن.", show_alert=True)
+            p = s.get(EducationProgress, uid)
+            if p and int(p.certificates or 0) >= 15:
+                return await q.answer("🏆 به آخرین مدرک رسیدی؛ دیگر امکان طراحی سؤال نداری.", show_alert=True)
             rows = [[InlineKeyboardButton(f"{TOPICS[k][0]} — {_remaining(s, uid, k)}/{USER_Q_DAILY_LIMIT} باقی", callback_data=f"eduq:t:{k}")] for k in TOPICS]
         finally: s.close()
         rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="eduq:back")])
@@ -377,6 +379,9 @@ async def eduq_button(update, context):
         topic = parts[2]; s = get_session()
         try:
             if not s.get(User, uid): return await q.answer("ابتدا ربات را استارت کن.", show_alert=True)
+            p = s.get(EducationProgress, uid)
+            if p and int(p.certificates or 0) >= 15:
+                return await q.answer("🏆 به آخرین مدرک رسیدی؛ دیگر امکان طراحی سؤال نداری.", show_alert=True)
             left = _remaining(s, uid, topic)
         finally: s.close()
         if left <= 0: return await q.answer(f"⛔ امروز برای این موضوع {USER_Q_DAILY_LIMIT} سؤال فرستادی؛ فردا دوباره بیا.", show_alert=True)
@@ -396,6 +401,10 @@ async def _submit_question(q, context, st):
     try:
         u = s.get(User, uid)
         if not u: return await q.answer("ابتدا ربات را استارت کن.", show_alert=True)
+        p = s.get(EducationProgress, uid)
+        if p and int(p.certificates or 0) >= 15:
+            context.user_data.pop("edu_q", None)
+            return await q.answer("🏆 به آخرین مدرک رسیدی؛ دیگر امکان طراحی سؤال نداری.", show_alert=True)
         if _remaining(s, uid, topic) <= 0:
             context.user_data.pop("edu_q", None)
             return await q.answer(f"⛔ سقف {USER_Q_DAILY_LIMIT} سؤال در روز برای این موضوع پر شده.", show_alert=True)
@@ -441,6 +450,19 @@ async def eduq_admin_button(update, context):
     try:
         row = s.query(EduUserQuestion).filter(EduUserQuestion.id == qid).with_for_update().first()
         if not row: return await q.answer("این سؤال پیدا نشد.", show_alert=True)
+        if decision == "delete":
+            try: refs = json.loads(row.admin_msgs or "[]")
+            except Exception: refs = []
+            author_id = row.author_id; question_text = row.question
+            s.delete(row); s.commit()
+            await q.answer("🗑 سؤال از بات حذف شد.", show_alert=True)
+            for chat_id, message_id in refs:
+                try:
+                    await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="🗑 این سؤال توسط پشتیبانی از بات حذف شد.", reply_markup=None)
+                except Exception: pass
+            try: await context.bot.send_message(author_id, f"🗑 سؤال شما از سیستم روباهیو درس حذف شد.\n❓ {question_text}")
+            except Exception: pass
+            return
         if row.status != "pending":
             return await q.answer("این سؤال قبلاً بررسی شده.", show_alert=True)
         author = s.get(User, row.author_id)
@@ -483,6 +505,10 @@ async def start_design_question(update, context):
             u = User(telegram_id=uid, username=update.effective_user.username,
                      first_name=update.effective_user.first_name)
             s.add(u); s.commit()
+        p = s.get(EducationProgress, uid)
+        if p and int(p.certificates or 0) >= 15:
+            await update.message.reply_text("🏆 تمام مدارک را گرفتی؛ بعد از آخرین مدرک دیگر امکان طراحی سؤال نداری.")
+            return True
         rows = [[InlineKeyboardButton(f"{TOPICS[k][0]} — {_remaining(s, uid, k)}/{USER_Q_DAILY_LIMIT} باقی", callback_data=f"eduq:t:{k}")] for k in TOPICS]
     finally:
         s.close()

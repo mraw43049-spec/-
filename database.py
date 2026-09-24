@@ -54,6 +54,8 @@ class User(Base):
     # داده‌های روباه؛ همه nullable/default هستند تا دیتابیس قبلی بدون حذف کاربران مهاجرت کند.
     fox_name = Column(String, nullable=False, default='مکار')
     fox_gender = Column(String, nullable=False, default='')  # '' نامشخص، 'male' مرد، 'female' زن
+    marriage_lock_until = Column(DateTime(timezone=True), nullable=True)
+    potion_count = Column(Integer, nullable=False, default=0)
     fox_level = Column(Integer, nullable=False, default=1)
     fox_belly = Column(Integer, nullable=False, default=3)
     fox_belly_capacity = Column(Integer, nullable=False, default=3)
@@ -106,6 +108,41 @@ class User(Base):
     injured_fox_stock = Column(Integer, nullable=False, default=0)
     spam_window_at = Column(DateTime(timezone=True), nullable=True)
     spam_count = Column(Integer, nullable=False, default=0)
+
+
+class RubyMarriage(Base):
+    __tablename__ = 'ruby_marriages'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    male_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False, index=True)
+    female_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False, index=True)
+    gift_item_key = Column(String, nullable=False)
+    gift_emoji = Column(String, nullable=False)
+    status = Column(String, nullable=False, default='pending')  # pending | active | divorced
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    divorced_at = Column(DateTime(timezone=True), nullable=True)
+    relation = Column(Integer, nullable=False, default=0)
+    last_relation_at = Column(DateTime(timezone=True), nullable=True)
+    pregnancy_started_at = Column(DateTime(timezone=True), nullable=True)
+    pregnancy_gender = Column(String, nullable=True)
+    pregnancy_decision = Column(String, nullable=True)  # pending | continue | aborted
+    baby_id = Column(Integer, nullable=True)
+
+
+class RubyBaby(Base):
+    __tablename__ = 'ruby_babies'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    marriage_id = Column(Integer, ForeignKey('ruby_marriages.id'), nullable=False, unique=True, index=True)
+    name = Column(String, nullable=False, default='نینی روباه')
+    gender = Column(String, nullable=False)  # male | female
+    level = Column(Integer, nullable=False, default=1)
+    belly = Column(Integer, nullable=False, default=1)
+    belly_capacity = Column(Integer, nullable=False, default=1)
+    points = Column(Integer, nullable=False, default=0)
+    last_production_at = Column(DateTime(timezone=True), nullable=True)
+    last_hunger_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class RubyEmojiItem(Base):
     __tablename__ = 'ruby_emoji_items'
@@ -536,6 +573,8 @@ def init_db():
         'spam_window_at': DT_SQL_TYPE,
         'spam_count': 'INTEGER NOT NULL DEFAULT 0',
         'fox_gender': "VARCHAR NOT NULL DEFAULT ''",
+        'marriage_lock_until': DT_SQL_TYPE,
+        'potion_count': 'INTEGER NOT NULL DEFAULT 0',
     }
     with engine.begin() as conn:
         added_user_cols = set()
@@ -612,6 +651,7 @@ def init_db():
         else:
             conn.execute(text("UPDATE users SET injured_fox_stock = 0 WHERE injured_fox_stock IS NULL OR injured_fox_stock < 0"))
         conn.execute(text("UPDATE users SET spam_count = 0 WHERE spam_count IS NULL OR spam_count < 0"))
+        conn.execute(text("UPDATE users SET potion_count = 0 WHERE potion_count IS NULL OR potion_count < 0"))
         if 'total_earned' not in cols:
             conn.execute(text('UPDATE users SET total_earned = points WHERE total_earned = 0'))
         if 'group_chats' in inspector.get_table_names():
