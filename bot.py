@@ -45,7 +45,7 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 FOX_UNLOCK_LEVEL = 3
-MARRIAGE_UNLOCK_LEVEL = 5
+MARRIAGE_UNLOCK_LEVEL = 3
 MARRIAGE_PROPOSAL_HOURS = 12
 MARRIAGE_DIVORCE_WAIT_HOURS = 24
 MARRIAGE_REJOIN_LOCK_HOURS = 14
@@ -6234,6 +6234,7 @@ def admin_main_keyboard():
         [InlineKeyboardButton("🐾 تنظیم روب روب", callback_data="admin:setclaims")],
         [InlineKeyboardButton("📚 سوالات درس", callback_data="admin:eduq")],
         [InlineKeyboardButton("🍼 نینی روبی", callback_data="admin:baby")],
+        [InlineKeyboardButton("💞 تنظیم رابطه ازدواج", callback_data="admin:marriage_relation")],
         [InlineKeyboardButton("⚽ پیش‌بینی فوتبال", callback_data="admin:football")],
         [InlineKeyboardButton("⛓️ زندان روبی", callback_data="admin:jailmenu")],
         [InlineKeyboardButton("📦 دریافت بکاپ اطلاعات", callback_data="admin:backup")],
@@ -6387,7 +6388,7 @@ async def admin_callback(update, context):
             if not target or not m or not baby:
                 await q.answer('نینی برای این کاربر پیدا نشد.',show_alert=True); return
             baby_settle(session,baby); session.commit(); male=session.get(User,m.male_id); female=session.get(User,m.female_id)
-            text_out=(f'🍼 پنل پشتیبانی نینی روبی\n\n👤 پدر: {user_display_name(male) if male else m.male_id}\n👤 مادر: {user_display_name(female) if female else m.female_id}\n💞 رابطه والدین: {int(m.relation or 0)}/50\n\n{baby_upgrade_text(baby)}\n\n🍖 وضعیت تولید: {"فعال؛ هر دو والد سیرند" if male and female and int(male.fox_belly or 0)>=2 and int(female.fox_belly or 0)>=2 else "متوقف؛ یکی از والدین گرسنه است"}')
+            text_out=(f'🍼 پنل پشتیبانی نینی روبی\n\n👤 پدر: {user_display_name(male) if male else m.male_id}\n👤 مادر: {user_display_name(female) if female else m.female_id}\n💞 رابطه والدین: {int(m.relation or 0)}/50\n\n{baby_upgrade_text(baby)}\n\n🍖 وضعیت تولید: {"فعال؛ هر دو والد سیرند" if male and female and int(male.fox_belly or 0)>0 and int(female.fox_belly or 0)>0 else "متوقف؛ یکی از والدین گرسنه است"}')
             await q.message.edit_text(text_out, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔄 تازه‌سازی', callback_data=f'admin:babyrefresh:{target_id}')],[InlineKeyboardButton('🔙 پنل مدیریت', callback_data='admin:back')]]))
             return
         finally:
@@ -6422,6 +6423,9 @@ async def admin_callback(update, context):
     elif action == "baby":
         context.user_data['admin_action']='baby_lookup'
         await q.message.reply_text('🍼 پنل پشتیبانی نینی روبی\n\nآیدی عددی کاربر را بفرست.\nمثال: 7433300089')
+    elif action == "marriage_relation":
+        context.user_data['admin_action']='marriage_relation'
+        await q.message.reply_text('💞 تنظیم رابطه ازدواج (فقط پشتیبانی)\n\nآیدی عددی یکی از دو همسر را بفرست.\nرابطه ازدواج فعال همان زوج روی 50/50 تنظیم می‌شود.')
     elif action == "jailmenu":
         await q.message.reply_text("⛓️ زندان روبی\n\nکاربر را با مدت و دلیل به زندان بینداز یا آزادش کن:", reply_markup=jail_menu_keyboard())
     elif action == "backup":
@@ -6523,8 +6527,37 @@ async def admin_text(update, context):
                 await update.message.reply_text(f'💕 ازدواج فعال است اما نینی روبی هنوز متولد نشده.\n👤 کاربر: {target_id}\n💞 رابطه: {int(m.relation or 0)}/50'); return True
             baby_settle(session,baby); session.commit()
             male=session.get(User,m.male_id); female=session.get(User,m.female_id)
-            text_out=(f'🍼 پنل پشتیبانی نینی روبی\n\n👤 پدر: {user_display_name(male) if male else m.male_id}\n👤 مادر: {user_display_name(female) if female else m.female_id}\n💞 رابطه والدین: {int(m.relation or 0)}/50\n\n{baby_upgrade_text(baby)}\n\n🍖 وضعیت تولید: {"فعال؛ هر دو والد سیرند" if male and female and int(male.fox_belly or 0)>=2 and int(female.fox_belly or 0)>=2 else "متوقف؛ یکی از والدین گرسنه است"}')
+            text_out=(f'🍼 پنل پشتیبانی نینی روبی\n\n👤 پدر: {user_display_name(male) if male else m.male_id}\n👤 مادر: {user_display_name(female) if female else m.female_id}\n💞 رابطه والدین: {int(m.relation or 0)}/50\n\n{baby_upgrade_text(baby)}\n\n🍖 وضعیت تولید: {"فعال؛ هر دو والد سیرند" if male and female and int(male.fox_belly or 0)>0 and int(female.fox_belly or 0)>0 else "متوقف؛ یکی از والدین گرسنه است"}')
             await update.message.reply_text(text_out, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔄 تازه‌سازی', callback_data=f'admin:babyrefresh:{target_id}')],[InlineKeyboardButton('🔙 پنل مدیریت', callback_data='admin:back')]]))
+            return True
+        finally:
+            session.close()
+    if action == "marriage_relation":
+        digits = text.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789')).replace(',', '').replace('،','').strip()
+        if not digits.isdigit():
+            context.user_data['admin_action']='marriage_relation'
+            await update.message.reply_text('❗️ فقط آیدی عددی کاربر را بفرست.')
+            return True
+        target_id=int(digits)
+        session=get_session()
+        try:
+            target=session.get(User,target_id)
+            m=active_marriage(session,target_id) if target else None
+            if not target:
+                context.user_data['admin_action']='marriage_relation'
+                await update.message.reply_text('❌ کاربر پیدا نشد.')
+                return True
+            if not m:
+                context.user_data['admin_action']='marriage_relation'
+                await update.message.reply_text('❌ این کاربر ازدواج فعال ندارد.')
+                return True
+            m.relation=50
+            m.last_relation_at=None
+            session.commit()
+            await update.message.reply_text(
+                f'✅ رابطه ازدواج این زوج توسط پشتیبانی روی 50/50 تنظیم شد.\n\n'
+                f'👤 طرف اول: {m.male_id}\n👤 طرف دوم: {m.female_id}\n💞 رابطه: 50/50'
+            )
             return True
         finally:
             session.close()
@@ -7154,7 +7187,7 @@ def baby_settle(session, baby):
         for parent in (male, female):
             if parent:
                 settle_fox_hunger(parent)
-                if int(parent.fox_belly or 0) < 2:
+                if int(parent.fox_belly or 0) <= 0:
                     parents_ok = False
             else:
                 parents_ok = False
@@ -7215,11 +7248,12 @@ def marriage_panel(session, viewer):
     if m.status == "active":
         left=marriage_relation_left(m)
         if left == 0:
-            rows.append([InlineKeyboardButton("💞 حال", callback_data=f"marriage:action:{m.id}:حال"), InlineKeyboardButton("💋 بوسه", callback_data=f"marriage:action:{m.id}:بوسه"), InlineKeyboardButton("🫂 بغل", callback_data=f"marriage:action:{m.id}:بغل")])
+            lines += ["", "💞 برای رابطه، روی پیام همسرت ریپلای کن و فقط یکی از این‌ها را بنویس: حال / بوسه / بغل"]
         else:
-            rows.append([InlineKeyboardButton(f"⏳ رابطه بعدی {format_duration(left)}", callback_data=f"marriage:noop:{m.id}")])
+            lines += ["", f"⏳ رابطه بعدی: {format_duration(left)}"]
         rows.append([InlineKeyboardButton("💰 انتقال روب‌پوینت به همسر", callback_data=f"marriage:transfer:{m.id}")])
         if baby:
+            rows.append([InlineKeyboardButton("🍼 نینی روبی", callback_data=f"marriage:babyview:{m.id}")])
             rows.append([InlineKeyboardButton("🍖 غذا دادن به نینی", callback_data=f"marriage:feedmenu:{m.id}")])
             rows.append([InlineKeyboardButton("✏️ تغییر اسم نینی", callback_data=f"marriage:babyname:{m.id}")])
             if baby.level < BABY_MAX_LEVEL:
@@ -7269,7 +7303,7 @@ async def marriage_command(update, context):
     try:
         user=get_or_create_user(session, update.effective_user)
         if int(user.level or 1) < MARRIAGE_UNLOCK_LEVEL:
-            await update.message.reply_text("🔒 ازدواج روبی از سطح ۵ باز می‌شود.", **reply_kwargs(update.message)); return
+            await update.message.reply_text("🔒 ازدواج روبی از سطح ۳ باز می‌شود.", **reply_kwargs(update.message)); return
         # پاک‌سازی درخواست‌های منقضی
         for p in session.query(RubyMarriage).filter(RubyMarriage.status=='pending', RubyMarriage.expires_at != None).all():
             if now_utc() >= aware(p.expires_at): p.status='divorced'; p.divorced_at=now_utc()
@@ -7287,7 +7321,7 @@ async def marriage_callback(update, context):
     try:
         user=get_or_create_user(session,q.from_user)
         if int(user.level or 1) < MARRIAGE_UNLOCK_LEVEL:
-            return await q.answer("🔒 ازدواج روبی از سطح ۵ باز می‌شود.",show_alert=True)
+            return await q.answer("🔒 ازدواج روبی از سطح ۳ باز می‌شود.",show_alert=True)
         if action in ('start','gift'):
             gift_key=parts[3] if len(parts)>3 else None
             if gift_key not in MARRIAGE_GIFTS: return await q.answer("گزینه نامعتبر است.",show_alert=True)
@@ -7298,7 +7332,7 @@ async def marriage_callback(update, context):
             if not item: return await q.answer(f"❌ {MARRIAGE_GIFTS[gift_key][0]} را اول از ایموجی روبی خریداری کن.",show_alert=True)
             context.user_data['marriage_proposal']={'gift_key':gift_key,'emoji':item.emoji}
             await q.answer()
-            await q.message.edit_text("💕 ازدواج روبی 💍\n\n🔺 خواستگاری روبی | انتخاب همدم زندگی\n\n❗️ خانمی👩🏻‍🦰 خود را جهت خواستگاری انتخاب کنید :\n┘─ ❓ آیدی عددی یا @شناسه کاربری خانم را بفرست.\n(تنها دوستان مجرد و دارای سطح ۵ به بالا نمایش داده می‌شوند)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('❌ لغو',callback_data='marriage:cancel:0:x')]]))
+            await q.message.edit_text("💕 ازدواج روبی 💍\n\n🔺 خواستگاری روبی | انتخاب همدم زندگی\n\n❗️ خانمی👩🏻‍🦰 خود را جهت خواستگاری انتخاب کنید :\n┘─ ❓ آیدی عددی یا @شناسه کاربری خانم را بفرست.\n(تنها دوستان مجرد و دارای سطح ۳ به بالا نمایش داده می‌شوند)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('❌ لغو',callback_data='marriage:cancel:0:x')]]))
             return
         if action=='cancel':
             context.user_data.pop('marriage_proposal',None); await q.answer('لغو شد.');
@@ -7361,8 +7395,14 @@ async def marriage_callback(update, context):
         if action=='noop': return await q.answer(f'⏳ {format_duration(marriage_relation_left(m))} تا رابطه بعدی.',show_alert=True)
         if action=='transfer':
             context.user_data['marriage_transfer_mid']=mid
+            context.user_data['marriage_transfer_panel_ref']=(q.message.chat_id,q.message.message_id)
             await q.answer()
-            await q.message.reply_text('💰 انتقال روب‌پوینت به همسر\n\nمقدار روب‌پوینتی که می‌خواهی برای همسرت بفرستی را فقط به عدد بفرست.\nمثال: 50000', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('❌ لغو', callback_data=f'marriage:back:{mid}:x')]]))
+            transfer_text=("💕 ازدواج روبی 💍\n\n"
+                           "💰 انتقال روب‌پوینت به همسر\n\n"
+                           "مقدار روب‌پوینتی که می‌خواهی برای همسرت بفرستی را فقط به عدد بفرست.\n"
+                           "مثال: 50000\n\n"
+                           "💞 این مرحله داخل همین پنل ازدواج انجام می‌شود.")
+            await marriage_edit_panel(q,transfer_text,InlineKeyboardMarkup([[InlineKeyboardButton('❌ لغو', callback_data=f'marriage:back:{mid}:x')]]))
             return
         if action=='transferyes':
             data=context.user_data.get('marriage_transfer_confirm') or {}
@@ -7372,19 +7412,16 @@ async def marriage_callback(update, context):
             spouse=session.get(User,marriage_spouse_id(m,uid))
             if not spouse: return await q.answer('❌ همسر پیدا نشد.',show_alert=True)
             user.fox_points-=amount; spouse.fox_points=int(spouse.fox_points or 0)+amount; session.commit()
-            context.user_data.pop('marriage_transfer_confirm',None); context.user_data.pop('marriage_transfer_mid',None)
+            context.user_data.pop('marriage_transfer_confirm',None); context.user_data.pop('marriage_transfer_mid',None); context.user_data.pop('marriage_transfer_panel_ref',None)
             try: await context.bot.send_message(spouse.telegram_id, f'💰 همسر روبی‌ات {user_mention(user)} برایت {amount:,} روب‌پوینت فرستاد.\n🪙 موجودی جدید: {int(spouse.fox_points or 0):,}')
             except Exception: pass
             await q.answer(f'✅ {amount:,} روب‌پوینت برای همسرت ارسال شد.')
             text2,kb2=marriage_panel(session,user); await marriage_edit_panel(q,text2,kb2); return
         if action=='action':
-            kind=parts[3] if len(parts)>3 else ''
-            if kind not in MARRIAGE_ACTIONS: return await q.answer('عملیات نامعتبر.',show_alert=True)
-            left=marriage_relation_left(m)
-            if left: return await q.answer(f'⏳ رابطه بعدی {format_duration(left)} دیگر.',show_alert=True)
-            context.user_data['marriage_action_confirm']={'mid':mid,'kind':kind}
-            await q.answer(); await q.message.edit_text(f"💕 تأیید رابطه\n\nآیا می‌خواهی «{kind}» را برای همسر روبیت انجام بدهی؟",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('✅ تأیید',callback_data=f'marriage:actionyes:{mid}:{kind}'),InlineKeyboardButton('❌ لغو',callback_data=f'marriage:noop:{mid}')]])); return
+            return await q.answer('💞 برای انجام رابطه، روی پیام همسرت ریپلای کن و حال / بوسه / بغل را بنویس.',show_alert=True)
         if action=='actionyes':
+            return await q.answer('💞 برای انجام رابطه، روی پیام همسرت ریپلای کن و حال / بوسه / بغل را بنویس.',show_alert=True)
+        if action=='actionlegacy':
             kind=parts[3] if len(parts)>3 else ''
             left=marriage_relation_left(m)
             if left: return await q.answer(f'⏳ {format_duration(left)} مانده.',show_alert=True)
@@ -7413,6 +7450,14 @@ async def marriage_callback(update, context):
             except Exception:
                 pass
             await q.answer(f'💞 رابطه به {m.relation} رسید!'); ptxt,pkb=marriage_panel(session,actor); await marriage_edit_panel(q,msg+"\n\n"+ptxt,pkb); return
+        if action=='babyview':
+            baby=session.get(RubyBaby,m.baby_id) if m.baby_id else None
+            if not baby: return await q.answer('🍼 نینی روباه هنوز متولد نشده.',show_alert=True)
+            baby_settle(session,baby); session.commit()
+            text2,kb2=marriage_panel(session,user)
+            await q.answer()
+            await marriage_edit_panel(q,text2,kb2)
+            return
         if action=='feedmenu':
             baby=session.get(RubyBaby,m.baby_id) if m.baby_id else None
             if not baby: return await q.answer('نینی روباه هنوز متولد نشده.',show_alert=True)
@@ -7494,7 +7539,7 @@ async def marriage_callback(update, context):
             except Exception: pass
             await q.answer(f'💰 سهم تو: +{half:,} روب‌پوینت'); text,kb=marriage_panel(session,user); await marriage_edit_panel(q,text,kb); return
         if action=='back':
-            context.user_data.pop('marriage_transfer_mid',None); context.user_data.pop('marriage_transfer_confirm',None)
+            context.user_data.pop('marriage_transfer_mid',None); context.user_data.pop('marriage_transfer_confirm',None); context.user_data.pop('marriage_transfer_panel_ref',None)
             text,kb=marriage_panel(session,user); await q.answer(); await marriage_edit_panel(q,text,kb); return
         if action=='continue' or action=='abort':
             if uid != m.female_id: return await q.answer('⛔ فقط روباه زن می‌تواند درباره بارداری تصمیم بگیرد.',show_alert=True)
@@ -7600,23 +7645,108 @@ async def handle_marriage_text(update, context):
             if not spouse: return True
             context.user_data.pop('marriage_transfer_mid',None)
             context.user_data['marriage_transfer_confirm']={'mid':m.id,'amount':amount}
-            await update.message.reply_text(f'💰 انتقال روب‌پوینت به همسر\n\nگیرنده: {user_display_name(spouse)}\nمقدار: {amount:,} روب‌پوینت\n\nتأیید می‌کنی؟', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('✅ تأیید انتقال',callback_data=f'marriage:transferyes:{m.id}:x'),InlineKeyboardButton('❌ لغو',callback_data=f'marriage:back:{m.id}:x')]]))
+            panel_ref=context.user_data.get('marriage_transfer_panel_ref')
+            confirm_text=(f'💕 ازدواج روبی 💍\n\n💰 انتقال روب‌پوینت به همسر\n\n'
+                          f'گیرنده: {user_display_name(spouse)}\nمقدار: {amount:,} روب‌پوینت\n\n'
+                          f'❓ تأیید می‌کنی؟')
+            kb=InlineKeyboardMarkup([[InlineKeyboardButton('✅ تأیید انتقال',callback_data=f'marriage:transferyes:{m.id}:x'),InlineKeyboardButton('❌ لغو',callback_data=f'marriage:back:{m.id}:x')]])
+            try:
+                if panel_ref:
+                    chat_id,msg_id=panel_ref
+                    await context.bot.edit_message_caption(chat_id=chat_id,message_id=msg_id,caption=confirm_text,reply_markup=kb)
+                else:
+                    await update.message.reply_text(confirm_text,reply_markup=kb)
+            except Exception:
+                try:
+                    await update.message.reply_text(confirm_text,reply_markup=kb)
+                except Exception:
+                    pass
             return True
         finally:
             session.close()
-    # تعاملات ازدواج فقط برای افراد متاهل
+    # تعاملات ازدواج فقط با ریپلای مستقیم روی پیام همسر انجام می‌شود.
     if text not in MARRIAGE_ACTIONS: return False
+    if not update.effective_chat or update.effective_chat.type not in ('group','supergroup'):
+        return False
+    reply=update.message.reply_to_message
+    if not reply or not reply.from_user:
+        await update.message.reply_text('💞 برای انجام این کار باید روی پیام همسرت ریپلای کنی و حال / بوسه / بغل را بنویسی.')
+        return True
     session=get_session()
     try:
         m=active_marriage(session,update.effective_user.id)
         if not m: return False
         user=session.get(User,update.effective_user.id)
+        spouse_id=marriage_spouse_id(m,user.telegram_id)
+        if int(reply.from_user.id) != int(spouse_id):
+            await update.message.reply_text('❌ این پیام متعلق به همسر روبی‌ات نیست.')
+            return True
         left=marriage_relation_left(m)
-        if left: await update.message.reply_text(f'⏳ رابطه بعدی {format_duration(left)} دیگر.'); return True
-        context.user_data['marriage_action_confirm']={'mid':m.id,'kind':text}
-        await update.message.reply_text(f'💕 تأیید رابطه\n\nآیا می‌خواهی «{text}» را برای همسر روبیت انجام بدهی؟',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('✅ تأیید',callback_data=f'marriage:actionyes:{m.id}:{text}'),InlineKeyboardButton('❌ لغو',callback_data=f'marriage:noop:{m.id}')]]))
+        if left:
+            await update.message.reply_text(f'⏳ رابطه بعدی {format_duration(left)} دیگر.')
+            return True
+        spouse=session.get(User,spouse_id)
+        actor=user
+        m.relation=min(50,int(m.relation or 0)+1)
+        m.last_relation_at=now_utc()
+        if m.relation>=PREGNANCY_RELATION and not m.pregnancy_started_at and not m.baby_id:
+            m.pregnancy_started_at=now_utc(); m.pregnancy_gender=random.choice(['male','female']); m.pregnancy_decision='pending'
+        if m.relation>=BIRTH_RELATION and m.pregnancy_started_at and m.pregnancy_decision=='continue' and not m.baby_id:
+            baby=RubyBaby(marriage_id=m.id,name='نینی روباه',gender=m.pregnancy_gender or random.choice(['male','female']),level=1,belly=1,belly_capacity=1,points=0,last_hunger_at=now_utc(),last_production_at=now_utc()); session.add(baby); session.flush(); m.baby_id=baby.id
+        session.commit()
+        target_word='خانومیش' if actor.fox_gender=='male' else 'شوشوییش'
+        msg=random.choice(MARRIAGE_TEMPLATES[text]).format(actor=user_display_name(actor),target_word=target_word)
+        msg += f"\n\n💞 میزان رابطه: {int(m.relation)}/50"
+        if m.relation==PREGNANCY_RELATION:
+            msg += f"\n\n🤰 {user_display_name(spouse)}، شما از روباه {user_display_name(actor)} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
+            try:
+                await context.bot.send_message(m.female_id, f"🤰 شما از روباه {user_display_name(session.get(User,m.male_id))} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}\n\nبرای تصمیم‌گیری وارد «ازدواج روبی» شو.")
+            except Exception: pass
+        if m.relation==BIRTH_RELATION and m.baby_id:
+            msg += f"\n\n🎉 نینی روباه شما متولد شد! 🍼\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
+            for _uid in (m.male_id,m.female_id):
+                try: await context.bot.send_message(_uid, f"🎉 نینی روباه شما متولد شد!\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}")
+                except Exception: pass
+        # متن اقدام + میزان رابطه با تصویر ازدواج روبی، دقیقاً به همان پیام همسر ریپلای می‌شود.
+        try:
+            if os.path.exists(MARRIAGE_PANEL_IMAGE):
+                with open(MARRIAGE_PANEL_IMAGE,'rb') as fh:
+                    await context.bot.send_photo(chat_id=update.effective_chat.id,photo=fh,caption=msg,reply_to_message_id=reply.message_id)
+            else:
+                await update.message.reply_text(msg,reply_to_message_id=reply.message_id)
+        except Exception:
+            await update.message.reply_text(msg,reply_to_message_id=reply.message_id)
+        # اطلاع خصوصی به همسر هم ارسال می‌شود.
+        try:
+            if os.path.exists(MARRIAGE_PANEL_IMAGE):
+                with open(MARRIAGE_PANEL_IMAGE,'rb') as fh:
+                    await context.bot.send_photo(chat_id=spouse.telegram_id,photo=fh,caption=msg)
+            else:
+                await context.bot.send_message(spouse.telegram_id,msg)
+        except Exception:
+            pass
         return True
     finally: session.close()
+
+async def baby_command(update, context):
+    if not await require_membership(update, context): return
+    if not update.effective_user or not update.message: return
+    session=get_session()
+    try:
+        user=get_or_create_user(session,update.effective_user)
+        m=active_marriage(session,user.telegram_id)
+        if not m:
+            await update.message.reply_text('💍 برای دیدن نینی روبی باید ازدواج فعال داشته باشی.', **reply_kwargs(update.message))
+            return
+        baby=session.get(RubyBaby,m.baby_id) if m.baby_id else None
+        if not baby:
+            await update.message.reply_text('🍼 نینی روبی هنوز متولد نشده است.', **reply_kwargs(update.message))
+            return
+        baby_settle(session,baby); session.commit()
+        text,kb=marriage_panel(session,user)
+    finally:
+        session.close()
+    await marriage_send_panel(update.message,text,kb)
 
 async def roobam_command(update,context):
     if not await require_membership(update,context):return
@@ -10753,6 +10883,7 @@ async def text_router(update, context):
     if text in {"ایموجی روبی", "شکلک روبی"}:
         await emoji_command(update, context); return
     if text in {"ازدواج روبی", "ازدواج روبی!", "💕 ازدواج روبی 💍"}: await marriage_command(update,context); return
+    if text in {"نینی روبی", "نینی روباه", "🍼 نینی روبی"}: await baby_command(update,context); return
     if text in {"روباهیو درس", "روباهیو درس!"}:
         await education_command(update, context); return
     if text in {"طراحی سوال", "طراحی سؤال", "طرح سوال", "طرح سؤال", "✍️ طراحی سوال", "✍️ طراحی سؤال"}:
@@ -10928,7 +11059,7 @@ def main():
     app.add_handler(CallbackQueryHandler(support_button,pattern=r"^support:(?:open|cancel)(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|eduq|baby|babyrefresh:\d+|jailmenu|backup|back)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|backup|back)$"))
     app.add_handler(CallbackQueryHandler(admin_jailset_callback,pattern=r"^admin:jailset:(?:add|free)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
@@ -10952,7 +11083,7 @@ def main():
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:(home|storage):\d+$|^remoji:cat:[a-z_]+$"))
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:item:[a-z_]+:\d+$"))
     app.add_handler(CallbackQueryHandler(emoji_action, pattern=r"^remoji:(buyyes|buyno|select|transfer|sell|sellyes|transferyes|transferno):[a-z_0-9]+:\d+$|^remoji:upgrade:\d+$"))
-    app.add_handler(CallbackQueryHandler(marriage_callback, pattern=r"^marriage:(?:start|gift|cancel|proposalconfirm|accept|acceptyes|reject|action|actionyes|noop|transfer|transferyes|feedmenu|feedconfirm|feedyes|feed|babyname|babyupgrade|babyupgradeyes|babycollect|collectyes|back|continue|continueyes|abort|abortyes|divorce|divorceyes):[^:]+(?::[^:]+)?$"))
+    app.add_handler(CallbackQueryHandler(marriage_callback, pattern=r"^marriage:(?:start|gift|cancel|proposalconfirm|accept|acceptyes|reject|action|actionyes|noop|transfer|transferyes|babyview|feedmenu|feedconfirm|feedyes|feed|babyname|babyupgrade|babyupgradeyes|babycollect|collectyes|back|continue|continueyes|abort|abortyes|divorce|divorceyes):[^:]+(?::[^:]+)?$"))
     app.add_handler(CallbackQueryHandler(education_topic, pattern=r"^edutopic:(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_unlock, pattern=r"^eduunlock:(yes|no):(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_certificate, pattern=r"^educert:(yes|no)$"))
