@@ -26,7 +26,8 @@ from database import (
 import ai_service as ai
 import fox_brain as brain
 import fox_spell as spell
-from education import education_command, education_topic, education_answer, education_unlock, education_certificate, education_profile_line
+import education as education_module
+from education import education_command, education_topic, education_answer, education_unlock, education_certificate, education_profile_line, eduq_button, eduq_admin_button, handle_edu_question_text, EducationProgress
 from ruby_emojis import emoji_command, emoji_callback, emoji_action, emoji_transfer_text
 from game_logic import (
     GAME_EMOJIS, GAME_NAMES_FA, HUNT_ITEMS, fox_level_reward,
@@ -903,7 +904,7 @@ GUIDE_TOPICS = [
     ("🏦 بانک / بانک روبی", "از لول ۴ فعال است؛ افتتاح حساب و مدیریت بانک."),
     ("🃏 کازینو روبی", "از لول ۵ فعال است؛ منوی قمارهای روبی و ساخت میز."),
     ("👤 روبام / روباش", "پروفایل روبی خودت یا کاربری که روی پیامش ریپلای کرده‌ای."),
-    ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار و روب روب."),
+    ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار، روب روب و بیشترین پاسخ درست درس."),
     ("🎡 گردونه / چرخ شانس", "روزی یک‌بار؛ جایزه به‌صورت تصادفی انتخاب می‌شود."),
     ("🥷 قاچاق روباهیو", "از لول ۸ فعال است؛ ۳ تا ۱۵ روباه زخمی را قاچاق کن. هر روباه ۵٬۰۰۰ روب‌پوینت ارزش دارد؛ ریسک و زمان با تعداد روباه‌ها بیشتر می‌شود."),
     ("⛓️ زندان روبی", "اگر در قاچاق گیر بیفتی یا اسپم شدید کنی، موقتاً زندانی می‌شوی. در زندان فقط پنل زندان، خاطره و پرداخت جریمه فعال است."),
@@ -7985,6 +7986,7 @@ LEADERBOARD_CATEGORIES = [
     ('fox_rescued_count', '🎃 روباه های زخمی'),
     ('hunt_count', '⚔️ شکار'),
     ('fox_claim_count', '🐾 روب روب'),
+    ('edu_correct', '🎓 بیشترین پاسخ درست درس'),
 ]
 LEADERBOARD_CATEGORY_MAP = dict(LEADERBOARD_CATEGORIES)
 
@@ -8048,6 +8050,13 @@ def build_leaderboard_text(session, field, title, page=1):
         users.sort(key=lambda u:(-counts.get(u.telegram_id,0),u.telegram_id))
         users=users[:LEADERBOARD_LIMIT]
         entries=[f'{i}. {user_mention(u)} — {counts.get(u.telegram_id,0):,} رفرال' for i,u in enumerate(users,1)]
+    elif field == 'edu_correct':
+        rows = (session.query(User, EducationProgress.correct_answers)
+                .join(EducationProgress, EducationProgress.user_id == User.telegram_id)
+                .filter(EducationProgress.correct_answers > 0)
+                .order_by(EducationProgress.correct_answers.desc(), User.telegram_id.asc())
+                .limit(LEADERBOARD_LIMIT).all())
+        entries = [f'{i}. {user_mention(u)} — {int(c or 0):,} پاسخ درست' for i, (u, c) in enumerate(rows, 1)]
     else:
         users = session.query(User).order_by(getattr(User, field).desc(), User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
         entries = [f'{i}. {user_mention(u)} — {int(getattr(u, field) or 0):,}' for i, u in enumerate(users, 1)]
@@ -8059,6 +8068,8 @@ def leaderboard_profile_ids(session, field, page):
         counts=dict(session.query(Referral.referrer_id,__import__('sqlalchemy').func.count(Referral.id)).filter(Referral.status=='approved').group_by(Referral.referrer_id).all())
         users=session.query(User).filter(User.telegram_id.in_(list(counts.keys()) or [0])).all()
         users.sort(key=lambda u:(-counts.get(u.telegram_id,0),u.telegram_id))
+    elif field=='edu_correct':
+        users=[u for u,_c in session.query(User,EducationProgress.correct_answers).join(EducationProgress,EducationProgress.user_id==User.telegram_id).filter(EducationProgress.correct_answers>0).order_by(EducationProgress.correct_answers.desc(),User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()]
     else:
         users=session.query(User).order_by(getattr(User,field).desc(),User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
     start=(page-1)*LEADERBOARD_PAGE_SIZE
@@ -9954,6 +9965,7 @@ async def text_router(update, context):
     if await handle_points_text(update, context): return
     if await handle_bank_text(update, context): return
     if await handle_fox_rename_text(update, context): return
+    if await handle_edu_question_text(update, context): return
     if await handle_ruby_entry_text(update, context): return
     if await handle_market_text(update, context): return
     if await handle_city_donate_text(update, context): return
@@ -10097,6 +10109,7 @@ async def post_init(application):
 def main():
     if not BOT_TOKEN: raise RuntimeError('BOT_TOKEN is missing. Add BOT_TOKEN in Railway Variables.')
     init_db()
+    education_module.mention_hook = user_mention   # اسمِ طراحِ سؤال به‌صورت لینک آبی نمایش داده شود
     ai.set_knowledge(build_ai_knowledge())
     brain.set_guide(build_guide_entries())
     logger.info("پاسخ‌های دستی یادگرفته‌شده: %s", load_custom_entries())
@@ -10151,6 +10164,8 @@ def main():
     app.add_handler(CallbackQueryHandler(education_topic, pattern=r"^edutopic:(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_unlock, pattern=r"^eduunlock:(yes|no):(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_certificate, pattern=r"^educert:(yes|no)$"))
+    app.add_handler(CallbackQueryHandler(eduq_button, pattern=r"^eduq:"))
+    app.add_handler(CallbackQueryHandler(eduq_admin_button, pattern=r"^eduqa:(?:ok|no):\d+$"))
     app.add_handler(CallbackQueryHandler(education_answer, pattern=r"^edu:(general|religion|history_geo|literature|math_iq):\d+:\d$"))
     app.add_handler(CallbackQueryHandler(flag_callback, pattern=r"^flag:(set|clear):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_change_confirm,pattern=r"^bankchange:(yes|no):\d+$"))

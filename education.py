@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """روباهیو درس: پنج موضوع، سؤال‌های سه‌گزینه‌ای، زمان ۱۵ ثانیه و فاصله ۲۵ دقیقه‌ای و مدارک."""
-import json, random
+import json, random, logging
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import Column, BigInteger, Integer, String, DateTime
+from sqlalchemy import Column, BigInteger, Integer, String, DateTime, Text
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from database import Base, User, get_session
+from config import ADMIN_IDS
 
 TOPICS = {
     "general": ("📚 اطلاعات عمومی", [
@@ -83,6 +84,38 @@ class EducationProgress(Base):
     active_expires = Column(DateTime(timezone=True), nullable=True)
     pending_certificate = Column(Integer, nullable=False, default=0)
 
+class EduUserQuestion(Base):
+    """سؤال طراحی‌شده‌ی کاربر: بعد از تأیید پشتیبانی وارد چرخه‌ی سؤال‌های همان موضوع می‌شود."""
+    __tablename__ = "edu_user_questions"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    author_id = Column(BigInteger, nullable=False, index=True)
+    topic = Column(String, nullable=False)
+    question = Column(Text, nullable=False)
+    correct_opt = Column(String, nullable=False)
+    wrong1 = Column(String, nullable=False)
+    wrong2 = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="pending")   # pending / approved / rejected
+    day_key = Column(String, nullable=False)                      # روزِ ثبت (به وقت ایران) برای سقف روزانه
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    decided_by = Column(BigInteger, nullable=True)
+    admin_msgs = Column(Text, nullable=False, default="[]")       # [[chat_id, message_id], ...] پیام‌های ارسال‌شده به پشتیبان‌ها
+
+USER_Q_OFFSET = 1_000_000     # شناسه‌ی سؤال کاربر در callback_data: OFFSET + id ردیف (سؤال‌های داخلی زیر OFFSET هستند)
+USER_Q_DAILY_LIMIT = 3        # حداکثر سؤال در روز برای هر موضوع
+USER_Q_REWARD = 1500          # جایزه‌ی هر سؤالِ تأییدشده (روب‌پوینت)
+mention_hook = None           # bot.py آن را با user_mention (لینک آبی اسم) جایگزین می‌کند
+
+def _author_name(u):
+    if u is None: return "کاربر"
+    if mention_hook:
+        try: return mention_hook(u)
+        except Exception: pass
+    return u.first_name or u.username or str(u.telegram_id)
+
+def _day_key():
+    return (datetime.now(timezone.utc) + timedelta(hours=3, minutes=30)).strftime("%Y-%m-%d")   # روز به وقت ایران
+
 def _now(): return datetime.now(timezone.utc)
 def _aware(d): return d.replace(tzinfo=timezone.utc) if d and d.tzinfo is None else d
 # تعداد کل پاسخ‌های درستِ لازم برای هر مدرک (تجمعی، نه فقط برای همون مرحله):
@@ -95,7 +128,9 @@ def _name(n):
     names=["دانش‌آموز","دانش‌یار","پژوهشگر","دانش‌پژوه","فرهیخته","استاد کوچک","استاد دانا","متفکر","دانشمند","نابغه","حکیم","پروفسور","استاد بزرگ","خردمند","دانای روباهیو"]
     return names[min(n, len(names)-1)]
 def _kb(topic, qid, options):
-    return InlineKeyboardMarkup([[InlineKeyboardButton(f"{i+1}) {v}", callback_data=f"edu:{topic}:{qid}:{i}")] for i,v in enumerate(options)])
+    # options: لیست متن‌ها یا لیست (شماره‌ی اصلی گزینه، متن)؛ شماره‌ی اصلی داخل callback می‌رود تا ترتیب نمایش می‌تواند بُر بخورد.
+    pairs = [o if isinstance(o, tuple) else (i, o) for i, o in enumerate(options)]
+    return InlineKeyboardMarkup([[InlineKeyboardButton(f"{pos+1}) {v}", callback_data=f"edu:{topic}:{qid}:{i}")] for pos,(i,v) in enumerate(pairs)])
 def _confirm_unlock(topic):
     return InlineKeyboardMarkup([[InlineKeyboardButton("✅ بله، خرید", callback_data=f"eduunlock:yes:{topic}"), InlineKeyboardButton("❌ خیر", callback_data="eduunlock:no:general")]])
 def _confirm_certificate():
@@ -105,6 +140,23 @@ def _progress_text(p):
     remaining=max(0,_threshold(p.certificates)-int(p.correct_answers or 0)) if p.certificates<15 else 0
     return f"🎓 پاسخ‌های درست: {int(p.correct_answers or 0)}\n🔹 واحدها: {int(p.correct or 0)}\n🏅 مدارک: {p.certificates}/۱۵\n📈 تا مدرک بعدی: {remaining} پاسخ درست"
 
+def _edu_panel(s, u, p):
+    """(متن، کیبورد) پنل اصلی درس؛ هم برای /روباهیو درس و هم برای برگشت از طرح سؤال."""
+    unlocked=set((p.unlocked or "general").split(","))
+    lines=["📚 روباهیو درس\n","موضوع‌ها:"]
+    for k,(title,_) in TOPICS.items():
+        status="✅ باز" if k in unlocked else "🔒 قفل — ۳۰٬۰۰۰ روب‌پوینت"
+        lines.append(f"{title}: {status}")
+    lines.append("\n"+_progress_text(p))
+    if p.pending_certificate:
+        lines.append(f"\n🎓 برای دریافت مدرک {_name(p.certificates+1)} باید { _tuition(p.certificates):,} روب‌پوینت شهریه پرداخت کنی.")
+    ask_row=[InlineKeyboardButton("✍️ طرح سوال (۱٬۵۰۰ روب‌پوینت جایزه)",callback_data="eduq:menu")]
+    if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1500:
+        left=1500-int((_now()-_aware(p.last_play_at)).total_seconds())
+        return "\n".join(lines)+f"\n\n⏳ سؤال بعدی تا {left//60} دقیقه دیگر.", InlineKeyboardMarkup([ask_row])
+    rows=[[InlineKeyboardButton(TOPICS[k][0],callback_data=f"edutopic:{k}")] for k in TOPICS]+[ask_row]
+    return "\n".join(lines)+"\n\nبرای شروع، موضوع را انتخاب کن:", InlineKeyboardMarkup(rows)
+
 async def education_command(update, context):
     s=get_session()
     try:
@@ -112,18 +164,8 @@ async def education_command(update, context):
         if not u: return await update.message.reply_text("ابتدا با /start وارد شو.")
         p=s.get(EducationProgress,u.telegram_id)
         if not p: p=EducationProgress(user_id=u.telegram_id); s.add(p); s.commit()
-        unlocked=set((p.unlocked or "general").split(","))
-        lines=["📚 روباهیو درس\n","موضوع‌ها:"]
-        for k,(title,_) in TOPICS.items():
-            status="✅ باز" if k in unlocked else "🔒 قفل — ۳۰٬۰۰۰ روب‌پوینت"
-            lines.append(f"{title}: {status}")
-        lines.append("\n"+_progress_text(p))
-        if p.pending_certificate:
-            lines.append(f"\n🎓 برای دریافت مدرک {_name(p.certificates+1)} باید { _tuition(p.certificates):,} روب‌پوینت شهریه پرداخت کنی.")
-        if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1500:
-            left=1500-int((_now()-_aware(p.last_play_at)).total_seconds())
-            return await update.message.reply_text("\n".join(lines)+f"\n\n⏳ سؤال بعدی تا {left//60} دقیقه دیگر.")
-        await update.message.reply_text("\n".join(lines)+"\n\nبرای شروع، موضوع را انتخاب کن:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(TOPICS[k][0],callback_data=f"edutopic:{k}")] for k in TOPICS]))
+        text,kb=_edu_panel(s,u,p)
+        await update.message.reply_text(text, reply_markup=kb)
     finally: s.close()
 
 async def education_topic(update, context):
@@ -139,12 +181,22 @@ async def education_topic(update, context):
 
 async def _start_question(q,s,p,topic):
     seen=json.loads(p.answered or "{}"); used=set(seen.get(topic,[])); pool=TOPICS[topic][1]
-    available=[i for i in range(len(pool)) if i not in used]
-    if not available:
-        seen[topic]=[]; available=list(range(len(pool)))
-    qid=random.choice(available); question,opts,correct=pool[qid]
+    # سؤال‌های طراحی‌شده‌ی کاربران (تأییدشده)؛ سؤال‌های خودِ کاربر به خودش داده نمی‌شود.
+    user_qs={USER_Q_OFFSET+r.id: r for r in s.query(EduUserQuestion).filter(EduUserQuestion.topic==topic, EduUserQuestion.status=="approved", EduUserQuestion.author_id!=p.user_id).all()}
+    all_ids=list(range(len(pool)))+list(user_qs.keys())
+    available=[i for i in all_ids if i not in used]
+    if not available:                    # همه‌ی سؤال‌های این موضوع دیده شد → دور از اول
+        seen[topic]=[]; p.answered=json.dumps(seen); available=all_ids
+    qid=random.choice(available)
+    designer=""
+    if qid>=USER_Q_OFFSET:
+        r=user_qs[qid]; question=r.question
+        opts=[(0,r.correct_opt),(1,r.wrong1),(2,r.wrong2)]; random.shuffle(opts)     # درست همیشه شماره‌ی اصلی ۰ است، ترتیب نمایش بُر می‌خورد
+        designer=f"\n✍️ طراح: {_author_name(s.get(User,r.author_id))}"
+    else:
+        question,opts,correct=pool[qid]
     p.active_topic=topic; p.active_question=qid; p.active_expires=_now()+timedelta(seconds=15); p.last_play_at=_now(); s.commit()
-    await q.answer(); await q.edit_message_text(f"{TOPICS[topic][0]}\n\n❓ {question}\n\n⏱ ۱۵ ثانیه فرصت داری.",reply_markup=_kb(topic,qid,opts))
+    await q.answer(); await q.edit_message_text(f"{TOPICS[topic][0]}\n\n❓ {question}{designer}\n\n⏱ ۱۵ ثانیه فرصت داری.",reply_markup=_kb(topic,qid,opts))
 
 async def education_unlock(update, context):
     q=update.callback_query; _,decision,topic=q.data.split(":"); s=get_session()
@@ -167,7 +219,14 @@ async def education_answer(update, context):
         if not p or p.active_topic!=topic or p.active_question!=qid or not p.active_expires or _now()>_aware(p.active_expires):
             if p: p.active_topic=None; p.active_question=None; p.active_expires=None; s.commit()
             return await q.answer("⏰ زمان سؤال تمام شد؛ این دور پایان یافت.",show_alert=True)
-        question,opts,correct=TOPICS[topic][1][qid]
+        if qid>=USER_Q_OFFSET:
+            r=s.get(EduUserQuestion,qid-USER_Q_OFFSET)
+            if not r or r.status!="approved" or r.topic!=topic:
+                p.active_topic=None; p.active_question=None; p.active_expires=None; s.commit()
+                return await q.answer("این سؤال دیگر در دسترس نیست؛ دوباره تلاش کن.",show_alert=True)
+            correct=0
+        else:
+            question,opts,correct=TOPICS[topic][1][qid]
         seen=json.loads(p.answered or "{}"); seen.setdefault(topic,[]).append(qid); p.answered=json.dumps(seen)
         p.active_topic=None; p.active_question=None; p.active_expires=None
         if choice!=correct:
@@ -199,3 +258,202 @@ def education_profile_line(session,user_id):
     p=session.get(EducationProgress,user_id)
     if not p: return "🎓 تحصیلات: هنوز مدرکی دریافت نکرده"
     return f"🎓 تحصیلات: {_name(p.certificates)}"
+
+
+# ======================= طرح سؤال توسط کاربر =======================
+# جریان: موضوع → متن سؤال → گزینه‌ی درست → دو گزینه‌ی نادرست → تأیید → ارسال برای پشتیبانی.
+# همه‌ی مرحله‌ها روی همان پیامِ پنل ویرایش می‌شوند. پشتیبان تأیید کند: ۱۵۰۰ روب‌پوینت به طراح
+# داده می‌شود و سؤال (با اسم طراح) وارد چرخه‌ی همان موضوع می‌شود.
+_Q_PROMPTS = {
+    "question": "❓ متن سؤال را بفرست (حداکثر ۲۰۰ کاراکتر).",
+    "correct": "✅ حالا گزینه‌ی درست را بفرست.",
+    "wrong1": "❌ حالا گزینه‌ی نادرست اول را بفرست.",
+    "wrong2": "❌ حالا گزینه‌ی نادرست دوم را بفرست.",
+}
+_Q_ORDER = ["question", "correct", "wrong1", "wrong2"]
+_Q_LIMITS = {"question": (5, 200), "correct": (1, 40), "wrong1": (1, 40), "wrong2": (1, 40)}
+
+def _norm_opt(t): return " ".join((t or "").split()).casefold()
+
+def _cancel_kb(): return InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو", callback_data="eduq:cancel")]])
+
+def _draft_text(st, prompt=None):
+    d = st["data"]; lines = [f"✍️ طرح سؤال — {TOPICS[st['topic']][0]}", ""]
+    if "question" in d: lines.append(f"❓ {d['question']}")
+    if "correct" in d: lines.append(f"✅ {d['correct']}")
+    if "wrong1" in d: lines.append(f"❌ {d['wrong1']}")
+    if "wrong2" in d: lines.append(f"❌ {d['wrong2']}")
+    if prompt: lines += ["", prompt]
+    return "\n".join(lines)
+
+def _remaining(s, uid, topic):
+    used = s.query(EduUserQuestion).filter(EduUserQuestion.author_id == uid, EduUserQuestion.topic == topic, EduUserQuestion.day_key == _day_key()).count()
+    return max(0, USER_Q_DAILY_LIMIT - used)
+
+async def _safe_edit_msg(message, text, markup=None):
+    try:
+        await message.edit_text(text, reply_markup=markup)
+    except Exception as e:
+        if "not modified" not in str(e).lower(): raise
+
+async def eduq_button(update, context):
+    q = update.callback_query; parts = (q.data or "").split(":"); action = parts[1] if len(parts) > 1 else ""
+    uid = q.from_user.id
+    if action == "cancel":
+        context.user_data.pop("edu_q", None)
+        action = "back"
+    if action == "back":
+        s = get_session()
+        try:
+            u = s.get(User, uid)
+            if not u: return await q.answer("ابتدا ربات را استارت کن.", show_alert=True)
+            p = s.get(EducationProgress, uid)
+            if not p: p = EducationProgress(user_id=uid); s.add(p); s.commit()
+            text, kb = _edu_panel(s, u, p)
+        finally: s.close()
+        await q.answer(); return await _safe_edit_msg(q.message, text, kb)
+    if action == "menu":
+        context.user_data.pop("edu_q", None)
+        s = get_session()
+        try:
+            if not s.get(User, uid): return await q.answer("ابتدا ربات را استارت کن.", show_alert=True)
+            rows = [[InlineKeyboardButton(f"{TOPICS[k][0]} — {_remaining(s, uid, k)}/{USER_Q_DAILY_LIMIT} باقی", callback_data=f"eduq:t:{k}")] for k in TOPICS]
+        finally: s.close()
+        rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="eduq:back")])
+        await q.answer()
+        return await _safe_edit_msg(q.message,
+            "✍️ طرح سؤال\n\nموضوع سؤالت را انتخاب کن.\n"
+            f"📌 روزی حداکثر {USER_Q_DAILY_LIMIT} سؤال برای هر موضوع.\n"
+            f"🎁 هر سؤالی که پشتیبانی تأیید کند {USER_Q_REWARD:,} روب‌پوینت می‌گیری و سؤالت با اسم تو وارد چرخه‌ی درس می‌شود.",
+            InlineKeyboardMarkup(rows))
+    if action == "t" and len(parts) > 2 and parts[2] in TOPICS:
+        topic = parts[2]; s = get_session()
+        try:
+            if not s.get(User, uid): return await q.answer("ابتدا ربات را استارت کن.", show_alert=True)
+            left = _remaining(s, uid, topic)
+        finally: s.close()
+        if left <= 0: return await q.answer(f"⛔ امروز برای این موضوع {USER_Q_DAILY_LIMIT} سؤال فرستادی؛ فردا دوباره بیا.", show_alert=True)
+        st = {"step": "question", "topic": topic, "ref": (q.message.chat_id, q.message.message_id), "data": {}}
+        context.user_data["edu_q"] = st
+        await q.answer()
+        return await _safe_edit_msg(q.message, _draft_text(st, _Q_PROMPTS["question"]), _cancel_kb())
+    if action == "send":
+        st = context.user_data.get("edu_q")
+        if not st or st.get("step") != "confirm":
+            return await q.answer("درخواستی برای ارسال پیدا نشد؛ از اول شروع کن.", show_alert=True)
+        return await _submit_question(q, context, st)
+    await q.answer()
+
+async def _submit_question(q, context, st):
+    uid = q.from_user.id; topic = st["topic"]; d = st["data"]; s = get_session()
+    try:
+        u = s.get(User, uid)
+        if not u: return await q.answer("ابتدا ربات را استارت کن.", show_alert=True)
+        if _remaining(s, uid, topic) <= 0:
+            context.user_data.pop("edu_q", None)
+            return await q.answer(f"⛔ سقف {USER_Q_DAILY_LIMIT} سؤال در روز برای این موضوع پر شده.", show_alert=True)
+        row = EduUserQuestion(author_id=uid, topic=topic, question=d["question"], correct_opt=d["correct"],
+                              wrong1=d["wrong1"], wrong2=d["wrong2"], status="pending", day_key=_day_key())
+        s.add(row); s.commit()
+        context.user_data.pop("edu_q", None)
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ تأیید (+{USER_Q_REWARD:,})", callback_data=f"eduqa:ok:{row.id}"),
+                                    InlineKeyboardButton("❌ رد", callback_data=f"eduqa:no:{row.id}")]])
+        card = _admin_card(row, u, "⏳ در انتظار بررسی")
+        refs = []
+        for admin_id in ADMIN_IDS:
+            try:
+                m = await context.bot.send_message(admin_id, card, reply_markup=kb)
+                refs.append([admin_id, m.message_id])
+            except Exception as e:
+                logging.getLogger(__name__).warning("edu question delivery failed for admin %s: %s", admin_id, e)
+        row.admin_msgs = json.dumps(refs); s.commit()
+    finally: s.close()
+    await q.answer("✅ برای پشتیبانی ارسال شد.")
+    await _safe_edit_msg(q.message,
+        "✅ سؤالت برای پشتیبانی ارسال شد.\n"
+        f"اگر تأیید شود {USER_Q_REWARD:,} روب‌پوینت می‌گیری و سؤالت با اسم تو وارد چرخه‌ی درس می‌شود.",
+        InlineKeyboardMarkup([[InlineKeyboardButton("✍️ سؤال بعدی", callback_data="eduq:menu"), InlineKeyboardButton("🔙 بازگشت", callback_data="eduq:back")]]))
+
+def _admin_card(row, author, status_line):
+    return (f"📝 سؤال جدید برای روباهیو درس | Q{row.id}\n\n"
+            f"📚 موضوع: {TOPICS.get(row.topic, (row.topic,))[0]}\n"
+            f"👤 طراح: {_author_name(author)} | {row.author_id}\n\n"
+            f"❓ {row.question}\n"
+            f"✅ درست: {row.correct_opt}\n"
+            f"❌ نادرست ۱: {row.wrong1}\n"
+            f"❌ نادرست ۲: {row.wrong2}\n\n{status_line}")
+
+async def eduq_admin_button(update, context):
+    q = update.callback_query
+    if not q or not q.from_user or q.from_user.id not in ADMIN_IDS:
+        return await q.answer("⛔ فقط پشتیبان‌ها می‌توانند این سؤال را بررسی کنند.", show_alert=True)
+    _, decision, id_s = q.data.split(":"); qid = int(id_s); s = get_session()
+    try:
+        row = s.query(EduUserQuestion).filter(EduUserQuestion.id == qid).with_for_update().first()
+        if not row: return await q.answer("این سؤال پیدا نشد.", show_alert=True)
+        if row.status != "pending":
+            return await q.answer("این سؤال قبلاً بررسی شده.", show_alert=True)
+        author = s.get(User, row.author_id)
+        admin_name = q.from_user.first_name or str(q.from_user.id)
+        title = TOPICS.get(row.topic, (row.topic,))[0]
+        if decision == "ok":
+            row.status = "approved"
+            if author: author.fox_points = int(author.fox_points or 0) + USER_Q_REWARD
+            status_line = f"✅ تأیید شد توسط {admin_name} — {USER_Q_REWARD:,} روب‌پوینت به طراح داده شد."
+            author_msg = f"🎉 سؤالت در درس «{title}» تأیید شد و وارد چرخه‌ی سؤال‌ها شد!\n🎁 {USER_Q_REWARD:,} روب‌پوینت به حسابت اضافه شد."
+        else:
+            row.status = "rejected"
+            status_line = f"❌ رد شد توسط {admin_name}."
+            author_msg = f"❌ سؤالت در درس «{title}» توسط پشتیبانی تأیید نشد.\n❓ {row.question}"
+        row.decided_at = _now(); row.decided_by = q.from_user.id
+        s.commit()
+        card = _admin_card(row, author, status_line)
+        try: refs = json.loads(row.admin_msgs or "[]")
+        except Exception: refs = []
+        author_id = row.author_id
+    finally: s.close()
+    await q.answer("انجام شد.")
+    # کارتِ همه‌ی پشتیبان‌ها به‌روز می‌شود تا دو نفر یک سؤال را دوباره بررسی نکنند.
+    for chat_id, message_id in refs:
+        try: await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=card)
+        except Exception as e:
+            if "not modified" not in str(e).lower(): logging.getLogger(__name__).warning("edu question card edit failed: %s", e)
+    try: await context.bot.send_message(author_id, author_msg)
+    except Exception: pass
+
+async def handle_edu_question_text(update, context):
+    """متن‌های مرحله‌ی طرح سؤال. True یعنی پیام مصرف شد."""
+    st = context.user_data.get("edu_q")
+    if not st or st.get("step") not in _Q_ORDER or not update.message or not update.message.text:
+        return False
+    ref = st.get("ref")
+    if ref and update.effective_chat and update.effective_chat.id != ref[0]:
+        return False
+    text = " ".join(update.message.text.split())
+    if text.startswith("/"): return False
+    step = st["step"]; d = st["data"]; lo, hi = _Q_LIMITS[step]
+
+    async def show(t, kb):
+        if ref:
+            try:
+                await context.bot.edit_message_text(chat_id=ref[0], message_id=ref[1], text=t, reply_markup=kb); return
+            except Exception as e:
+                if "not modified" in str(e).lower(): return
+                logging.getLogger(__name__).warning("edu question panel edit failed: %s", e)
+        await update.message.reply_text(t, reply_markup=kb)
+
+    if not (lo <= len(text) <= hi):
+        await show(_draft_text(st, f"❌ طول متن باید بین {lo} تا {hi} کاراکتر باشد.\n{_Q_PROMPTS[step]}"), _cancel_kb()); return True
+    if step != "question" and _norm_opt(text) in {_norm_opt(d[k]) for k in ("correct", "wrong1", "wrong2") if k in d}:
+        await show(_draft_text(st, f"❌ گزینه‌ها نباید تکراری باشند.\n{_Q_PROMPTS[step]}"), _cancel_kb()); return True
+    d[step] = text
+    nxt = _Q_ORDER.index(step) + 1
+    if nxt < len(_Q_ORDER):
+        st["step"] = _Q_ORDER[nxt]
+        await show(_draft_text(st, _Q_PROMPTS[st["step"]]), _cancel_kb())
+    else:
+        st["step"] = "confirm"
+        await show(_draft_text(st, "آیا این سؤال برای پشتیبانی ارسال شود؟"),
+                   InlineKeyboardMarkup([[InlineKeyboardButton("✅ ارسال برای پشتیبانی", callback_data="eduq:send")],
+                                         [InlineKeyboardButton("❌ لغو", callback_data="eduq:cancel")]]))
+    return True
