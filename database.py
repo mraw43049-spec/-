@@ -25,10 +25,17 @@ if DATABASE_URL.startswith('postgresql://'):
         )
         DATABASE_URL = 'sqlite:///bot.db'
 
+_is_sqlite = DATABASE_URL.startswith('sqlite')
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
-    connect_args={'check_same_thread': False} if DATABASE_URL.startswith('sqlite') else {}
+    # با فعال‌شدن پردازش هم‌زمان آپدیت‌ها در bot.py، ممکنه چند هندلر هم‌زمان سشن دیتابیس
+    # بخوان؛ استخر پیش‌فرض (۵ کانکشن + ۱۰ overflow) برای این حالت کم بود و باعث صف و کندی می‌شد.
+    pool_size=20 if not _is_sqlite else 5,
+    max_overflow=40 if not _is_sqlite else 0,
+    pool_timeout=30,
+    pool_recycle=1800,
+    connect_args={'check_same_thread': False} if _is_sqlite else {}
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()

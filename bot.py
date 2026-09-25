@@ -13,6 +13,7 @@ from telegram.ext import (
     ApplicationBuilder, ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, ChatMemberHandler,
     ContextTypes, MessageHandler, filters, ExtBot
 )
+from telegram.request import HTTPXRequest
 
 from config import (
     ADMIN_IDS, BOT_TOKEN, CLAIM_COOLDOWN_SECONDS, CLAIM_KEYWORD, REFERRAL_REWARD,
@@ -73,7 +74,12 @@ for _lv in range(1, BABY_MAX_LEVEL + 1):
 
 FOX_MAX_LEVEL = 25
 FOX_HUNGER_INTERVAL_SECONDS = 35 * 60  # هر ۳۵ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
-INJURED_FOX_INTERVAL = 20 * 60
+# روباه زخمی: پایه هر ۴۵ دقیقه؛ به ازای هر سطح ارتقای شهر روبی، ۲ دقیقه زودتر می‌آید
+# (سطح ۱ = ۴۵ دقیقه، سطح ۲ = ۴۳ دقیقه، سطح ۳ = ۴۱ دقیقه و ...).
+INJURED_FOX_BASE_INTERVAL_MINUTES = 45
+INJURED_FOX_LEVEL_REDUCTION_MINUTES = 2
+INJURED_FOX_MIN_INTERVAL_MINUTES = 5  # سقف حداقلی برای جلوگیری از بمباران پیام در سطوح خیلی بالا
+INJURED_FOX_INTERVAL = INJURED_FOX_BASE_INTERVAL_MINUTES * 60  # (نگه‌داشته‌شده برای سازگاری با کدهای قدیمی)
 INJURED_FOX_COST = 10
 INJURED_FOX_REWARD_MIN = 200
 INJURED_FOX_REWARD_MAX = 2000
@@ -4685,6 +4691,7 @@ async def bot_joined_group(update, context):
             session.commit()
     finally:
         session.close()
+    schedule_injured_fox_job(context.application, cm.chat.id, 1)
     try:
         await context.bot.send_message(chat_id=cm.chat.id, text="یه روباه مکار و باهوش اینجاست 🦊 نمی‌خوای روب روب کنی براش💲🎃")
     except Exception:
@@ -4706,6 +4713,7 @@ async def register_group_chat(update, context):
             row.active = 1
         session.commit()
         if is_new:
+            schedule_injured_fox_job(context.application, chat.id, row.city_level or 1)
             try:
                 await context.bot.send_message(chat_id=chat.id, text="یه روباه مکار و باهوش اینجاست 🦊 نمی‌خوای روب روب کنی براش💲🎃")
             except Exception:
@@ -4717,44 +4725,78 @@ async def register_group_chat(update, context):
         session.close()
 
 
-async def post_injured_fox_job(context):
+def injured_fox_interval_seconds(city_level):
+    """فاصلهٔ زمانی روباه زخمی بر اساس سطح شهر روبی: پایه ۴۵ دقیقه، هر سطح ۲ دقیقه زودتر."""
+    level = max(1, int(city_level or 1))
+    minutes = INJURED_FOX_BASE_INTERVAL_MINUTES - INJURED_FOX_LEVEL_REDUCTION_MINUTES * (level - 1)
+    minutes = max(INJURED_FOX_MIN_INTERVAL_MINUTES, minutes)
+    return minutes * 60
+
+
+def schedule_injured_fox_job(application, chat_id, city_level=1, first_delay=None):
+    """جاب روباه زخمی مخصوص یک گپ را (دوباره) زمان‌بندی می‌کند؛ نسخهٔ قبلی همان گپ حذف می‌شود."""
+    job_queue = application.job_queue if application else None
+    if job_queue is None:
+        return
+    job_name = f"injured-fox-{chat_id}"
+    for job in job_queue.get_jobs_by_name(job_name):
+        job.schedule_removal()
+    interval = injured_fox_interval_seconds(city_level)
+    if first_delay is None:
+        # کمی پخش تصادفی بین گپ‌ها تا همه دقیقاً هم‌زمان با هم روباه نفرستند.
+        first_delay = random.randint(5, min(interval, 120))
+    job_queue.run_repeating(
+        post_injured_fox_job,
+        interval=interval,
+        first=first_delay,
+        name=job_name,
+        chat_id=chat_id,
+        data={"chat_id": chat_id},
+    )
+
+
+def schedule_all_injured_fox_jobs(application):
+    """موقع استارت ربات، برای همهٔ گپ‌های فعال، جاب روباه زخمی با فاصلهٔ متناسب با سطح شهرشان می‌سازد."""
     session = get_session()
     try:
         chats = session.query(GroupChat).filter(GroupChat.active == 1).all()
-        chat_ids = [c.chat_id for c in chats]
+        rows = [(c.chat_id, c.city_level or 1) for c in chats]
     finally:
         session.close()
+    for chat_id, city_level in rows:
+        schedule_injured_fox_job(application, chat_id, city_level)
 
-    for chat_id in chat_ids:
+
+async def post_injured_fox_job(context):
+    chat_id = context.job.chat_id
+    try:
+        required = random.randint(1, 4)  # 1/2/3 = نجات در همان تلاش؛ 4 = هر سه تلاش ناموفق
+        session = get_session()
         try:
-            # هر 20 دقیقه یک روباه زخمی جدید در هر گپی که ربات در آن فعال دیده شده.
-            required = random.randint(1, 4)  # 1/2/3 = نجات در همان تلاش؛ 4 = هر سه تلاش ناموفق
-            session = get_session()
-            try:
-                event = InjuredFox(chat_id=chat_id, required_attempts=required, attempts=0, status="pending", attempt_log="")
-                session.add(event)
-                session.commit()
-                event_id = event.id
-            finally:
-                session.close()
+            event = InjuredFox(chat_id=chat_id, required_attempts=required, attempts=0, status="pending", attempt_log="")
+            session.add(event)
+            session.commit()
+            event_id = event.id
+        finally:
+            session.close()
 
-            with open(INJURED_FOX_TRAPPED_IMAGE, "rb") as photo:
-                msg = await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=InputFile(photo),
-                    caption=injured_fox_text(0),
-                    reply_markup=injured_fox_keyboard(event_id),
-                )
-            session = get_session()
-            try:
-                event = session.get(InjuredFox, event_id)
-                if event:
-                    event.message_id = msg.message_id
-                    session.commit()
-            finally:
-                session.close()
-        except Exception as e:
-            logger.warning("post injured fox failed in %s: %s", chat_id, e)
+        with open(INJURED_FOX_TRAPPED_IMAGE, "rb") as photo:
+            msg = await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=InputFile(photo),
+                caption=injured_fox_text(0),
+                reply_markup=injured_fox_keyboard(event_id),
+            )
+        session = get_session()
+        try:
+            event = session.get(InjuredFox, event_id)
+            if event:
+                event.message_id = msg.message_id
+                session.commit()
+        finally:
+            session.close()
+    except Exception as e:
+        logger.warning("post injured fox failed in %s: %s", chat_id, e)
 
 
 async def injured_fox_button(update, context):
@@ -8518,6 +8560,8 @@ async def maybe_level_up_city(context, chat_id):
         session.close()
     if new_level is None:
         return
+    # با ارتقای شهر، روباه زخمی ۲ دقیقه زودتر از قبل می‌آید.
+    schedule_injured_fox_job(context.application, chat_id, new_level)
     try:
         await context.bot.send_message(
             chat_id,
@@ -11138,7 +11182,21 @@ def main():
     logger.info("پاسخ‌های دستی یادگرفته‌شده: %s", load_custom_entries())
     logger.info("مغز قانون‌محور: %s | هوش مصنوعی خارجی: %s", "فعال" if brain.ENABLED else "خاموش",
                 f"فعال ({ai.AI_PROVIDER} / {ai.AI_MODEL})" if ai.AI_ENABLED else "غیرفعال (AI_API_KEY تنظیم نشده)")
-    app=ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
+    # پیش‌فرض کتابخانه فقط ۱ کانکشن هم‌زمان به تلگرام باز می‌کند و آپدیت‌ها را یکی‌یکی
+    # (سریالی) پردازش می‌کند؛ همین باعث می‌شد با زیاد شدن گپ‌ها و کاربران، کل ربات کند شود
+    # چون هر پیام باید منتظر تمام‌شدن پردازش پیام قبلی (در هر گپی) می‌ماند.
+    # اینجا هم استخر کانکشن API تلگرام را بزرگ‌تر می‌کنیم و هم پردازش هم‌زمان آپدیت‌ها را فعال می‌کنیم.
+    request = HTTPXRequest(connection_pool_size=64, pool_timeout=20.0, connect_timeout=15.0, read_timeout=30.0, write_timeout=30.0)
+    get_updates_request = HTTPXRequest(connection_pool_size=8, pool_timeout=20.0, connect_timeout=15.0, read_timeout=40.0, write_timeout=30.0)
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .request(request)
+        .get_updates_request(get_updates_request)
+        .concurrent_updates(64)
+        .post_init(post_init)
+        .build()
+    )
     if app.job_queue is None:
         raise RuntimeError("JobQueue is unavailable. Install python-telegram-bot[job-queue].")
     app.add_handler(CommandHandler("start",start_command))
@@ -11240,7 +11298,7 @@ def main():
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POSTS & (filters.AUDIO | filters.Document.ALL), mood_channel_post), group=6)
     if app.job_queue:
         app.job_queue.run_repeating(settle_all_smuggling, interval=30, first=10, name="ruby-smuggling-settler")
-        app.job_queue.run_repeating(post_injured_fox_job, interval=INJURED_FOX_INTERVAL, first=5, name="injured-fox")
+        schedule_all_injured_fox_jobs(app)  # هر گپ جاب روباه زخمی مخصوص خودش را با فاصلهٔ متناسب با سطح شهرش می‌گیرد
         app.job_queue.run_repeating(update_market_prices_job, interval=FACTORY_MARKET_UPDATE_SECONDS, first=15, name="factory-market")
         app.job_queue.run_repeating(marriage_expire_job, interval=60, first=20, name="marriage-expire")
         if ADMIN_IDS:
