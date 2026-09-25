@@ -161,7 +161,7 @@ async def education_command(update, context):
     # نتوانند روی پنل شخصی یک کاربر کلیک کنند.
     if update.effective_chat and update.effective_chat.type != "private":
         me = await context.bot.get_me()
-        url = f"https://t.me/{me.username}"  # ورود مستقیم به پیوی ربات؛ پنل درس با «روباهیو درس» باز می‌شود.
+        url = f"https://t.me/{me.username}?start=edu_panel"  # با این لینک، پنل درس خودش در پیوی باز می‌شود؛ لازم نیست کاربر دوباره «روباهیو درس» را تایپ کند.
         await update.message.reply_text(
             "📚 پنل درس فقط در پیوی ربات فعال است.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📚 ورود به پنل درس", url=url)]]),

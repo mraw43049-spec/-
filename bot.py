@@ -1022,6 +1022,15 @@ async def start_command(update, context):
     if context.args and context.args[0].strip().lower() == "design_question":
         if await start_design_question(update, context):
             return
+    # لینک «روباهیو درس» از گروه مستقیماً پنل درس را در پیوی باز می‌کند؛ کاربر لازم نیست دوباره تایپ کند.
+    if context.args and context.args[0].strip().lower() == "edu_panel":
+        session = get_session()
+        try:
+            get_or_create_user(session, update.effective_user)
+        finally:
+            session.close()
+        await education_command(update, context)
+        return
     session = get_session()
     try:
         existing = session.get(User, update.effective_user.id)
@@ -7106,6 +7115,7 @@ async def _send_roobam_panel(msg,text,label,uid,username,bot=None):
 
 # ======================= ازدواج روبی 💕 =======================
 MARRIAGE_PANEL_IMAGE = os.path.join(os.path.dirname(__file__), 'marriage_panel.png')
+BABY_PANEL_IMAGE = os.path.join(os.path.dirname(__file__), 'baby_panel.png')  # عکس مخصوص نینی روباه؛ اگر فایل نبود، بدون عکس نمایش داده می‌شود (نه عکس ازدواج).
 
 MARRIAGE_GIFTS = {
     "gift": ("🎁", "کادو"),
@@ -7331,6 +7341,16 @@ async def marriage_send_panel(message, text, kb):
             logger.warning("marriage panel image send failed: %s", e)
     return await message.reply_text(text, reply_markup=kb, **reply_kwargs(message))
 
+async def baby_send_panel(message, text, kb):
+    """پنل «نینی روبی» را با عکس مخصوص نینی می‌فرستد، نه عکس ازدواج زوج."""
+    if os.path.exists(BABY_PANEL_IMAGE):
+        try:
+            with open(BABY_PANEL_IMAGE, 'rb') as fh:
+                return await message.reply_photo(photo=fh, caption=text, reply_markup=kb, **reply_kwargs(message))
+        except Exception as e:
+            logger.warning("baby panel image send failed: %s", e)
+    return await message.reply_text(text, reply_markup=kb, **reply_kwargs(message))
+
 async def marriage_edit_panel(q, text, kb):
     """پنل ازدواج را بدون از بین بردن عکس اولیه به‌روزرسانی می‌کند."""
     try:
@@ -7529,6 +7549,8 @@ async def marriage_callback(update, context):
             for h in hunts: foods.append([InlineKeyboardButton(f"🍖 {h.emoji} {h.item_name} (+{h.nutrition})",callback_data=f"marriage:feedconfirm:h{h.id}:{m.id}")])
             eggs=session.query(RubyEgg).filter(RubyEgg.user_id==uid).order_by(RubyEgg.id.asc()).limit(6).all()
             for e in eggs: foods.append([InlineKeyboardButton(f"🥚 تخم‌مرغ #{e.id} (+{11 if e.cooked else 5})",callback_data=f"marriage:feedconfirm:e{e.id}:{m.id}")])
+            if not foods:
+                return await q.answer('🍖 غذایی برای دادن به نینی نداری؛ اول از «شکار» یا «مارکت روبی» (تخم‌مرغ) غذا تهیه کن.',show_alert=True)
             foods.append([InlineKeyboardButton('🔙 بازگشت',callback_data=f'marriage:back:{m.id}:x')])
             await q.answer(); await _edit(baby_upgrade_text(baby)+"\n\n🍖 یک غذا را انتخاب کن:",reply_markup=InlineKeyboardMarkup(foods)); return
         if action=='feedconfirm':
@@ -7755,22 +7777,25 @@ async def handle_marriage_text(update, context):
             return True
         spouse=session.get(User,spouse_id)
         actor=user
+        # فقط همان لحظه‌ای که بارداری/تولد واقعاً اتفاق می‌افتد پیام مخصوصش نمایش داده می‌شود؛
+        # بعد از تولد، رابطه روی ۵۰ می‌ماند و این‌طوری همان پیام دوباره و دوباره تکرار نمی‌شود.
+        just_pregnant=False; just_born=False
         m.relation=min(50,int(m.relation or 0)+1)
         m.last_relation_at=now_utc()
         if m.relation>=PREGNANCY_RELATION and not m.pregnancy_started_at and not m.baby_id:
-            m.pregnancy_started_at=now_utc(); m.pregnancy_gender=random.choice(['male','female']); m.pregnancy_decision='pending'
+            m.pregnancy_started_at=now_utc(); m.pregnancy_gender=random.choice(['male','female']); m.pregnancy_decision='pending'; just_pregnant=True
         if m.relation>=BIRTH_RELATION and m.pregnancy_started_at and m.pregnancy_decision=='continue' and not m.baby_id:
-            baby=RubyBaby(marriage_id=m.id,name='نینی روباه',gender=m.pregnancy_gender or random.choice(['male','female']),level=1,belly=1,belly_capacity=1,points=0,last_hunger_at=now_utc(),last_production_at=now_utc()); session.add(baby); session.flush(); m.baby_id=baby.id
+            baby=RubyBaby(marriage_id=m.id,name='نینی روباه',gender=m.pregnancy_gender or random.choice(['male','female']),level=1,belly=1,belly_capacity=1,points=0,last_hunger_at=now_utc(),last_production_at=now_utc()); session.add(baby); session.flush(); m.baby_id=baby.id; just_born=True
         session.commit()
         target_word='خانومیش' if actor.fox_gender=='male' else 'شوشوییش'
         msg=random.choice(MARRIAGE_TEMPLATES[text]).format(actor=user_display_name(actor),target_word=target_word)
         msg += f"\n\n💞 میزان رابطه: {int(m.relation)}/50"
-        if m.relation==PREGNANCY_RELATION:
+        if just_pregnant:
             msg += f"\n\n🤰 {user_display_name(spouse)}، شما از روباه {user_display_name(actor)} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
             try:
                 await context.bot.send_message(m.female_id, f"🤰 شما از روباه {user_display_name(session.get(User,m.male_id))} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}\n\nبرای تصمیم‌گیری وارد «ازدواج روبی» شو.")
             except Exception: pass
-        if m.relation==BIRTH_RELATION and m.baby_id:
+        if just_born:
             msg += f"\n\n🎉 نینی روباه شما متولد شد! 🍼\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
             for _uid in (m.male_id,m.female_id):
                 try: await context.bot.send_message(_uid, f"🎉 نینی روباه شما متولد شد!\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}")
@@ -7814,7 +7839,7 @@ async def baby_command(update, context):
         text,kb=marriage_panel(session,user)
     finally:
         session.close()
-    await marriage_send_panel(update.message,text,kb)
+    await baby_send_panel(update.message,text,kb)
 
 async def roobam_command(update,context):
     if not await require_membership(update,context):return
