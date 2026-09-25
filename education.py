@@ -151,6 +151,8 @@ def _edu_panel(s, u, p):
     if p.pending_certificate:
         lines.append(f"\n🎓 برای دریافت مدرک {_name(p.certificates+1)} باید { _tuition(p.certificates):,} روب‌پوینت شهریه پرداخت کنی.")
     rows=[[InlineKeyboardButton(TOPICS[k][0],callback_data=f"edutopic:{k}")] for k in TOPICS]
+    if int(p.certificates or 0) < 15:
+        rows.append([InlineKeyboardButton("✍️ طرح سوال",callback_data="eduq:menu")])
     if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1500:
         left=1500-int((_now()-_aware(p.last_play_at)).total_seconds())
         return "\n".join(lines)+f"\n\n⏳ سؤال بعدی تا {left//60} دقیقه دیگر.", InlineKeyboardMarkup(rows)
