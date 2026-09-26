@@ -50,8 +50,8 @@ MARRIAGE_UNLOCK_LEVEL = 3
 MARRIAGE_PROPOSAL_HOURS = 12
 MARRIAGE_DIVORCE_WAIT_HOURS = 24
 MARRIAGE_REJOIN_LOCK_HOURS = 14
-MARRIAGE_DIVORCE_JAIL_MINUTES = 30
-MARRIAGE_DIVORCE_FINE = 50_000
+MARRIAGE_DIVORCE_JAIL_MINUTES = 30  # دیگر استفاده نمی‌شود؛ طلاق دیگر زندان ندارد (رایگان و بدون زندان)
+MARRIAGE_DIVORCE_FINE = 50_000  # دیگر استفاده نمی‌شود؛ طلاق رایگان است
 RELATION_COOLDOWN_SECONDS = 7 * 60
 PREGNANCY_RELATION = 30
 BIRTH_RELATION = 50
@@ -5904,6 +5904,37 @@ def jail_block_text(user):
     )
 
 
+# پیام‌های معمولی (مثل «سلام») نباید حبس روبی رو یادآوری کنن؛ این یادآوری فقط وقتی
+# نشون داده می‌شه که کاربر واقعاً بخواد از یک دستور/بخش ربات استفاده کنه.
+_JAIL_ACTIVE_FLOW_FLAGS = (
+    'admin_action', 'baby_collect_confirm', 'baby_name_mid', 'bank_action',
+    'city_donate_chat_id', 'city_donate_message_id', 'friend_action', 'friend_add_owner',
+    'gift_code_flow', 'jail_memory_wait', 'marriage_abort_confirm', 'marriage_accept_confirm',
+    'marriage_continue_confirm', 'marriage_divorce_confirm', 'marriage_proposal',
+    'marriage_proposal_confirm', 'marriage_transfer_confirm', 'marriage_transfer_mid',
+    'marriage_transfer_panel_ref', 'pending_bank_transfer', 'pending_referral', 'ruby_setup',
+)
+_JAIL_CLAIM_ALIASES = {'روب روب', 'هور هور', 'عو عو'}
+
+
+def _looks_like_bot_command(text, context):
+    """آیا این متن واقعاً یک تلاش برای اجرای دستور/بخشی از ربات است؟ (نه یک پیام معمولی مثل «سلام»)"""
+    t = (text or '').strip()
+    if not t:
+        return False
+    if t.startswith('/'):
+        return True
+    if t in _JAIL_CLAIM_ALIASES or (CLAIM_KEYWORD and t == CLAIM_KEYWORD):
+        return True
+    if t in FOX_COMMAND_PHRASES:
+        return True
+    if _feature_key_for_text(t):
+        return True
+    if any(context.user_data.get(k) for k in _JAIL_ACTIVE_FLOW_FLAGS):
+        return True
+    return False
+
+
 async def ban_gate(update, context):
     """محرومیت قبلی + زندان روبی را قبل از تمام بخش‌های ربات اعمال می‌کند."""
     user_tg = update.effective_user
@@ -5950,6 +5981,10 @@ async def ban_gate(update, context):
         if jailed:
             # دستور زندان روبی و جریان نوشتن خاطره اجازه عبور دارند.
             if jail_cmd or context.user_data.get("jail_memory_wait"):
+                return
+            # پیام معمولی (نه یک دستور/بخش واقعی ربات، مثلاً «سلام») را نادیده می‌گیریم؛
+            # فقط تلاش واقعی برای استفاده از یک بخش ربات یادآوری زندان می‌گیرد.
+            if update.message and update.message.text and not _looks_like_bot_command(update.message.text, context):
                 return
             if update.message:
                 await update.message.reply_text(jail_block_text(u), **reply_kwargs(update.message))
@@ -7500,7 +7535,7 @@ async def marriage_callback(update, context):
             if active_marriage(session,male.telegram_id) or active_marriage(session,female.telegram_id) or pending_marriage_for(session,male.telegram_id) or pending_marriage_for(session,female.telegram_id):
                 return await q.answer('❌ یکی از دو نفر دیگر شرایط ازدواج ندارد.',show_alert=True)
             if not get_friendship(session,male.telegram_id,female.telegram_id): return await q.answer('❌ این کاربر دوست روباهیو تو نیست.',show_alert=True)
-            if getattr(female,'marriage_lock_until',None) and now_utc()<aware(female.marriage_lock_until): return await q.answer('⏳ این کاربر فعلاً از ازدواج دوباره محروم است.',show_alert=True)
+            if getattr(female,'marriage_lock_until',None) and not admin_only(int(female.telegram_id)) and now_utc()<aware(female.marriage_lock_until): return await q.answer('⏳ این کاربر فعلاً از ازدواج دوباره محروم است.',show_alert=True)
             item=marriage_gift_item(session,male.telegram_id,gift_key)
             if not item: return await q.answer('❌ هدیه در انبارت نیست.',show_alert=True)
             m=RubyMarriage(male_id=male.telegram_id,female_id=female.telegram_id,gift_item_key=gift_key,gift_emoji=item.emoji,status='pending',expires_at=now_utc()+timedelta(hours=MARRIAGE_PROPOSAL_HOURS))
@@ -7698,12 +7733,11 @@ async def marriage_callback(update, context):
                 baby=session.get(RubyBaby,m.baby_id)
                 if baby: session.delete(baby)
             for u in (male,female):
-                if u:
-                    u.jail_until=now_utc()+timedelta(minutes=MARRIAGE_DIVORCE_JAIL_MINUTES); u.jail_reason='طلاق روبی (خیانت)'; u.jail_fine=MARRIAGE_DIVORCE_FINE; u.jail_arrested_at=now_utc(); u.marriage_lock_until=now_utc()+timedelta(hours=MARRIAGE_REJOIN_LOCK_HOURS)
-                    u.fox_points=max(0,int(u.fox_points or 0)-MARRIAGE_DIVORCE_FINE)
+                if u and not admin_only(int(u.telegram_id)):
+                    u.marriage_lock_until=now_utc()+timedelta(hours=MARRIAGE_REJOIN_LOCK_HOURS)
             m.status='divorced'; m.divorced_at=now_utc(); session.commit()
             for uid2 in (m.male_id,m.female_id):
-                try: await context.bot.send_message(uid2,'💔 ازدواج روبی شما به‌خاطر خیانت پایان یافت.\n⛓️ ۳۰ دقیقه زندان روبی\n💸 جریمه: ۵۰٬۰۰۰ روب‌پوینت\n⏳ تا ۱۴ ساعت امکان ازدواج دوباره نداری.')
+                try: await context.bot.send_message(uid2,'💔 ازدواج روبی شما به‌خاطر خیانت پایان یافت.\n⏳ تا ۱۴ ساعت امکان ازدواج دوباره نداری.')
                 except Exception: pass
             await q.answer('💔 طلاق ثبت شد.'); await _edit('💔 به‌خاطر خیانت طلاق گرفتی. متاسفیم برات 😢'); return
         if action=='cheatignore':
@@ -7711,7 +7745,7 @@ async def marriage_callback(update, context):
         if action=='divorce':
             if not m.accepted_at or (now_utc()-aware(m.accepted_at)).total_seconds()<MARRIAGE_DIVORCE_WAIT_HOURS*3600: return await q.answer('⏳ تا ۲۴ ساعت از ازدواج نگذشته؛ طلاق ممکن نیست.',show_alert=True)
             context.user_data['marriage_divorce_confirm']=mid
-            await q.answer(); await _edit('💔 طلاق\n\nطلاق باعث مجرد شدن هر دو نفر، ۳۰ دقیقه زندان و ۵۰٬۰۰۰ روب‌پوینت جریمه برای هر نفر می‌شود. اگر نینی داشته باشید، نینی هم حذف می‌شود.\n\nتأیید می‌کنی؟',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('💔 بله، طلاق',callback_data=f'marriage:divorceyes:{mid}'),InlineKeyboardButton('❌ خیر',callback_data=f'marriage:noop:{mid}')]])); return
+            await q.answer(); await _edit('💔 طلاق\n\nطلاق باعث مجرد شدن هر دو نفر می‌شود و رایگان است؛ تا ۱۴ ساعت امکان ازدواج دوباره نخواهید داشت. اگر نینی داشته باشید، نینی هم حذف می‌شود.\n\nتأیید می‌کنی؟',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('💔 بله، طلاق',callback_data=f'marriage:divorceyes:{mid}'),InlineKeyboardButton('❌ خیر',callback_data=f'marriage:noop:{mid}')]])); return
         if action=='divorceyes':
             if not m.accepted_at or (now_utc()-aware(m.accepted_at)).total_seconds()<MARRIAGE_DIVORCE_WAIT_HOURS*3600: return await q.answer('هنوز ۲۴ ساعت کامل نشده.',show_alert=True)
             male=session.get(User,m.male_id); female=session.get(User,m.female_id)
@@ -7719,14 +7753,13 @@ async def marriage_callback(update, context):
                 baby=session.get(RubyBaby,m.baby_id)
                 if baby: session.delete(baby)
             for u in (male,female):
-                if u:
-                    u.jail_until=now_utc()+timedelta(minutes=MARRIAGE_DIVORCE_JAIL_MINUTES); u.jail_reason='طلاق روبی'; u.jail_fine=MARRIAGE_DIVORCE_FINE; u.jail_arrested_at=now_utc(); u.marriage_lock_until=now_utc()+timedelta(hours=MARRIAGE_REJOIN_LOCK_HOURS)
-                    u.fox_points=max(0,int(u.fox_points or 0)-MARRIAGE_DIVORCE_FINE)
+                if u and not admin_only(int(u.telegram_id)):
+                    u.marriage_lock_until=now_utc()+timedelta(hours=MARRIAGE_REJOIN_LOCK_HOURS)
             m.status='divorced'; m.divorced_at=now_utc(); session.commit()
             for uid2 in (m.male_id,m.female_id):
-                try: await context.bot.send_message(uid2,'💔 ازدواج روبی شما پایان یافت.\n⛓️ ۳۰ دقیقه زندان روبی\n💸 جریمه: ۵۰٬۰۰۰ روب‌پوینت\n⏳ تا ۱۴ ساعت امکان ازدواج دوباره نداری.')
+                try: await context.bot.send_message(uid2,'💔 ازدواج روبی شما پایان یافت.\n⏳ تا ۱۴ ساعت امکان ازدواج دوباره نداری.')
                 except Exception: pass
-            await q.answer('💔 طلاق ثبت شد.'); await _edit('💔 طلاق ثبت شد و هر دو نفر طبق قوانین ازدواج روبی محروم و زندانی شدند.'); return
+            await q.answer('💔 طلاق ثبت شد.'); await _edit('💔 طلاق ثبت شد؛ طلاق رایگان بود و هر دو نفر مجرد شدید.'); return
     finally:
         session.close()
 
@@ -7771,8 +7804,8 @@ async def handle_marriage_text(update, context):
             if int(female.level or 1)<MARRIAGE_UNLOCK_LEVEL: await update.message.reply_text('❌ سطح این کاربر برای ازدواج کافی نیست.'); return True
             if target.id==male.telegram_id or active_marriage(session,target.id) or pending_marriage_for(session,target.id): await update.message.reply_text('❌ این کاربر در حال حاضر شرایط ازدواج ندارد.'); return True
             if not get_friendship(session,male.telegram_id,target.id): await update.message.reply_text('❌ فقط می‌توانی از بین دوستان روباهیو خودت خواستگاری کنی.'); return True
-            if getattr(male,'marriage_lock_until',None) and now_utc()<aware(male.marriage_lock_until): await update.message.reply_text(f'⏳ تا {format_duration(int((aware(male.marriage_lock_until)-now_utc()).total_seconds()))} دیگر نمی‌توانی ازدواج کنی.'); return True
-            if getattr(female,'marriage_lock_until',None) and now_utc()<aware(female.marriage_lock_until): await update.message.reply_text('⏳ این کاربر فعلاً از ازدواج دوباره محروم است.'); return True
+            if getattr(male,'marriage_lock_until',None) and not admin_only(int(male.telegram_id)) and now_utc()<aware(male.marriage_lock_until): await update.message.reply_text(f'⏳ تا {format_duration(int((aware(male.marriage_lock_until)-now_utc()).total_seconds()))} دیگر نمی‌توانی ازدواج کنی.'); return True
+            if getattr(female,'marriage_lock_until',None) and not admin_only(int(female.telegram_id)) and now_utc()<aware(female.marriage_lock_until): await update.message.reply_text('⏳ این کاربر فعلاً از ازدواج دوباره محروم است.'); return True
             if not marriage_gift_item(session,male.telegram_id,prop['gift_key']): await update.message.reply_text('❌ هدیه‌ای که انتخاب کردی دیگر در انبارت نیست.'); return True
             context.user_data['marriage_proposal_confirm']={'female_id':female.telegram_id,'gift_key':prop['gift_key'],'emoji':prop['emoji'],'mid':0}
             await update.message.reply_text(f"💕 تأیید خواستگاری\n\n👤 خانم : {user_mention(female)}\n🎁 هدیه : {prop['emoji']}\n⏳ مهلت پاسخ او : ۱۲ ساعت\n\nدرخواست خواستگاری ارسال شود؟",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('💌 بله، ارسال کن',callback_data=f"marriage:proposalconfirm:0:{prop['gift_key']}"),InlineKeyboardButton('❌ لغو',callback_data='marriage:cancel:0:x')]]))
