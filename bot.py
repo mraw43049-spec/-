@@ -59,7 +59,7 @@ BABY_HUNGER_SECONDS = 20 * 60
 BABY_PRODUCTION_SECONDS = 1
 BABY_MAX_LEVEL = 10
 BABY_MILK_COOLDOWN_SECONDS = 3 * 60 * 60  # مادر هر ۳ ساعت یک‌بار می‌تواند به نینی شیر بدهد
-BABY_MILK_COST = 5_000  # هزینه‌ی هر بار شیر دادن (رایگان نیست)
+BABY_MILK_COST = 0  # شیر دادن رایگان است؛ فقط محدودیت زمانی (کول‌داون) دارد
 BABY_LEVELS = {}
 for _lv in range(1, BABY_MAX_LEVEL + 1):
     if _lv == 1:
@@ -1863,7 +1863,7 @@ async def ask_ruby_entry_amount(chat_id,message_id,context,key,count,owner_id):
             "مثال: 50k / 50کا / 50م / 200000\n\n"
             "👇 جواب این پیام رو (یا فقط عدد رو) در همین چت بفرست."
         ),
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت",callback_data=f"rubysetup:back:{owner_id}")]])
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت",callback_data=f"rubysetup:back:{key}:{owner_id}")]])
     )
 
 async def finalize_ruby_setup(chat_id,message_id,context,key,count,amount,owner_id):
@@ -1892,12 +1892,21 @@ async def finalize_ruby_setup(chat_id,message_id,context,key,count,amount,owner_
 
 async def ruby_setup_back(update,context):
     q=update.callback_query
-    try: owner=int(q.data.split(':')[2])
+    parts=q.data.split(':')
+    try:
+        if len(parts)==4:
+            # فرمت جدید: rubysetup:back:<key>:<owner> — کلید بازی مستقیماً از callback میاد
+            # تا وقتی چند پنل ساخت میز هم‌زمان باز است (مثلاً هم کازینو هم بازی روبی)،
+            # پنل‌ها با هم قاطی نشوند و بازگشت هرکدام به منوی درست خودش برود.
+            key=parts[2]; owner=int(parts[3])
+        else:
+            # فرمت قدیمی (پیام‌های قدیمی‌تر): کلید را از حافظه‌ی کاربر می‌خوانیم
+            owner=int(parts[2])
+            key=(context.user_data.get('ruby_setup') or {}).get('key','')
     except Exception: return
     if q.from_user.id!=owner:
         await q.answer('⛔ این پنل برای کاربر دیگری است.',show_alert=True); return
-    setup=context.user_data.pop('ruby_setup',{})
-    key=setup.get('key','')
+    context.user_data.pop('ruby_setup',None)
     await q.answer()
     if key.startswith('cz_'):
         kb=InlineKeyboardMarkup([[InlineKeyboardButton('🎰 اسلات',callback_data=f'rg:cz_wheel:{owner}')],[InlineKeyboardButton('🎲 تاس',callback_data=f'rg:cz_dice:{owner}')],[InlineKeyboardButton('🐇 خرگوش خور',callback_data=f'rg:cz_rabbit:{owner}')],[InlineKeyboardButton('🃏 بازی دوتایی‌ها',callback_data=f'rg:cz_pairs:{owner}')],[InlineKeyboardButton('💥 بمب',callback_data=f'rg:cz_bomb:{owner}')]])
@@ -4795,6 +4804,8 @@ def schedule_all_injured_fox_jobs(application):
 
 async def post_injured_fox_job(context):
     chat_id = context.job.chat_id
+    if is_feature_disabled(chat_id, 'injured_fox'):
+        return
     try:
         required = random.randint(1, 4)  # 1/2/3 = نجات در همان تلاش؛ 4 = هر سه تلاش ناموفق
         session = get_session()
@@ -7339,7 +7350,7 @@ def baby_panel_view(session, viewer, m, baby):
     rows = []
     if viewer.telegram_id == m.female_id:
         remaining = seconds_left(baby.last_milk_at, BABY_MILK_COOLDOWN_SECONDS)
-        label = f"🍼 شیر دادن ({BABY_MILK_COST:,})" if not remaining else f"🍼 شیر دادن ({format_duration(remaining)} دیگر)"
+        label = "🍼 شیر دادن (رایگان)" if not remaining else f"🍼 شیر دادن ({format_duration(remaining)} دیگر)"
         rows.append([InlineKeyboardButton(label, callback_data=f"marriage:babymilk:{m.id}")])
     rows.append([InlineKeyboardButton("✏️ تغییر اسم نینی", callback_data=f"marriage:babyname:{m.id}")])
     if baby.level < BABY_MAX_LEVEL:
@@ -7615,11 +7626,8 @@ async def marriage_callback(update, context):
             if uid != m.female_id: return await q.answer('⛔ فقط مادر نینی می‌تواند بهش شیر بدهد.',show_alert=True)
             remaining = seconds_left(baby.last_milk_at, BABY_MILK_COOLDOWN_SECONDS)
             if remaining: return await q.answer(f'⏳ شیر بعدی: {format_duration(remaining)} دیگر.',show_alert=True)
-            if int(user.fox_points or 0) < BABY_MILK_COST:
-                return await q.answer(f'❌ {BABY_MILK_COST:,} روب‌پوینت لازم داری.',show_alert=True)
             baby_settle(session,baby)
             cap=int(baby.belly_capacity or 1)
-            user.fox_points -= BABY_MILK_COST
             baby.belly=cap
             baby.last_milk_at=now_utc()
             session.commit()
@@ -11033,11 +11041,199 @@ async def handle_named_fox_text(update, context):
     await fox_command(update, context)
     return True
 
+# ---------- غیرفعال‌سازی بخش‌های ربات در هر گپ (فقط پشتیبانی) ----------
+# پشتیبانی (ADMIN_IDS) هیچ محدودیتی در هیچ بخش ربات ندارد و می‌تواند در هر گپی
+# که ربات توشه با نوشتن «<اسم بخش> غیرفعال» آن بخش را فقط برای همان گپ خاموش کند
+# و با «<اسم بخش> فعال» دوباره روشنش کند؛ این برای همه‌ی بخش‌های ربات کار می‌کند
+# (نه فقط «روباه زخمی»).
+FEATURE_DISPLAY_NAMES = {
+    'injured_fox': 'روباه زخمی', 'casino': 'کازینو', 'games': 'بازی روبی',
+    'marriage': 'ازدواج روبی', 'baby': 'نینی روبی', 'education': 'روباهیو درس',
+    'hunt': 'شکار', 'smuggling': 'قاچاق روبی', 'jail': 'زندان روبی',
+    'market': 'مارکت روبی', 'city': 'شهر روبی', 'bank': 'بانک روبی',
+    'wheel': 'گردونه', 'referral': 'رفرال', 'leaderboard': 'لیدر برد',
+    'friends': 'دوست روبی', 'gift_shop': 'شاپ روبی', 'gift_code': 'کد هدیه',
+    'football': 'پیش بینی فوتبال', 'fridge': 'یخچال روبی', 'factory': 'کارخونه روبی',
+    'mood': 'روباهیو حال', 'flag': 'پرچم', 'fox_panel': 'روباه', 'claim': 'روب روب',
+    'city_news': 'اخبار شهر', 'city_mayor': 'شهردار روبی', 'emoji': 'ایموجی روبی',
+}
+
+# اسم‌های جایگزین که پشتیبانی ممکنه به‌جای اسم اصلی بنویسه (برای تشخیص دستور غیرفعال/فعال)
+FEATURE_NAME_ALIASES = {
+    'injured_fox': ['روباه زخمی'],
+    'casino': ['کازینو', 'کازینو روبی'],
+    'games': ['بازی روبی', 'بازی های روبی', 'بازی‌های روبی'],
+    'marriage': ['ازدواج روبی', 'ازدواج'],
+    'baby': ['نینی روبی', 'نینی روباه'],
+    'education': ['روباهیو درس', 'آموزش روباهیو', 'درس'],
+    'hunt': ['شکار'],
+    'smuggling': ['قاچاق روبی', 'قاچاق روباهیو', 'قاچاق'],
+    'jail': ['زندان روبی', 'زندان روباهیو'],
+    'market': ['مارکت روبی', 'مارکت', 'بازار روبی'],
+    'city': ['شهر روبی', 'شهر روباهیو'],
+    'bank': ['بانک روبی', 'بانک'],
+    'wheel': ['گردونه', 'چرخ شانس'],
+    'referral': ['رفرال', 'زیرمجموعه گیری', 'زیرمجموعه'],
+    'leaderboard': ['لیدر برد', 'لیدربرد'],
+    'friends': ['دوست روبی', 'فرند روب', 'دوست روباهیو'],
+    'gift_shop': ['شاپ روبی', 'فروشگاه روبی'],
+    'gift_code': ['کد هدیه', 'کد جایزه'],
+    'football': ['پیش بینی فوتبال', 'پیش بینی'],
+    'fridge': ['یخچال روبی'],
+    'factory': ['کارخونه روبی', 'کارخونه'],
+    'mood': ['روباهیو حال'],
+    'flag': ['پرچم'],
+    'fox_panel': ['روباه', 'روبی', 'روباهیو'],
+    'claim': ['روب روب', 'هور هور', 'عو عو'],
+    'city_news': ['اخبار شهر'],
+    'city_mayor': ['شهردار روبی', 'شهردار'],
+    'emoji': ['ایموجی روبی', 'شکلک روبی'],
+}
+
+# متن‌های دقیقی که در پایین همین فایل برای رسیدن به هر بخش چک می‌شوند؛ اگر بخشی
+# در یک گپ غیرفعال باشد، همین متن‌ها در آن گپ نادیده گرفته می‌شوند (انگار آن
+# دستور اصلاً وجود ندارد).
+FEATURE_TRIGGER_TEXTS = {
+    'marriage': {"ازدواج روبی", "ازدواج روبی!", "💕 ازدواج روبی 💍"},
+    'baby': {"نینی روبی", "نینی روباه", "🍼 نینی روبی"},
+    'education': {"روباهیو درس", "روباهیو درس!", "طراحی سوال", "طراحی سؤال", "طرح سوال", "طرح سؤال", "✍️ طراحی سوال", "✍️ طراحی سؤال"},
+    'flag': {"پرچم", "پرچم روباهیو", "🌍 پرچم"},
+    'leaderboard': {"لیدر برد", "لیدربرد", "leaderboard", "Leaderboard"},
+    'wheel': {"گردونه", "چرخ شانس", "🎡 گردونه", "🎡 چرخ شانس"},
+    'friends': {"دوست روبی", "فرند روب", "دوست روباهیو", "فرند روبی", "friends"},
+    'gift_code': {"کد هدیه", "کد جایزه", "gift code", "giftcode"},
+    'city': {"شهر روبی", "شهر روباهیو", "شهر روباه", "🦊 شهر روبی", "شهر"},
+    'market': {"مارکت روبی", "مارکت", "🛍 مارکت روبی"},
+    'city_mayor': {"شهردار روبی", "شهردار", "🦁 شهردار روبی"},
+    'fox_panel': {"روباه", "روباه روباه", "روبی", "روباهیو", "🦊 روباه", "🦊 روبی", "🦊 روباهیو"},
+    'jail': {"زندان روبی", "زندان روباهیو", "⛓️ زندان روبی", "زندان"},
+    'smuggling': {"قاچاق روبی", "قاچاق روباهیو", "🥷 قاچاق روبی", "🥷 قاچاق روباهیو", "قاچاق"},
+    'hunt': {"شکار", "شکار!", "🏹 شکار"},
+    'fridge': {"یخچال روبی", "🧊 یخچال روبی", "یخچال"},
+    'factory': {"کارخونه روبی", "کارخونه روبی!", "کارخونه", "🏭 کارخونه روبی"},
+    'referral': {"رفرال", "زیرمجموعه گیری", "زیر مجموعه گیری", "🔗 رفرال", "زیرمجموعه"},
+    'bank': {"بانک", "بانک روبی", "🏦 بانک روبی"},
+    'gift_shop': {"شاپ روبی", "فروشگاه روبی", "🎁 شاپ روبی", "🎁 فروشگاه روبی"},
+    'friends': {"دوست روبی", "فرند روب", "دوست روباهیو", "فرند روبی", "friends", "دوست", "فرند"},
+    'wheel': {"گردونه", "چرخ شانس", "🎡 گردونه", "🎡 چرخ شانس", "چرخ"},
+    'games': {"بازی روبی", "بازی های روبی", "بازی‌های روبی", "🕹 بازی های روبی", "بازی"},
+    'casino': {"کازینو روبی", "کازینو", "🃏 کازینو روبی"},
+    'football': {"پیش بینی", "پیش بینی فوتبال", "⚽ پیش بینی", "پیشبینی"},
+    'city_news': {"اخبار شهر", "اخبار شهر روبی", "خبر شهر", "📰 اخبار شهر"},
+    'emoji': {"ایموجی روبی", "شکلک روبی"},
+}
+
+
+def _feature_normalize(text):
+    return re.sub(r"[\s\u200c]+", " ", (text or "").strip())
+
+
+def get_disabled_features(chat_id):
+    """ست کلید بخش‌های غیرفعال‌شده‌ی یک گپ."""
+    session = get_session()
+    try:
+        row = session.get(GroupChat, chat_id)
+        raw = (row.disabled_features or '') if row else ''
+    except Exception:
+        raw = ''
+    finally:
+        session.close()
+    return {p.strip() for p in raw.split(',') if p.strip()}
+
+
+def is_feature_disabled(chat_id, key):
+    if not chat_id or not key:
+        return False
+    return key in get_disabled_features(chat_id)
+
+
+def set_feature_disabled(chat_id, key, disabled):
+    session = get_session()
+    try:
+        row = session.get(GroupChat, chat_id)
+        if row is None:
+            row = GroupChat(chat_id=chat_id, title='گپ', active=1)
+            session.add(row)
+        current = {p.strip() for p in (row.disabled_features or '').split(',') if p.strip()}
+        if disabled:
+            current.add(key)
+        else:
+            current.discard(key)
+        row.disabled_features = ','.join(sorted(current))
+        session.commit()
+    finally:
+        session.close()
+
+
+def feature_blocked(update, key):
+    """آیا این بخش برای این گپ خاموش است؟ پشتیبانی (ADMIN_IDS) همیشه دسترسی کامل
+    دارد و هیچ بخشی برایش محدود نمی‌شود."""
+    chat = update.effective_chat
+    user = update.effective_user
+    if not chat or chat.type == 'private':
+        return False
+    if user and int(user.id) in ADMIN_IDS:
+        return False
+    return is_feature_disabled(chat.id, key)
+
+
+def _feature_key_for_text(text):
+    norm = _feature_normalize(text)
+    for key, triggers in FEATURE_TRIGGER_TEXTS.items():
+        if text in triggers or norm in triggers:
+            return key
+    return None
+
+
+FEATURE_TOGGLE_RE = re.compile(r"^(?P<name>.+?)\s+(?P<state>غیرفعال|فعال)$")
+
+# نگاشت اسم → کلید بخش برای دستور غیرفعال/فعال (طولانی‌ترین اسم اول تا اسم‌های
+# هم‌پوشان با هم تداخل پیدا نکنن)
+_FEATURE_NAME_TO_KEY = []
+for _fkey, _fnames in FEATURE_NAME_ALIASES.items():
+    for _fname in _fnames:
+        _FEATURE_NAME_TO_KEY.append((_fname, _fkey))
+_FEATURE_NAME_TO_KEY.sort(key=lambda x: -len(x[0]))
+
+
+async def feature_toggle_command(update, context):
+    """پشتیبانی با نوشتن «<اسم بخش> غیرفعال» یا «<اسم بخش> فعال» در هر گپی که ربات
+    توشه، آن بخش را فقط برای همان گپ خاموش/روشن می‌کند. مثال: «روباه زخمی غیرفعال»."""
+    msg = update.message
+    chat = update.effective_chat
+    user = update.effective_user
+    if not msg or not msg.text or not chat or chat.type == 'private':
+        return False
+    if not user or int(user.id) not in ADMIN_IDS:
+        return False
+    text = _feature_normalize(msg.text)
+    m = FEATURE_TOGGLE_RE.match(text)
+    if not m:
+        return False
+    name = _feature_normalize(m.group('name'))
+    disable = m.group('state') == 'غیرفعال'
+    matched_key = None
+    for candidate_name, key in _FEATURE_NAME_TO_KEY:
+        if name == candidate_name:
+            matched_key = key
+            break
+    if not matched_key:
+        return False
+    set_feature_disabled(chat.id, matched_key, disable)
+    label = FEATURE_DISPLAY_NAMES.get(matched_key, name)
+    if disable:
+        await msg.reply_text(f"⛔️ بخش «{label}» در این گپ غیرفعال شد.", **reply_kwargs(msg))
+    else:
+        await msg.reply_text(f"✅ بخش «{label}» در این گپ دوباره فعال شد.", **reply_kwargs(msg))
+    return True
+
+
 async def text_router(update, context):
     if await support_admin_reply(update, context): return
     if await support_text(update, context): return
     if await emoji_transfer_text(update, context): return
     if not update.message or not update.message.text: return
+    if await feature_toggle_command(update, context): return
     if await handle_jail_memory_text(update, context): return
     if await handle_friend_text(update, context): return
     if await handle_gift_code_text(update, context): return
@@ -11051,6 +11247,9 @@ async def text_router(update, context):
     if await handle_market_text(update, context): return
     if await handle_city_donate_text(update, context): return
     text=update.message.text.strip()
+    _feat_key = _feature_key_for_text(text)
+    if _feat_key and feature_blocked(update, _feat_key):
+        return
     if await handle_named_fox_text(update, context): return
     if text in {"ایموجی روبی", "شکلک روبی"}:
         await emoji_command(update, context); return
@@ -11152,6 +11351,9 @@ async def persian_slash_router(update, context):
     m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?|رفرال|زیرمجموعه(?:\s+گیری)?|پرچم)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
+        _slash_feat = _feature_key_for_text(cmd)
+        if _slash_feat and feature_blocked(update, _slash_feat):
+            return
         if cmd in {"روباه","روبی","روباهیو"}: await fox_command(update,context)
         elif cmd in {"کارخونه روبی","کارخونه"}: await factory_command(update,context)
         elif cmd in {"رفرال","زیرمجموعه","زیرمجموعه گیری"}: await referral_command(update,context)
@@ -11257,7 +11459,7 @@ def main():
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit|cz_pairs|cz_bomb):\d+:\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_setup_back,pattern=r"^rubysetup:back:\d+$"))
+    app.add_handler(CallbackQueryHandler(ruby_setup_back,pattern=r"^rubysetup:back:(?:(?:xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):)?\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_dice_bet_select,pattern=r"^rdicebet:\d+:\d+:\d+:(odd|even|high|low)$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_rps_choice,pattern=r"^rrps:\d+:(rock|paper|scissors)$"))

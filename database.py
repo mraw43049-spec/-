@@ -202,6 +202,8 @@ class GroupChat(Base):
     ai_mod = Column(Integer, nullable=False, default=0)
     # غلط‌گیر املایی: -1 = طبق پیش‌فرض ربات (FOX_SPELL_DEFAULT)، 0 = خاموش، 1 = روشن
     spell_mod = Column(Integer, nullable=False, default=-1)
+    # بخش‌های غیرفعال‌شده‌ی این گپ توسط پشتیبانی؛ کلیدها با کاما جدا می‌شوند (مثلاً "injured_fox,casino")
+    disabled_features = Column(String, nullable=False, default='')
 
 
 
@@ -679,6 +681,7 @@ def init_db():
                 'city_donors': "VARCHAR DEFAULT ''",
                 'ai_mod': 'INTEGER NOT NULL DEFAULT 0',
                 'spell_mod': 'INTEGER NOT NULL DEFAULT -1',
+                'disabled_features': "VARCHAR DEFAULT ''",
             }
             for name, definition in gc_additions.items():
                 if name not in gc_cols:
