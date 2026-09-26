@@ -149,6 +149,7 @@ class RubyBaby(Base):
     points = Column(Integer, nullable=False, default=0)
     last_production_at = Column(DateTime(timezone=True), nullable=True)
     last_hunger_at = Column(DateTime(timezone=True), nullable=True)
+    last_milk_at = Column(DateTime(timezone=True), nullable=True)  # آخرین باری که مادر به نینی شیر داده
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class RubyEmojiItem(Base):
@@ -593,6 +594,10 @@ def init_db():
             conn.execute(text("ALTER TABLE injured_foxes ADD COLUMN attempt_log VARCHAR"))
         if 'last_card_transfer_at' not in bank_cols:
             conn.execute(text(f'ALTER TABLE bank_accounts ADD COLUMN last_card_transfer_at {DT_SQL_TYPE}'))
+        if 'ruby_babies' in inspector.get_table_names():
+            baby_cols = {c['name'] for c in inspector.get_columns('ruby_babies')}
+            if 'last_milk_at' not in baby_cols:
+                conn.execute(text(f'ALTER TABLE ruby_babies ADD COLUMN last_milk_at {DT_SQL_TYPE}'))
         if 'fox_hunts' in inspector.get_table_names():
             hunt_cols = {c['name'] for c in inspector.get_columns('fox_hunts')}
             hunt_additions = {

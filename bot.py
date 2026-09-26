@@ -58,8 +58,8 @@ BIRTH_RELATION = 50
 BABY_HUNGER_SECONDS = 20 * 60
 BABY_PRODUCTION_SECONDS = 1
 BABY_MAX_LEVEL = 10
-BABY_FOOD_BUY_COST = 5_000
-BABY_FOOD_BUY_NUTRITION = 3
+BABY_MILK_COOLDOWN_SECONDS = 3 * 60 * 60  # مادر هر ۳ ساعت یک‌بار می‌تواند به نینی شیر بدهد
+BABY_MILK_COST = 5_000  # هزینه‌ی هر بار شیر دادن (رایگان نیست)
 BABY_LEVELS = {}
 for _lv in range(1, BABY_MAX_LEVEL + 1):
     if _lv == 1:
@@ -1315,7 +1315,7 @@ async def casino_command(update, context):
         [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
         [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
     ])
-    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۲۵ خانه · ۳ بمب رندوم\n┘─ هر خانه سالم: +۲٬۰۰۰ روب‌پوینت؛ با بمب، جایزه صفر\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۲۵ خانه · ۳ بمب رندوم\n┘─ هر خانه سالم: +۲۰۰ روب‌پوینت؛ با بمب، جایزه صفر\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
@@ -2547,10 +2547,10 @@ def _parse_ruby_scores(raw):
 
 BOMB_CELLS = 25
 BOMB_COUNT = 3
-BOMB_REWARD_FIRST = 2000
+BOMB_REWARD_FIRST = 200
 
 def bomb_reward(safe):
-    """پاداش تجمعی: خانه اول ۲۰۰۰، خانه دوم ۴۰۰۰ و هر بار دو برابر افزایش می‌یابد."""
+    """پاداش تجمعی: خانه اول ۲۰۰، خانه دوم ۴۰۰ و هر بار دو برابر افزایش می‌یابد."""
     safe = max(0, int(safe or 0))
     return BOMB_REWARD_FIRST * ((2 ** safe) - 1)
 
@@ -2572,7 +2572,7 @@ def bomb_text(state, name, entry):
     return (f"💥 {name}\n\n🧩 خانه‌های سالم: {safe}/{BOMB_CELLS-BOMB_COUNT}\n"
             f"💰 جایزه فعلی: {reward:,} روب‌پوینت\n"
             "⚠️ سه بمب مخفی‌اند؛ پیدا کردن بمب بازی را تمام می‌کند و جایزه‌ای نمی‌گیری.\n"
-            "پاداش خانه‌ها تجمعی است: ۲٬۰۰۰، سپس ۴٬۰۰۰، سپس ۸٬۰۰۰ و ...")
+            "پاداش خانه‌ها تجمعی است: ۲۰۰، سپس ۴۰۰، سپس ۸۰۰ و ...")
 
 async def ruby_bomb_button(update, context):
     q=update.callback_query; parts=q.data.split(":")
@@ -3311,6 +3311,21 @@ async def fox_button(update, context):
 
 # ---------- شکار ----------
 
+def hunt_result_keyboard(hunt_id, user_id, has_baby):
+    rows = [
+        [InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"hunt:feed:{hunt_id}:{user_id}"), InlineKeyboardButton("💰 فروختن", callback_data=f"hunt:sell:{hunt_id}:{user_id}")],
+    ]
+    if has_baby:
+        rows.append([InlineKeyboardButton("دادن به نینی🍼", callback_data=f"hunt:baby:{hunt_id}:{user_id}")])
+    rows.append([InlineKeyboardButton("❄️ انداختن در یخچال روبی", callback_data=f"hunt:fridge:{hunt_id}:{user_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def user_has_baby(session, uid):
+    m = active_marriage(session, uid)
+    return bool(m and m.baby_id)
+
+
 async def handle_hunt_request(q, session, user, context):
     remaining = seconds_left(user.last_hunt_at, HUNT_COOLDOWN)
     if remaining:
@@ -3326,10 +3341,7 @@ async def handle_hunt_request(q, session, user, context):
     chat = q.message.chat if q.message else None
     if chat: bump_city_stat(session, chat.id, chat.title, city_hunt_total=1)
     session.commit()
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"hunt:feed:{hunt.id}:{user.telegram_id}"), InlineKeyboardButton("💰 فروختن", callback_data=f"hunt:sell:{hunt.id}:{user.telegram_id}")],
-        [InlineKeyboardButton("❄️ انداختن در یخچال روبی", callback_data=f"hunt:fridge:{hunt.id}:{user.telegram_id}")],
-    ])
+    kb = hunt_result_keyboard(hunt.id, user.telegram_id, user_has_baby(session, user.telegram_id))
     await q.answer()
     emoji_msg = await q.message.reply_text(emoji)
     await asyncio.sleep(3)
@@ -3365,10 +3377,7 @@ async def hunt_command(update, context):
         chat = update.effective_chat
         if chat: bump_city_stat(session, chat.id, chat.title, city_hunt_total=1)
         session.commit()
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🦊 دادن به روباه", callback_data=f"hunt:feed:{hunt.id}:{user.telegram_id}"), InlineKeyboardButton("💰 فروختن", callback_data=f"hunt:sell:{hunt.id}:{user.telegram_id}")],
-            [InlineKeyboardButton("❄️ انداختن در یخچال روبی", callback_data=f"hunt:fridge:{hunt.id}:{user.telegram_id}")],
-        ])
+        kb = hunt_result_keyboard(hunt.id, user.telegram_id, user_has_baby(session, user.telegram_id))
         emoji_msg = await update.message.reply_text(emoji, **reply_kwargs(update.message))
         await asyncio.sleep(3)
         await emoji_msg.reply_text(
@@ -3423,6 +3432,23 @@ async def hunt_button(update, context):
             session.commit()
             await q.answer("💰 فروخته شد!")
             await q.message.edit_text(f"💰 {hunt.emoji} {hunt.item_name} فروخته شد و {hunt.sell_value:,} روب پوینت گرفتی.\n🪙 موجودی روب‌پوینت: {int(user.fox_points):,}")
+        elif action == "baby":
+            m = active_marriage(session, user.telegram_id)
+            baby = session.get(RubyBaby, m.baby_id) if (m and m.baby_id) else None
+            if not baby:
+                await q.answer("🍼 نینی‌ای برای دادن این شکار وجود ندارد.", show_alert=True)
+                return
+            baby_settle(session, baby)
+            cap = int(baby.belly_capacity or 1)
+            before = int(baby.belly or 0)
+            baby.belly = min(cap, before + int(hunt.nutrition or 0))
+            hunt.status = "babyfed"
+            session.commit()
+            await q.answer("🍼 شکار به نینی داده شد!")
+            await q.message.edit_text(
+                f"🍼 {hunt.emoji} {hunt.item_name} به نینی داده شد.\n"
+                f"🍖 شکم نینی: {before}/{cap} → {baby.belly}/{cap}"
+            )
         elif action == "fridge":
             if user.level < FRIDGE_UNLOCK_LEVEL:
                 await q.answer(f"❄️ یخچال روبی در سطح {FRIDGE_UNLOCK_LEVEL} باز می‌شود.", show_alert=True)
@@ -7309,11 +7335,13 @@ def baby_panel_view(session, viewer, m, baby):
     baby_settle(session, baby); session.commit()
     prod_ok = int(baby.belly or 0) > 0
     lines = [baby_upgrade_text(baby), "",
-             "🍖 وضعیت تولید : " + ("فعال" if prod_ok else "متوقف؛ شکم نینی خالیه — بهش غذا بده تا دوباره تولید کنه")]
-    rows = [
-        [InlineKeyboardButton("🍖 غذا دادن به نینی", callback_data=f"marriage:feedmenu:{m.id}")],
-        [InlineKeyboardButton("✏️ تغییر اسم نینی", callback_data=f"marriage:babyname:{m.id}")],
-    ]
+             "🍖 وضعیت تولید : " + ("فعال" if prod_ok else "متوقف؛ شکم نینی خالیه — بهش شیر بده تا دوباره تولید کنه")]
+    rows = []
+    if viewer.telegram_id == m.female_id:
+        remaining = seconds_left(baby.last_milk_at, BABY_MILK_COOLDOWN_SECONDS)
+        label = f"🍼 شیر دادن ({BABY_MILK_COST:,})" if not remaining else f"🍼 شیر دادن ({format_duration(remaining)} دیگر)"
+        rows.append([InlineKeyboardButton(label, callback_data=f"marriage:babymilk:{m.id}")])
+    rows.append([InlineKeyboardButton("✏️ تغییر اسم نینی", callback_data=f"marriage:babyname:{m.id}")])
     if baby.level < BABY_MAX_LEVEL:
         rows.append([InlineKeyboardButton("⬆️ ارتقای نینی", callback_data=f"marriage:babyupgrade:{m.id}")])
     if baby.points > 0:
@@ -7581,63 +7609,21 @@ async def marriage_callback(update, context):
             if not baby: return await q.answer('نینی وجود ندارد.',show_alert=True)
             text2,kb2=baby_panel_view(session,user,m,baby)
             await q.answer(); await marriage_edit_panel(q,text2,kb2); return
-        if action=='feedmenu':
+        if action=='babymilk':
             baby=session.get(RubyBaby,m.baby_id) if m.baby_id else None
             if not baby: return await q.answer('نینی روباه هنوز متولد نشده.',show_alert=True)
-            baby_settle(session,baby); session.commit()
-            foods=[]
-            hunts=session.query(FoxHunt).filter(FoxHunt.user_id==uid, FoxHunt.status.in_(['pending','fridge'])).order_by(FoxHunt.id.desc()).limit(6).all()
-            for h in hunts: foods.append([InlineKeyboardButton(f"🍖 {h.emoji} {h.item_name} (+{h.nutrition})",callback_data=f"marriage:feedconfirm:h{h.id}:{m.id}")])
-            eggs=session.query(RubyEgg).filter(RubyEgg.user_id==uid).order_by(RubyEgg.id.asc()).limit(6).all()
-            for e in eggs: foods.append([InlineKeyboardButton(f"🥚 تخم‌مرغ #{e.id} (+{11 if e.cooked else 5})",callback_data=f"marriage:feedconfirm:e{e.id}:{m.id}")])
-            foods.append([InlineKeyboardButton(f"🛒 خرید غذا با روب‌پوینت (-{BABY_FOOD_BUY_COST:,})",callback_data=f"marriage:feedbuy:{m.id}")])
-            foods.append([InlineKeyboardButton('🔙 بازگشت',callback_data=f'marriage:babyhome:{m.id}:x')])
-            note = "" if (hunts or eggs) else "\n\n(چیزی از شکار/یخچال نداری؛ می‌تونی با روب‌پوینت غذا بخری.)"
-            await q.answer(); await _edit(baby_upgrade_text(baby)+"\n\n🍖 یک غذا را انتخاب کن:"+note,reply_markup=InlineKeyboardMarkup(foods)); return
-        if action=='feedbuy':
-            baby=session.get(RubyBaby,m.baby_id) if m.baby_id else None
-            if not baby: return await q.answer('نینی وجود ندارد.',show_alert=True)
-            if int(user.fox_points or 0)<BABY_FOOD_BUY_COST: return await q.answer(f'❌ {BABY_FOOD_BUY_COST:,} روب‌پوینت لازم داری.',show_alert=True)
-            await q.answer(); await _edit(f"🛒 خرید غذا برای نینی\n\nهزینه: {BABY_FOOD_BUY_COST:,} روب‌پوینت\n\nتأیید می‌کنی؟",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('✅ بله، بخر و بده',callback_data=f'marriage:feedbuyyes:{m.id}'),InlineKeyboardButton('❌ خیر',callback_data=f'marriage:babyhome:{m.id}:x')]])); return
-        if action=='feedbuyyes':
-            baby=session.get(RubyBaby,m.baby_id) if m.baby_id else None
-            if not baby: return await q.answer('نینی وجود ندارد.',show_alert=True)
-            if int(user.fox_points or 0)<BABY_FOOD_BUY_COST: return await q.answer(f'❌ {BABY_FOOD_BUY_COST:,} روب‌پوینت لازم داری.',show_alert=True)
-            baby_settle(session,baby); user.fox_points-=BABY_FOOD_BUY_COST
-            cap=int(baby.belly_capacity or 1); baby.belly=min(cap,int(baby.belly or 0)+BABY_FOOD_BUY_NUTRITION); session.commit()
-            await q.answer('🍖 غذا خریداری و به نینی داده شد!'); text,kb=baby_panel_view(session,user,m,baby); await marriage_edit_panel(q,text,kb); return
-        if action=='feedconfirm':
-            token=parts[2]; mid2=int(parts[3]);
-            if mid2!=m.id: return await q.answer('پنل نامعتبر است.',show_alert=True)
-            baby=session.get(RubyBaby,m.baby_id) if m.baby_id else None
-            if not baby: return await q.answer('نینی وجود ندارد.',show_alert=True)
-            context.user_data['baby_feed_confirm']={'mid':m.id,'token':token}
-            await q.answer(); await _edit(f"🍖 تأیید غذا دادن به نینی\n\nاین غذا به نینی داده شود؟",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('✅ بله',callback_data=f'marriage:feedyes:{token}:{m.id}'),InlineKeyboardButton('❌ خیر',callback_data=f'marriage:babyhome:{m.id}:x')]])); return
-        if action=='feedyes':
-            # ادامه‌ی همان منطق feed بعد از تأیید
-            token=parts[2]; mid2=int(parts[3])
-            if mid2!=m.id: return await q.answer('پنل نامعتبر است.',show_alert=True)
-            if (context.user_data.get('baby_feed_confirm') or {}).get('token')!=token: return await q.answer('این تأیید منقضی شده.',show_alert=True)
-            context.user_data.pop('baby_feed_confirm',None)
-            action='feed'; parts=['marriage','feed',token,str(m.id)]
-        if action=='feed':
-            token=parts[2]; mid2=int(parts[3]);
-            if mid2!=m.id: return await q.answer('پنل نامعتبر است.',show_alert=True)
-            baby=session.get(RubyBaby,m.baby_id) if m.baby_id else None
-            if not baby: return await q.answer('نینی وجود ندارد.',show_alert=True)
-            baby_settle(session,baby); cap=int(baby.belly_capacity or 1); nutrition=0; label=''
-            if token.startswith('h'):
-                hid=int(token[1:]); hunt=session.get(FoxHunt,hid)
-                if not hunt or hunt.user_id!=uid or hunt.status not in ('pending','fridge'): return await q.answer('این غذا دیگر در دسترس نیست.',show_alert=True)
-                nutrition=int(hunt.nutrition or 0); label=f'{hunt.emoji} {hunt.item_name}'; hunt.status='babyfed'
-            elif token.startswith('e'):
-                eid=int(token[1:]); egg=session.get(RubyEgg,eid)
-                if not egg or egg.user_id!=uid: return await q.answer('این تخم‌مرغ دیگر در دسترس نیست.',show_alert=True)
-                settle_ruby_egg(egg); nutrition=11 if egg.cooked else 5; label=f'🥚 تخم‌مرغ #{eid}'; session.delete(egg)
-            else: return await q.answer('غذا نامعتبر است.',show_alert=True)
-            if nutrition<=0: return await q.answer('غذا نامعتبر است.',show_alert=True)
-            before=int(baby.belly or 0); baby.belly=min(cap,before+nutrition); session.commit()
-            await q.answer('🍖 غذا به نینی داده شد!'); text,kb=baby_panel_view(session,user,m,baby); await marriage_edit_panel(q,text,kb); return
+            if uid != m.female_id: return await q.answer('⛔ فقط مادر نینی می‌تواند بهش شیر بدهد.',show_alert=True)
+            remaining = seconds_left(baby.last_milk_at, BABY_MILK_COOLDOWN_SECONDS)
+            if remaining: return await q.answer(f'⏳ شیر بعدی: {format_duration(remaining)} دیگر.',show_alert=True)
+            if int(user.fox_points or 0) < BABY_MILK_COST:
+                return await q.answer(f'❌ {BABY_MILK_COST:,} روب‌پوینت لازم داری.',show_alert=True)
+            baby_settle(session,baby)
+            cap=int(baby.belly_capacity or 1)
+            user.fox_points -= BABY_MILK_COST
+            baby.belly=cap
+            baby.last_milk_at=now_utc()
+            session.commit()
+            await q.answer('🍼 نینی شیر خورد و سیر شد!'); text,kb=baby_panel_view(session,user,m,baby); await marriage_edit_panel(q,text,kb); return
         if action=='babyname':
             baby=session.get(RubyBaby,m.baby_id) if m.baby_id else None
             if not baby: return await q.answer('نینی وجود ندارد.',show_alert=True)
@@ -7698,6 +7684,22 @@ async def marriage_callback(update, context):
             else:
                 m.pregnancy_decision='continue'; session.commit(); await q.answer('بارداری ادامه پیدا می‌کند.')
             text,kb=marriage_panel(session,user); await marriage_edit_panel(q,text,kb); return
+        if action=='cheatdivorce':
+            male=session.get(User,m.male_id); female=session.get(User,m.female_id)
+            if m.baby_id:
+                baby=session.get(RubyBaby,m.baby_id)
+                if baby: session.delete(baby)
+            for u in (male,female):
+                if u:
+                    u.jail_until=now_utc()+timedelta(minutes=MARRIAGE_DIVORCE_JAIL_MINUTES); u.jail_reason='طلاق روبی (خیانت)'; u.jail_fine=MARRIAGE_DIVORCE_FINE; u.jail_arrested_at=now_utc(); u.marriage_lock_until=now_utc()+timedelta(hours=MARRIAGE_REJOIN_LOCK_HOURS)
+                    u.fox_points=max(0,int(u.fox_points or 0)-MARRIAGE_DIVORCE_FINE)
+            m.status='divorced'; m.divorced_at=now_utc(); session.commit()
+            for uid2 in (m.male_id,m.female_id):
+                try: await context.bot.send_message(uid2,'💔 ازدواج روبی شما به‌خاطر خیانت پایان یافت.\n⛓️ ۳۰ دقیقه زندان روبی\n💸 جریمه: ۵۰٬۰۰۰ روب‌پوینت\n⏳ تا ۱۴ ساعت امکان ازدواج دوباره نداری.')
+                except Exception: pass
+            await q.answer('💔 طلاق ثبت شد.'); await _edit('💔 به‌خاطر خیانت طلاق گرفتی. متاسفیم برات 😢'); return
+        if action=='cheatignore':
+            await q.answer('باشه 😌'); await _edit('😌 بیخیال شدی؛ ازدواجت همچنان برقراره.'); return
         if action=='divorce':
             if not m.accepted_at or (now_utc()-aware(m.accepted_at)).total_seconds()<MARRIAGE_DIVORCE_WAIT_HOURS*3600: return await q.answer('⏳ تا ۲۴ ساعت از ازدواج نگذشته؛ طلاق ممکن نیست.',show_alert=True)
             context.user_data['marriage_divorce_confirm']=mid
@@ -7820,7 +7822,32 @@ async def handle_marriage_text(update, context):
         user=session.get(User,update.effective_user.id)
         spouse_id=marriage_spouse_id(m,user.telegram_id)
         if int(reply.from_user.id) != int(spouse_id):
-            await update.message.reply_text('❌ این پیام متعلق به همسر روبی‌ات نیست.')
+            # ریپلای حال/بوسه/بغل روی پیام یک نفر دیگر (نه همسر خودش) = خیانت!
+            if int(reply.from_user.id) == int(user.telegram_id) or getattr(reply.from_user, 'is_bot', False):
+                await update.message.reply_text('❌ این پیام متعلق به همسر روبی‌ات نیست.')
+                return True
+            possessive = 'خانمیت' if user.fox_gender == 'male' else 'شوشوییت'
+            await update.message.reply_text(f'😎 هوی! تو داری به {possessive} خیانت می‌کنی، بهش خبر میدم!')
+            try:
+                target_tg = reply.from_user
+                target_user = session.get(User, target_tg.id)
+                target_name = user_display_name(target_user) if target_user else (target_tg.first_name or 'یک نفر دیگه')
+                actor_word = 'شوهرت' if user.fox_gender == 'male' else 'خانمت'
+                cheat_text = (
+                    f"🚨 خبر بد!\n\n{actor_word} {user_display_name(user)} رفت رو پیام {target_name} "
+                    f"و براش «{text}» فرستاد 😢\nانگار داره بهت خیانت می‌کنه...\n\nحالا می‌خوای چیکار کنی؟"
+                )
+                kb = InlineKeyboardMarkup([[
+                    InlineKeyboardButton('💔 طلاق', callback_data=f'marriage:cheatdivorce:{m.id}'),
+                    InlineKeyboardButton('😌 بیخیال', callback_data=f'marriage:cheatignore:{m.id}'),
+                ]])
+                if os.path.exists(MARRIAGE_PANEL_IMAGE):
+                    with open(MARRIAGE_PANEL_IMAGE, 'rb') as fh:
+                        await context.bot.send_photo(chat_id=spouse_id, photo=fh, caption=cheat_text, reply_markup=kb)
+                else:
+                    await context.bot.send_message(spouse_id, cheat_text, reply_markup=kb)
+            except Exception:
+                pass
             return True
         left=marriage_relation_left(m)
         if left:
@@ -11223,7 +11250,7 @@ def main():
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|renamemenu|renameyes|renameno|gendermenu|genderpick_male|genderpick_female|genderyes_male|genderyes_female|genderno_male|genderno_female|resetask|resetyes|resetno):\d+$"))
-    app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge|baby):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|feed|upgrade):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
     app.add_handler(CallbackQueryHandler(referral_admin_button,pattern=r"^ref:(approve|reject):\d+$"))
@@ -11242,7 +11269,7 @@ def main():
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:(home|storage):\d+$|^remoji:cat:[a-z_]+$"))
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:item:[a-z_]+:\d+$"))
     app.add_handler(CallbackQueryHandler(emoji_action, pattern=r"^remoji:(buyyes|buyno|select|transfer|sell|sellyes|transferyes|transferno):[a-z_0-9]+:\d+$|^remoji:upgrade:\d+$"))
-    app.add_handler(CallbackQueryHandler(marriage_callback, pattern=r"^marriage:(?:start|gift|cancel|proposalconfirm|accept|acceptyes|reject|action|actionyes|noop|transfer|transferyes|babyview|babyhome|feedmenu|feedbuy|feedbuyyes|feedconfirm|feedyes|feed|babyname|babyupgrade|babyupgradeyes|babycollect|collectyes|back|continue|continueyes|abort|abortyes|divorce|divorceyes):[^:]+(?::[^:]+)?$"))
+    app.add_handler(CallbackQueryHandler(marriage_callback, pattern=r"^marriage:(?:start|gift|cancel|proposalconfirm|accept|acceptyes|reject|action|actionyes|noop|transfer|transferyes|babyview|babyhome|babymilk|babyname|babyupgrade|babyupgradeyes|babycollect|collectyes|back|continue|continueyes|abort|abortyes|divorce|divorceyes|cheatdivorce|cheatignore):[^:]+(?::[^:]+)?$"))
     app.add_handler(CallbackQueryHandler(education_topic, pattern=r"^edutopic:(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_unlock, pattern=r"^eduunlock:(yes|no):(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_certificate, pattern=r"^educert:(yes|no)$"))
