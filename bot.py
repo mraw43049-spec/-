@@ -55,6 +55,7 @@ MARRIAGE_DIVORCE_FINE = 50_000  # دیگر استفاده نمی‌شود؛ طل
 RELATION_COOLDOWN_SECONDS = 7 * 60
 PREGNANCY_RELATION = 30
 BIRTH_RELATION = 50
+POST_ABORT_BIRTH_ACTIONS = 30  # بعد از سقط، با این تعداد حال/بوسه/بغل یک نینی جدید مستقیم ساخته می‌شود
 BABY_HUNGER_SECONDS = 20 * 60
 BABY_PRODUCTION_SECONDS = 1
 BABY_MAX_LEVEL = 10
@@ -6513,7 +6514,7 @@ async def admin_callback(update, context):
             if not target or not m or not baby:
                 await q.answer('نینی برای این کاربر پیدا نشد.',show_alert=True); return
             baby_settle(session,baby); session.commit(); male=session.get(User,m.male_id); female=session.get(User,m.female_id)
-            text_out=(f'🍼 پنل پشتیبانی نینی روبی\n\n👤 پدر: {user_display_name(male) if male else m.male_id}\n👤 مادر: {user_display_name(female) if female else m.female_id}\n💞 رابطه والدین: {int(m.relation or 0)}/50\n\n{baby_upgrade_text(baby)}\n\n🍖 وضعیت تولید: {"فعال" if int(baby.belly or 0)>0 else "متوقف؛ شکم نینی خالیه"}')
+            text_out=(f'🍼 پنل پشتیبانی نینی روبی\n\n👤 پدر: {user_display_name(male) if male else m.male_id}\n👤 مادر: {user_display_name(female) if female else m.female_id}\n💞 رابطه والدین: {int(m.relation or 0)}\n\n{baby_upgrade_text(baby)}\n\n🍖 وضعیت تولید: {"فعال" if int(baby.belly or 0)>0 else "متوقف؛ شکم نینی خالیه"}')
             await q.message.edit_text(text_out, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔄 تازه‌سازی', callback_data=f'admin:babyrefresh:{target_id}')],[InlineKeyboardButton('🔙 پنل مدیریت', callback_data='admin:back')]]))
             return
         finally:
@@ -6550,7 +6551,7 @@ async def admin_callback(update, context):
         await q.message.reply_text('🍼 پنل پشتیبانی نینی روبی\n\nآیدی عددی کاربر را بفرست.\nمثال: 7433300089')
     elif action == "marriage_relation":
         context.user_data['admin_action']='marriage_relation'
-        await q.message.reply_text('💞 تنظیم رابطه ازدواج (فقط پشتیبانی)\n\nآیدی عددی یکی از دو همسر را بفرست.\nرابطه ازدواج فعال همان زوج روی 50/50 تنظیم می‌شود.')
+        await q.message.reply_text('💞 تنظیم رابطه ازدواج (فقط پشتیبانی)\n\nآیدی عددی یکی از دو همسر را بفرست.\nرابطه ازدواج فعال همان زوج روی 50 تنظیم می‌شود.')
     elif action == "jailmenu":
         await q.message.reply_text("⛓️ زندان روبی\n\nکاربر را با مدت و دلیل به زندان بینداز یا آزادش کن:", reply_markup=jail_menu_keyboard())
     elif action == "backup":
@@ -6649,10 +6650,10 @@ async def admin_text(update, context):
             if not m:
                 await update.message.reply_text(f'🦊 کاربر {target_id} ازدواج فعال ندارد.'); return True
             if not baby:
-                await update.message.reply_text(f'💕 ازدواج فعال است اما نینی روبی هنوز متولد نشده.\n👤 کاربر: {target_id}\n💞 رابطه: {int(m.relation or 0)}/50'); return True
+                await update.message.reply_text(f'💕 ازدواج فعال است اما نینی روبی هنوز متولد نشده.\n👤 کاربر: {target_id}\n💞 رابطه: {int(m.relation or 0)}'); return True
             baby_settle(session,baby); session.commit()
             male=session.get(User,m.male_id); female=session.get(User,m.female_id)
-            text_out=(f'🍼 پنل پشتیبانی نینی روبی\n\n👤 پدر: {user_display_name(male) if male else m.male_id}\n👤 مادر: {user_display_name(female) if female else m.female_id}\n💞 رابطه والدین: {int(m.relation or 0)}/50\n\n{baby_upgrade_text(baby)}\n\n🍖 وضعیت تولید: {"فعال" if int(baby.belly or 0)>0 else "متوقف؛ شکم نینی خالیه"}')
+            text_out=(f'🍼 پنل پشتیبانی نینی روبی\n\n👤 پدر: {user_display_name(male) if male else m.male_id}\n👤 مادر: {user_display_name(female) if female else m.female_id}\n💞 رابطه والدین: {int(m.relation or 0)}\n\n{baby_upgrade_text(baby)}\n\n🍖 وضعیت تولید: {"فعال" if int(baby.belly or 0)>0 else "متوقف؛ شکم نینی خالیه"}')
             await update.message.reply_text(text_out, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔄 تازه‌سازی', callback_data=f'admin:babyrefresh:{target_id}')],[InlineKeyboardButton('🔙 پنل مدیریت', callback_data='admin:back')]]))
             return True
         finally:
@@ -6680,8 +6681,8 @@ async def admin_text(update, context):
             m.last_relation_at=None
             session.commit()
             await update.message.reply_text(
-                f'✅ رابطه ازدواج این زوج توسط پشتیبانی روی 50/50 تنظیم شد.\n\n'
-                f'👤 طرف اول: {m.male_id}\n👤 طرف دوم: {m.female_id}\n💞 رابطه: 50/50'
+                f'✅ رابطه ازدواج این زوج توسط پشتیبانی روی 50 تنظیم شد.\n\n'
+                f'👤 طرف اول: {m.male_id}\n👤 طرف دوم: {m.female_id}\n💞 رابطه: 50'
             )
             return True
         finally:
@@ -7404,15 +7405,15 @@ def marriage_panel(session, viewer):
                     f"⏳ یک درخواست ازدواج در انتظار پاسخ {user_mention(other) if other else 'کاربر'} است.\n"
                     f"⏱ مهلت پاسخ: تا {format_duration(max(0, int((aware(pending.expires_at)-now_utc()).total_seconds()))) if pending.expires_at else '۱۲ ساعت'}", None)
         return ("💕 ازدواج روبی 💍\n\n"
-                f"🦊 روبی : {user_display_name(viewer)}\n"
+                f"🦊 روبی : {user_mention(viewer)}\n"
                 "┘─ ❗️ وضعیت : مجرد\n\n"
                 "✨ هنوز سینگل و تنهایی در شب کنار گرگ های وحشی به سر میبری😢\n"
                 "┘─ ❓ جهت خواستگاری از یکی از دوستان روبی خود از گزینه های زیر استفاده کنید ⬇️", None)
     spouse_id = marriage_spouse_id(m, viewer.telegram_id); spouse = session.get(User, spouse_id)
     rel = int(m.relation or 0)
     gift = m.gift_emoji
-    lines = ["💕 ازدواج روبی 💍", "", f"🦊 روبی : {user_display_name(viewer)}", f"┘─ 💍 وضعیت : متاهل{gift}",
-             f"❤️ همسر روبی : {user_mention(spouse) if spouse else spouse_id}", f"┘─ 💞 رابطه : {rel}/50"]
+    lines = ["💕 ازدواج روبی 💍", "", f"🦊 روبی : {user_mention(viewer)}", f"┘─ 💍 وضعیت : متاهل{gift}",
+             f"❤️ همسر روبی : {user_mention(spouse) if spouse else spouse_id}", f"┘─ 💞 رابطه : {rel}"]
     if m.accepted_at:
         since = max(0, int((now_utc()-aware(m.accepted_at)).total_seconds()))
         if since < MARRIAGE_DIVORCE_WAIT_HOURS*3600:
@@ -7624,14 +7625,29 @@ async def marriage_callback(update, context):
                 m.pregnancy_started_at=now_utc(); m.pregnancy_gender=random.choice(['male','female']); m.pregnancy_decision='pending'
             if m.relation>=BIRTH_RELATION and m.pregnancy_started_at and m.pregnancy_decision=='continue' and not m.baby_id:
                 baby=RubyBaby(marriage_id=m.id,name='نینی روباه',gender=m.pregnancy_gender or random.choice(['male','female']),level=1,belly=1,belly_capacity=1,points=0,last_hunger_at=now_utc(),last_production_at=now_utc()); session.add(baby); session.flush(); m.baby_id=baby.id
+            just_reborn=False
+            # بعد از سقط قبلی: با ۳۰ تا حال/بوسه/بغل جدید، یک نینی روباه تازه مستقیم ساخته می‌شود.
+            if m.pregnancy_decision=='aborted' and not m.baby_id:
+                m.post_abort_actions=int(m.post_abort_actions or 0)+1
+                if m.post_abort_actions>=POST_ABORT_BIRTH_ACTIONS:
+                    m.post_abort_actions=0
+                    m.pregnancy_gender=random.choice(['male','female'])
+                    m.pregnancy_decision='continue'
+                    m.pregnancy_started_at=now_utc()
+                    baby=RubyBaby(marriage_id=m.id,name='نینی روباه',gender=m.pregnancy_gender,level=1,belly=1,belly_capacity=1,points=0,last_hunger_at=now_utc(),last_production_at=now_utc()); session.add(baby); session.flush(); m.baby_id=baby.id; just_reborn=True
             session.commit()
             target_word='خانومیش' if actor.fox_gender=='male' else 'شوشوییش'
-            msg=random.choice(MARRIAGE_TEMPLATES[kind]).format(actor=user_display_name(actor),target_word=target_word)
+            msg=random.choice(MARRIAGE_TEMPLATES[kind]).format(actor=user_mention(actor),target_word=target_word)
             if m.relation==PREGNANCY_RELATION:
-                msg += f"\n\n🤰 {user_display_name(spouse)}، شما از روباه {user_display_name(actor)} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
+                msg += f"\n\n🤰 {user_mention(spouse)}، شما از روباه {user_mention(actor)} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
                 try:
-                    await context.bot.send_message(m.female_id, f"🤰 شما از روباه {user_display_name(session.get(User,m.male_id))} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}\n\nبرای تصمیم‌گیری وارد «ازدواج روبی» شو.")
+                    await context.bot.send_message(m.female_id, f"🤰 شما از روباه {user_mention(session.get(User,m.male_id))} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}\n\nبرای تصمیم‌گیری وارد «ازدواج روبی» شو.")
                 except Exception: pass
+            if just_reborn:
+                msg += f"\n\n🎉 نینی روباه جدیدتون متولد شد! 🍼\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
+                for _uid in (m.male_id,m.female_id):
+                    try: await context.bot.send_message(_uid, f"🎉 نینی روباه جدیدتون متولد شد!\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}")
+                    except Exception: pass
             if m.relation==BIRTH_RELATION and m.baby_id:
                 msg += f"\n\n🎉 نینی روباه شما متولد شد! 🍼\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
                 for _uid in (m.male_id,m.female_id):
@@ -7723,7 +7739,11 @@ async def marriage_callback(update, context):
         if action in ('continueyes','abortyes'):
             if action=='abortyes':
                 if uid!=m.female_id or int(user.potion_count or 0)<=0: return await q.answer('❌ معجون کافی نیست.',show_alert=True)
-                user.potion_count -= 1; m.pregnancy_decision='aborted'; session.commit(); await q.answer('سقط انجام شد.');
+                user.potion_count -= 1; m.pregnancy_decision='aborted'; m.post_abort_actions=0; session.commit(); await q.answer('سقط انجام شد.');
+                try:
+                    await context.bot.send_message(m.male_id, f"☠️ خبر بد!\n\n{user_mention(user)} بارداری نینی روباه‌تون رو سقط کرد.")
+                except Exception:
+                    pass
             else:
                 m.pregnancy_decision='continue'; session.commit(); await q.answer('بارداری ادامه پیدا می‌کند.')
             text,kb=marriage_panel(session,user); await marriage_edit_panel(q,text,kb); return
@@ -7831,7 +7851,7 @@ async def handle_marriage_text(update, context):
             context.user_data['marriage_transfer_confirm']={'mid':m.id,'amount':amount}
             panel_ref=context.user_data.get('marriage_transfer_panel_ref')
             confirm_text=(f'💕 ازدواج روبی 💍\n\n💰 انتقال روب‌پوینت به همسر\n\n'
-                          f'گیرنده: {user_display_name(spouse)}\nمقدار: {amount:,} روب‌پوینت\n\n'
+                          f'گیرنده: {user_mention(spouse)}\nمقدار: {amount:,} روب‌پوینت\n\n'
                           f'❓ تأیید می‌کنی؟')
             kb=InlineKeyboardMarkup([[InlineKeyboardButton('✅ تأیید انتقال',callback_data=f'marriage:transferyes:{m.id}:x'),InlineKeyboardButton('❌ لغو',callback_data=f'marriage:back:{m.id}:x')]])
             try:
@@ -7899,20 +7919,29 @@ async def handle_marriage_text(update, context):
         # فقط همان لحظه‌ای که بارداری/تولد واقعاً اتفاق می‌افتد پیام مخصوصش نمایش داده می‌شود؛
         # بعد از تولد، رابطه روی ۵۰ می‌ماند و این‌طوری همان پیام دوباره و دوباره تکرار نمی‌شود.
         just_pregnant=False; just_born=False
-        m.relation=min(50,int(m.relation or 0)+1)
+        m.relation=int(m.relation or 0)+1
         m.last_relation_at=now_utc()
         if m.relation>=PREGNANCY_RELATION and not m.pregnancy_started_at and not m.baby_id:
             m.pregnancy_started_at=now_utc(); m.pregnancy_gender=random.choice(['male','female']); m.pregnancy_decision='pending'; just_pregnant=True
         if m.relation>=BIRTH_RELATION and m.pregnancy_started_at and m.pregnancy_decision=='continue' and not m.baby_id:
             baby=RubyBaby(marriage_id=m.id,name='نینی روباه',gender=m.pregnancy_gender or random.choice(['male','female']),level=1,belly=1,belly_capacity=1,points=0,last_hunger_at=now_utc(),last_production_at=now_utc()); session.add(baby); session.flush(); m.baby_id=baby.id; just_born=True
+        # بعد از سقط قبلی: با ۳۰ تا حال/بوسه/بغل جدید، یک نینی روباه تازه مستقیم ساخته می‌شود.
+        if m.pregnancy_decision=='aborted' and not m.baby_id:
+            m.post_abort_actions=int(m.post_abort_actions or 0)+1
+            if m.post_abort_actions>=POST_ABORT_BIRTH_ACTIONS:
+                m.post_abort_actions=0
+                m.pregnancy_gender=random.choice(['male','female'])
+                m.pregnancy_decision='continue'
+                m.pregnancy_started_at=now_utc()
+                baby=RubyBaby(marriage_id=m.id,name='نینی روباه',gender=m.pregnancy_gender,level=1,belly=1,belly_capacity=1,points=0,last_hunger_at=now_utc(),last_production_at=now_utc()); session.add(baby); session.flush(); m.baby_id=baby.id; just_born=True
         session.commit()
         target_word='خانومیش' if actor.fox_gender=='male' else 'شوشوییش'
-        msg=random.choice(MARRIAGE_TEMPLATES[text]).format(actor=user_display_name(actor),target_word=target_word)
-        msg += f"\n\n💞 میزان رابطه: {int(m.relation)}/50"
+        msg=random.choice(MARRIAGE_TEMPLATES[text]).format(actor=user_mention(actor),target_word=target_word)
+        msg += f"\n\n💞 میزان رابطه: {int(m.relation)}"
         if just_pregnant:
-            msg += f"\n\n🤰 {user_display_name(spouse)}، شما از روباه {user_display_name(actor)} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
+            msg += f"\n\n🤰 {user_mention(spouse)}، شما از روباه {user_mention(actor)} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
             try:
-                await context.bot.send_message(m.female_id, f"🤰 شما از روباه {user_display_name(session.get(User,m.male_id))} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}\n\nبرای تصمیم‌گیری وارد «ازدواج روبی» شو.")
+                await context.bot.send_message(m.female_id, f"🤰 شما از روباه {user_mention(session.get(User,m.male_id))} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}\n\nبرای تصمیم‌گیری وارد «ازدواج روبی» شو.")
             except Exception: pass
         if just_born:
             msg += f"\n\n🎉 نینی روباه شما متولد شد! 🍼\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"

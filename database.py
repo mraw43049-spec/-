@@ -135,6 +135,7 @@ class RubyMarriage(Base):
     pregnancy_gender = Column(String, nullable=True)
     pregnancy_decision = Column(String, nullable=True)  # pending | continue | aborted
     baby_id = Column(Integer, nullable=True)
+    post_abort_actions = Column(Integer, nullable=False, default=0)  # شمارنده حال/بوسه/بغل بعد از سقط؛ بعد از ۳۰ تا نینی جدید ساخته می‌شود
 
 
 class RubyBaby(Base):
@@ -600,6 +601,10 @@ def init_db():
             baby_cols = {c['name'] for c in inspector.get_columns('ruby_babies')}
             if 'last_milk_at' not in baby_cols:
                 conn.execute(text(f'ALTER TABLE ruby_babies ADD COLUMN last_milk_at {DT_SQL_TYPE}'))
+        if 'ruby_marriages' in inspector.get_table_names():
+            marriage_cols = {c['name'] for c in inspector.get_columns('ruby_marriages')}
+            if 'post_abort_actions' not in marriage_cols:
+                conn.execute(text("ALTER TABLE ruby_marriages ADD COLUMN post_abort_actions INTEGER NOT NULL DEFAULT 0"))
         if 'fox_hunts' in inspector.get_table_names():
             hunt_cols = {c['name'] for c in inspector.get_columns('fox_hunts')}
             hunt_additions = {
