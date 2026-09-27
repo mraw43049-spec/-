@@ -1821,6 +1821,48 @@ async def ruby_game_select(update,context):
     if q.from_user.id!=owner_id:
         await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True); return
     if not await require_membership(update,context): return
+    await casino_game_select(q,context,key,owner_id)
+
+# ── پنل جدید ساخت میز کازینو: چک‌لیستی با ✅/❌ به‌جای ویزارد خطی ──
+CASINO_MIN_ENTRY = 500
+
+def casino_setup_panel(key, state):
+    name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
+    icon = '🃏' if key.startswith('cz_') else '🕹' 
+    owner_id=state['owner_id']
+    amount=state.get('amount')
+    count=state.get('count')
+    fixed_count = (minp==maxp)
+    if fixed_count and count is None:
+        count = minp
+    rows=[]
+    amt_label = f"✅ مبلغ ورودی: {amount:,} روب‌پوینت" if amount is not None else "💰 انتخاب مبلغ ورودی ❌"
+    rows.append([InlineKeyboardButton(amt_label, callback_data=f"csetup:amount:{key}:{owner_id}")])
+    if not fixed_count and amount is not None:
+        cnt_label = f"✅ تعداد بازیکن: {count} نفر" if count is not None else "👥 تعیین تعداد بازیکن ❌"
+        rows.append([InlineKeyboardButton(cnt_label, callback_data=f"csetup:count:{key}:{owner_id}")])
+    ready = amount is not None and (fixed_count or count is not None)
+    if ready:
+        if key=='cz_dice':
+            if count<=1:
+                bet_keys=['odd','even']; labels=DICE_BET_LABELS
+            else:
+                bet_keys=['high','low']; labels=DICE_RULE_LABELS
+            for b in bet_keys:
+                rows.append([InlineKeyboardButton(labels[b], callback_data=f"rdicebet:{count}:{amount}:{owner_id}:{b}")])
+        else:
+            rows.append([InlineKeyboardButton("🛠 ساخت میز بازی ✅", callback_data=f"rcreate:{key}:{count}:{amount}:{owner_id}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"csetup:back:{key}:{owner_id}")])
+    text=f"{icon} {name}\n\n👇 مراحل ساخت میز رو کامل کن:"
+    if fixed_count:
+        text += f"\n👥 تعداد بازیکن: {count} نفر (ثابت)"
+    elif count is not None:
+        text += f"\n👥 تعداد بازیکن: {count} نفر"
+    if amount is not None:
+        text += f"\n💰 مبلغ ورودی: {amount:,} روب‌پوینت"
+    return text, InlineKeyboardMarkup(rows)
+
+async def casino_game_select(q, context, key, owner_id):
     name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
     session=get_session()
     try:
@@ -1828,118 +1870,127 @@ async def ruby_game_select(update,context):
         remaining=ruby_cooldown_remaining(user, key)
     finally: session.close()
     if remaining>0:
-        await q.answer(f"⏳ هر {CASINO_COOLDOWN_SECONDS if key.startswith('cz_') else RUBY_COOLDOWN_SECONDS} ثانیه فقط یک‌بار می‌تونی بازی بسازی/وارد بشی. {remaining} ثانیه دیگه صبر کن.",show_alert=True); return
+        cd_secs = CASINO_COOLDOWN_SECONDS if key.startswith('cz_') else RUBY_COOLDOWN_SECONDS
+        await q.answer(f"⏳ هر {cd_secs} ثانیه فقط یک‌بار می‌تونی بازی بسازی/وارد بشی. {remaining} ثانیه دیگه صبر کن.",show_alert=True); return
     await q.answer()
     chat_id=q.message.chat_id; message_id=q.message.message_id
-    if minp==maxp:
-        await ask_ruby_entry_amount(chat_id,message_id,context,key,minp,owner_id)
-    else:
-        kb=InlineKeyboardMarkup([[InlineKeyboardButton(f"{n} نفر",callback_data=f"rcount:{key}:{n}:{owner_id}") for n in range(minp,maxp+1)]])
-        await q.message.edit_text(f"🕹 {name}\n\n👥 میز رو برای چند نفر بچینم؟",reply_markup=kb)
-
-async def ruby_count_select(update,context):
-    q=update.callback_query
-    parts=q.data.split(":")
-    if len(parts)!=4: return
-    _,key,count,owner_s=parts; count=int(count); owner_id=int(owner_s)
-    if q.from_user.id!=owner_id:
-        await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True); return
-    if not await require_membership(update,context): return
-    await q.answer()
-    await ask_ruby_entry_amount(q.message.chat_id,q.message.message_id,context,key,count,owner_id)
-
-async def ask_ruby_entry_amount(chat_id,message_id,context,key,count,owner_id):
-    name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
-    if not allow_fee:
-        # این بازی هنوز منطق تعیین برنده ندارد، فعلاً فقط رایگان قابل ساخت است.
-        await finalize_ruby_setup(chat_id,message_id,context,key,count,0,owner_id)
-        return
-    context.user_data['ruby_setup']={'key':key,'count':count,'chat_id':chat_id,'message_id':message_id,'owner_id':owner_id}
-    await context.bot.edit_message_text(
-        chat_id=chat_id,message_id=message_id,
-        text=(
-            f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n\n"
-            f"💰 مبلغ ورودی هر نفر رو بفرست (روب‌پوینت).\n"
-            f"سقف مجاز: {max_entry_for_game(key):,} روب‌پوینت.\nبرای بازی رایگان عدد 0 رو بفرست.\n"
-            "مثال: 50k / 50کا / 50م / 200000\n\n"
-            "👇 جواب این پیام رو (یا فقط عدد رو) در همین چت بفرست."
-        ),
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت",callback_data=f"rubysetup:back:{key}:{owner_id}")]])
-    )
-
-async def finalize_ruby_setup(chat_id,message_id,context,key,count,amount,owner_id):
-    name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
-    fee_text = "رایگان ✅" if amount<=0 else f"{amount:,} روب‌پوینت 🪙"
-    if key == 'cz_dice':
-        if count <= 1:
-            bet_keys = ['odd', 'even']; labels = DICE_BET_LABELS
-            bet_hint = "روی تک تاست شرط ببند:"
-        else:
-            bet_keys = ['high', 'low']; labels = DICE_RULE_LABELS
-            bet_hint = "قانون بازی رو انتخاب کن؛ این قانون برای هر دو نفر یکسانه:"
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton(labels[b], callback_data=f"rdicebet:{count}:{amount}:{owner_id}:{b}")] for b in bet_keys])
-        await context.bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text=f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n💰 مبلغ ورودی : {fee_text}\n\n🎲 {bet_hint}",
-            reply_markup=kb
-        )
-        return
-    kb=InlineKeyboardMarkup([[InlineKeyboardButton("🛠 ساخت میز بازی",callback_data=f"rcreate:{key}:{count}:{amount}:{owner_id}")]])
-    await context.bot.edit_message_text(
-        chat_id=chat_id,message_id=message_id,
-        text=f"🕹 {name}\n\n👥 تعداد بازیکن: {count} نفر\n💰 مبلغ ورودی : {fee_text}\n\nآماده‌ای؟",
-        reply_markup=kb
-    )
-
-async def ruby_setup_back(update,context):
-    q=update.callback_query
-    parts=q.data.split(':')
-    try:
-        if len(parts)==4:
-            # فرمت جدید: rubysetup:back:<key>:<owner> — کلید بازی مستقیماً از callback میاد
-            # تا وقتی چند پنل ساخت میز هم‌زمان باز است (مثلاً هم کازینو هم بازی روبی)،
-            # پنل‌ها با هم قاطی نشوند و بازگشت هرکدام به منوی درست خودش برود.
-            key=parts[2]; owner=int(parts[3])
-        else:
-            # فرمت قدیمی (پیام‌های قدیمی‌تر): کلید را از حافظه‌ی کاربر می‌خوانیم
-            owner=int(parts[2])
-            key=(context.user_data.get('ruby_setup') or {}).get('key','')
-    except Exception: return
-    if q.from_user.id!=owner:
-        await q.answer('⛔ این پنل برای کاربر دیگری است.',show_alert=True); return
-    context.user_data.pop('ruby_setup',None)
-    await q.answer()
-    if key.startswith('cz_'):
-        kb=InlineKeyboardMarkup([[InlineKeyboardButton('🎰 اسلات',callback_data=f'rg:cz_wheel:{owner}')],[InlineKeyboardButton('🎲 تاس',callback_data=f'rg:cz_dice:{owner}')],[InlineKeyboardButton('🐇 خرگوش خور',callback_data=f'rg:cz_rabbit:{owner}')],[InlineKeyboardButton('🃏 بازی دوتایی‌ها',callback_data=f'rg:cz_pairs:{owner}')],[InlineKeyboardButton('💥 بمب',callback_data=f'rg:cz_bomb:{owner}')]])
-        text='🃏 کازینو روبی🦊\n\n❗️ قمار مورد نظر را انتخاب کن:'
-    else:
-        kb=InlineKeyboardMarkup([[InlineKeyboardButton('🧩 بازی روبی دوز XO',callback_data=f'rg:xo:{owner}')],[InlineKeyboardButton('🔫 بازی روبی سنگ کاغذ قیچی',callback_data=f'rg:rps:{owner}')],[InlineKeyboardButton('🎯 بازی روبی دارت',callback_data=f'rg:darts:{owner}')],[InlineKeyboardButton('🏀 بازی روبی بسکتبال',callback_data=f'rg:basketball:{owner}')],[InlineKeyboardButton('🎳 بازی روبی بولینگ',callback_data=f'rg:bowling:{owner}')]])
-        text='🕹 بازی‌های روبی🦊\n\n❗️ بازی مورد نظر را انتخاب کن:'
+    state={'key':key,'owner_id':owner_id,'chat_id':chat_id,'message_id':message_id,'amount':None,'count':None,'awaiting':None}
+    context.user_data['casino_setup']=state
+    text,kb=casino_setup_panel(key,state)
     try: await q.message.edit_text(text,reply_markup=kb)
     except Exception: pass
 
-async def handle_ruby_entry_text(update,context):
-    setup=context.user_data.get('ruby_setup')
-    if not setup: return False
-    if update.effective_user.id!=setup.get('owner_id'):
+def _casino_menu_kb(owner_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎰 اسلات",callback_data=f"rg:cz_wheel:{owner_id}")],
+        [InlineKeyboardButton("🎲 تاس",callback_data=f"rg:cz_dice:{owner_id}")],
+        [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
+        [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
+        [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
+    ])
+
+def _ruby_games_menu_kb(owner_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🧩 بازی روبی دوز XO",callback_data=f"rg:xo:{owner_id}")],
+        [InlineKeyboardButton("🔫 بازی روبی سنگ کاغذ قیچی",callback_data=f"rg:rps:{owner_id}")],
+        [InlineKeyboardButton("🎯 بازی روبی دارت",callback_data=f"rg:darts:{owner_id}")],
+        [InlineKeyboardButton("🏀 بازی روبی بسکتبال",callback_data=f"rg:basketball:{owner_id}")],
+        [InlineKeyboardButton("🎳 بازی روبی بولینگ",callback_data=f"rg:bowling:{owner_id}")],
+    ])
+
+async def casino_setup_callback(update,context):
+    q=update.callback_query
+    parts=q.data.split(":")
+    if len(parts)==5 and parts[1]=='setcount':
+        _,_,key,n_s,owner_s=parts; action='setcount'; n=int(n_s); owner_id=int(owner_s)
+    elif len(parts)==4:
+        _,action,key,owner_s=parts; owner_id=int(owner_s); n=None
+    else:
+        return
+    if key not in RUBY_GAME_CONFIG: return
+    if q.from_user.id!=owner_id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True); return
+    if not await require_membership(update,context): return
+    name,minp,maxp,allow_fee=RUBY_GAME_CONFIG[key]
+    icon = '🃏' if key.startswith('cz_') else '🕹'
+    state=context.user_data.get('casino_setup')
+    if not state or state.get('key')!=key or state.get('owner_id')!=owner_id:
+        state={'key':key,'owner_id':owner_id,'chat_id':q.message.chat_id,'message_id':q.message.message_id,'amount':None,'count':None,'awaiting':None}
+        context.user_data['casino_setup']=state
+    await q.answer()
+    if action=='back':
+        context.user_data.pop('casino_setup',None)
+        if key.startswith('cz_'):
+            try: await q.message.edit_text('🃏 کازینو روبی🦊\n\n❗️ قمار مورد نظر را انتخاب کن:',reply_markup=_casino_menu_kb(owner_id))
+            except Exception: pass
+        else:
+            try: await q.message.edit_text('🕹 بازی‌های روبی🦊\n\n❗️ بازی مورد نظر را انتخاب کن:',reply_markup=_ruby_games_menu_kb(owner_id))
+            except Exception: pass
+        return
+    if action=='amount':
+        state['awaiting']='amount'
+        try:
+            await q.message.edit_text(
+                f"{icon} {name}\n\n💰 مبلغ ورودی هر نفر رو بفرست (روب‌پوینت).\n"
+                f"حداقل: {CASINO_MIN_ENTRY:,} روب‌پوینت\nسقف مجاز: {max_entry_for_game(key):,} روب‌پوینت.\n"
+                "مثال: 50k / 50کا / 50م / 200000\n\n"
+                "👇 جواب این پیام رو (یا فقط عدد رو) در همین چت بفرست.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت",callback_data=f"csetup:cancelamount:{key}:{owner_id}")]])
+            )
+        except Exception: pass
+        return
+    if action=='cancelamount':
+        state['awaiting']=None
+        text,kb=casino_setup_panel(key,state)
+        try: await q.message.edit_text(text,reply_markup=kb)
+        except Exception: pass
+        return
+    if action=='count':
+        if minp==maxp: return
+        btn_row=[InlineKeyboardButton(f"{n2} نفر",callback_data=f"csetup:setcount:{key}:{n2}:{owner_id}") for n2 in range(minp,maxp+1)]
+        kb=InlineKeyboardMarkup([btn_row,[InlineKeyboardButton("🔙 بازگشت",callback_data=f"csetup:cancelcount:{key}:{owner_id}")]])
+        try: await q.message.edit_text(f"{icon} {name}\n\n👥 میز رو برای چند نفر بچینم؟",reply_markup=kb)
+        except Exception: pass
+        return
+    if action=='cancelcount':
+        text,kb=casino_setup_panel(key,state)
+        try: await q.message.edit_text(text,reply_markup=kb)
+        except Exception: pass
+        return
+    if action=='setcount':
+        state['count']=n
+        text,kb=casino_setup_panel(key,state)
+        try: await q.message.edit_text(text,reply_markup=kb)
+        except Exception: pass
+        return
+
+async def handle_casino_entry_text(update,context):
+    state=context.user_data.get('casino_setup')
+    if not state or state.get('awaiting')!='amount': return False
+    if update.effective_user.id!=state.get('owner_id'):
         return False
-    context.user_data.pop('ruby_setup',None)
     if not await require_membership(update,context): return True
-    chat_id=setup['chat_id']; message_id=setup['message_id']; owner_id=setup['owner_id']
+    key=state['key']; chat_id=state['chat_id']; message_id=state['message_id']; owner_id=state['owner_id']
     try:
         amount=parse_amount(update.message.text)
         if amount<0: raise ValueError
     except Exception:
-        await update.message.reply_text("❌ مبلغ نامعتبره؛ یک عدد بفرست (مثلاً 0 یا 50000).",**reply_kwargs(update.message)); return True
-    if amount>max_entry_for_game(setup['key']):
-        await update.message.reply_text(f"❌ سقف مبلغ ورودی {max_entry_for_game(setup['key']):,} روب‌پوینته.",**reply_kwargs(update.message)); return True
+        await update.message.reply_text("❌ مبلغ نامعتبره؛ یک عدد بفرست (مثلاً 500 یا 50000).",**reply_kwargs(update.message)); return True
+    if amount<CASINO_MIN_ENTRY:
+        await update.message.reply_text(f"❌ حداقل مبلغ ورودی {CASINO_MIN_ENTRY:,} روب‌پوینته.",**reply_kwargs(update.message)); return True
+    if amount>max_entry_for_game(key):
+        await update.message.reply_text(f"❌ سقف مبلغ ورودی {max_entry_for_game(key):,} روب‌پوینته.",**reply_kwargs(update.message)); return True
     session=get_session()
     try:
         user=get_or_create_user(session,update.effective_user)
-        if amount>0 and (user.fox_points or 0)<amount:
+        if (user.fox_points or 0)<amount:
             await update.message.reply_text(f"❌ روب‌پوینت کافی نداری.\n💰 موجودی: {int(user.fox_points or 0):,}",**reply_kwargs(update.message)); return True
     finally: session.close()
-    await finalize_ruby_setup(chat_id,message_id,context,setup['key'],setup['count'],amount,owner_id)
+    state['amount']=amount; state['awaiting']=None
+    text,kb=casino_setup_panel(key,state)
+    try:
+        await context.bot.edit_message_text(chat_id=chat_id,message_id=message_id,text=text,reply_markup=kb)
+    except Exception: pass
     return True
 
 async def ruby_create_table(update,context):
@@ -9601,7 +9652,7 @@ def build_ai_knowledge():
         f"- 🦁 شهر روبی: تو گروه «شهر روبی» رو بنویس. شهر تا سطح {CITY_MAX_LEVEL} بالا می‌ره (با روب‌روب، نجات روباه زخمی، شکار و دونیت به خزانه). از سطح {CITY_MAYOR_UNLOCK_LEVEL} شهردار روبی فعال می‌شه؛ شهردار اولیه مالک گپ است و می‌تونه شهرداری را واگذار کنه. «اخبار شهر» یه خبر بامزه از وضعیت شهر می‌ده.",
         f"- 👥 دوست روبی: بنویس «دوست روبی» و ➕ افزودن دوست رو بزن، بعد آیدی عددی یا @یوزرنیم دوستت رو بفرست. حداکثر {FRIEND_LIMIT} دوست؛ درخواست به پیوی ربات دوستت می‌ره و اون قبول یا رد می‌کنه؛ نتیجه هم تو پیوی ربات به تو خبر داده می‌شه. با دوستات می‌تونی روب‌پوینت و پیام بفرستی و رتبه‌شون رو ببینی.",
         "- 🎁 کد هدیه: «کد هدیه» رو بنویس، 🎟 ورود کد رو بزن و کد رو روی همون پنل ریپلای کن. هر کد برای هر حساب فقط یک‌بار قابل استفاده‌ست؛ ظرفیت و مهلت داره.",
-        f"- 🃏 کازینو (از لول {CASINO_UNLOCK_LEVEL}؛ مبلغ ورودی هر نفر حداکثر ۵٬۰۰۰٬۰۰۰ روب‌پوینت در کازینو و ۲٬۵۰۰٬۰۰۰ در بازی روبی؛ میز ۶۰ ثانیه برای پیوستن فرصت داره؛ هر کاربر هر ۹۰ ثانیه در بازی روبی و هر ۴ دقیقه در کازینو می‌سازه یا وارد میز می‌شه):",
+        f"- 🃏 کازینو (از لول {CASINO_UNLOCK_LEVEL}؛ مبلغ ورودی هر نفر در کازینو حداقل {CASINO_MIN_ENTRY:,} و حداکثر ۵٬۰۰۰٬۰۰۰ روب‌پوینت، در بازی روبی حداکثر ۲٬۵۰۰٬۰۰۰؛ میز ۶۰ ثانیه برای پیوستن فرصت داره؛ هر کاربر هر ۹۰ ثانیه در بازی روبی و هر ۴ دقیقه در کازینو می‌سازه یا وارد میز می‌شه):",
         "   • 🎰 اسلات: ۱ تا ۳ نفر. تک‌نفره مقابل خانه‌ست (امتیاز بالا جایزه می‌گیره، 7️⃣7️⃣7️⃣ جکپاته). دو نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ی میزه؛ اگه امتیازها برابر بشه قرعه‌کشی می‌شه.",
         "   • 🎲 تاس: ۱ یا ۲ نفر. تک‌نفره شرط فرد/زوج (ضریب ۱٫۹). دونفره سازنده‌ی میز قانون «بزرگ‌ترین عدد برنده» یا «کوچک‌ترین عدد برنده» رو انتخاب می‌کنه و برای هر دو نفر یکسانه؛ اگه دو عدد برابر بشه مبلغ ورودی برمی‌گرده.",
         "   • 🐇 خرگوش‌خور: ۲ نفر، ۲۰ خونه؛ هر نفر مخفیانه یه خونه رو پنجه‌ش انتخاب می‌کنه و هرکس خونه‌ی پنجه 🐾 رو باز کنه می‌بازه.",
@@ -9663,7 +9714,7 @@ def build_guide_entries():
         ("🃏 دوتایی‌ها", ['دوتایی', 'دوتایی ها', 'جفت', 'حافظه', 'pairs', 'کارت‌های جفت'],
          f"از لول {CASINO_UNLOCK_LEVEL}؛ ۲ نفر، ۱۶ خونه (۸ جفت)؛ هر نوبت {PAIRS_TURN_SECONDS} ثانیه. هرکس جفت بیشتری پیدا کنه برنده‌ست."),
         ("🎟 شرط‌بندی کازینو", ['ورودی', 'مبلغ ورودی', 'حداکثر ورودی', 'جایزه میز', 'مبلغ شرط', 'شرط'],
-         f"مبلغ ورودی هر نفر حداکثر ۵٬۰۰۰٬۰۰۰ در کازینو و ۲٬۵۰۰٬۰۰۰ در بازی روبی. میز ۶۰ ثانیه برای پیوستن فرصت داره و هر کاربر هر ۹۰ ثانیه در بازی روبی و هر ۴ دقیقه در کازینو می‌سازه یا وارد میز می‌شه."),
+         f"مبلغ ورودی هر نفر در کازینو حداقل {CASINO_MIN_ENTRY:,} و حداکثر ۵٬۰۰۰٬۰۰۰ روب‌پوینت، در بازی روبی حداکثر ۲٬۵۰۰٬۰۰۰. میز ۶۰ ثانیه برای پیوستن فرصت داره و هر کاربر هر ۹۰ ثانیه در بازی روبی و هر ۴ دقیقه در کازینو می‌سازه یا وارد میز می‌شه."),
         ("🏦 بانک روبی (جزئیات)", ['سود بانک', 'کارمزد', 'کارت به کارت', 'انتقال به کارت', 'افتتاح حساب', 'سپرده'],
          f"از لول ۴؛ افتتاح حساب {BANK_OPEN_COST:,} روب‌پوینت، سود {int(BANK_INTEREST_RATE * 100)}٪ هر ۱۲ ساعت. کارت‌به‌کارت {int(BANK_CARD_TRANSFER_FEE_RATE * 100)}٪ کارمزد داره و هر {BANK_CARD_TRANSFER_COOLDOWN // 60} دقیقه یک‌بار ممکنه."),
         ("💸 انتقال روب‌پوینت", ['انتقال', 'انتقال روب پوینت', 'بفرستم', 'ارسال پوینت', 'پوینت بفرستم', 'روب پوینت بفرستم', 'پول بفرستم', 'هدیه بدم', 'پوینت بدم', 'روب پوینت بدم', 'به دوستم پوینت'],
@@ -11305,7 +11356,7 @@ async def text_router(update, context):
     if await handle_fox_rename_text(update, context): return
     if await handle_marriage_text(update, context): return
     if await handle_edu_question_text(update, context): return
-    if await handle_ruby_entry_text(update, context): return
+    if await handle_casino_entry_text(update, context): return
     if await handle_market_text(update, context): return
     if await handle_city_donate_text(update, context): return
     text=update.message.text.strip()
@@ -11519,9 +11570,9 @@ def main():
     app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
     app.add_handler(CallbackQueryHandler(referral_admin_button,pattern=r"^ref:(approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_count_select,pattern=r"^rcount:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(casino_setup_callback,pattern=r"^csetup:(?:amount|cancelamount|count|cancelcount|back):(?:xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+$"))
+    app.add_handler(CallbackQueryHandler(casino_setup_callback,pattern=r"^csetup:setcount:(?:xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_create_table,pattern=r"^rcreate:(xo|rps|darts|basketball|bowling|cz_wheel|cz_rabbit|cz_pairs|cz_bomb):\d+:\d+:\d+$"))
-    app.add_handler(CallbackQueryHandler(ruby_setup_back,pattern=r"^rubysetup:back:(?:(?:xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):)?\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_dice_bet_select,pattern=r"^rdicebet:\d+:\d+:\d+:(odd|even|high|low)$"))
     app.add_handler(CallbackQueryHandler(ruby_join_table,pattern=r"^rjoin:\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_rps_choice,pattern=r"^rrps:\d+:(rock|paper|scissors)$"))
