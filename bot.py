@@ -74,6 +74,11 @@ for _lv in range(1, BABY_MAX_LEVEL + 1):
         BABY_LEVELS[_lv] = {"upgrade_cost": round(100_000 + t * 900_000), "capacity": round(43_000 + t * 307_000), "rate": round(5 + t * 7, 2)}
 
 FOX_MAX_LEVEL = 25
+VIP_SKIN_LIGHTNING = 'lightning'
+VIP_SKIN_PRICE = 5_000_000
+VIP_SKIN_BONUS_PER_SECOND = 5  # اسکین رعد و برق: +5 روب‌پوینت در ثانیه
+VIP_SKIN_MALE_IMAGE = os.path.join(BASE_DIR, 'vip_lightning_male.png')
+VIP_SKIN_FEMALE_IMAGE = os.path.join(BASE_DIR, 'vip_lightning_female.png')
 FOX_HUNGER_INTERVAL_SECONDS = 35 * 60  # هر ۳۵ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
 # روباه زخمی: پایه هر ۴۵ دقیقه؛ به ازای هر سطح ارتقای شهر روبی، ۲ دقیقه زودتر می‌آید
 # (سطح ۱ = ۴۵ دقیقه، سطح ۲ = ۴۳ دقیقه، سطح ۳ = ۴۱ دقیقه و ...).
@@ -1346,7 +1351,7 @@ async def casino_command(update, context):
         [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
         [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
     ])
-    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۲۵ خانه · ۳ بمب رندوم\n┘─ هر خانه سالم: +۲۰۰ روب‌پوینت؛ با بمب، جایزه صفر\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۱۲ خانه · ۳ بمب رندوم\n┘─ خانه‌های سالم: ۱۵٪ تا ۲۰۰٪ اضافه روی مبلغ ورودی؛ با بمب، جایزه صفر\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
@@ -2643,22 +2648,30 @@ def _parse_ruby_scores(raw):
             uid,val=pair.split(':'); scores[int(uid)]=int(val)
     return scores
 
-BOMB_CELLS = 25
+BOMB_CELLS = 12
 BOMB_COUNT = 3
-BOMB_REWARD_FIRST = 200
+# درصد اضافه‌شده به مبلغ ورودی بعد از هر خانه سالم؛ ۹ خانه سالم داریم.
+BOMB_BONUS_RATES = [0.15, 0.25, 0.35, 0.45, 0.50, 1.20, 1.40, 1.70, 2.00]
 
-def bomb_reward(safe):
-    """پاداش تجمعی: خانه اول ۲۰۰، خانه دوم ۴۰۰ و هر بار دو برابر افزایش می‌یابد."""
-    safe = max(0, int(safe or 0))
-    return BOMB_REWARD_FIRST * ((2 ** safe) - 1)
+def bomb_reward(safe, entry=0):
+    """مبلغ جایزه‌ی اضافه‌شده به ورودی؛ خانه‌ها ضریب‌های مشخص دارند و دوباره دوبرابر نمی‌شوند."""
+    safe = max(0, min(int(safe or 0), len(BOMB_BONUS_RATES)))
+    entry = max(0, int(entry or 0))
+    if safe <= 0 or entry <= 0:
+        return 0
+    return int(round(entry * BOMB_BONUS_RATES[safe - 1]))
+
+def bomb_bonus_rate(safe):
+    safe = max(0, min(int(safe or 0), len(BOMB_BONUS_RATES)))
+    return BOMB_BONUS_RATES[safe - 1] if safe else 0.0
 
 def bomb_keyboard(tid, state, owner_id):
     revealed = set(state.get("revealed", []))
     rows=[]
-    for r in range(5):
+    for r in range(3):
         row=[]
-        for c in range(5):
-            i=r*5+c
+        for c in range(4):
+            i=r*4+c
             label="✅" if i in revealed else "❔"
             row.append(InlineKeyboardButton(label, callback_data=f"rbomb:cell:{tid}:{i}:{owner_id}"))
         rows.append(row)
@@ -2666,11 +2679,15 @@ def bomb_keyboard(tid, state, owner_id):
     return InlineKeyboardMarkup(rows)
 
 def bomb_text(state, name, entry):
-    safe=int(state.get("safe",0)); reward=bomb_reward(safe)
+    safe=int(state.get("safe",0)); reward=bomb_reward(safe, entry); rate=bomb_bonus_rate(safe)
+    total=int(entry or 0)+reward
+    rate_text = f"+{rate * 100:.2f}%" if rate else "+0%"
     return (f"💥 {name}\n\n🧩 خانه‌های سالم: {safe}/{BOMB_CELLS-BOMB_COUNT}\n"
-            f"💰 جایزه فعلی: {reward:,} روب‌پوینت\n"
+            f"💰 مبلغ ورودی: {int(entry or 0):,} روب‌پوینت\n"
+            f"📈 ضریب فعلی: {rate_text}\n"
+            f"💵 دریافتی در صورت «کافیه»: {total:,} روب‌پوینت\n"
             "⚠️ سه بمب مخفی‌اند؛ پیدا کردن بمب بازی را تمام می‌کند و جایزه‌ای نمی‌گیری.\n"
-            "پاداش خانه‌ها تجمعی است: ۲۰۰، سپس ۴۰۰، سپس ۸۰۰ و ...")
+            "📈 پاداش خانه‌های سالم: ۱۵٪، ۲۵٪، ۳۵٪، ۴۵٪، ۵۰٪، ۱۲۰٪، ۱۴۰٪، ۱۷۰٪، ۲۰۰٪")
 
 async def ruby_bomb_button(update, context):
     q=update.callback_query; parts=q.data.split(":")
@@ -2691,7 +2708,7 @@ async def ruby_bomb_button(update, context):
             await q.answer("این بازی تمام شده.", show_alert=True); return
         state=json.loads(t.state or '{}')
         if action=='cashout':
-            reward=bomb_reward(state.get('safe',0))
+            reward=bomb_reward(state.get('safe',0), t.entry_amount)
             payout=int(t.entry_amount or 0)+int(reward)
             t.status='finished'; state['ended']='cashout'
             u=session.get(User,owner)
@@ -2708,7 +2725,7 @@ async def ruby_bomb_button(update, context):
                 await q.answer("💥 بمب!", show_alert=True)
             else:
                 state.setdefault('revealed',[]).append(idx); state['safe']=int(state.get('safe',0))+1
-                reward=bomb_reward(state['safe'])
+                reward=bomb_reward(state['safe'], t.entry_amount)
                 if state['safe']>=BOMB_CELLS-BOMB_COUNT:
                     t.status='finished'; state['ended']='all_safe'; u=session.get(User,owner)
                     payout=int(t.entry_amount or 0)+int(reward)
@@ -3092,6 +3109,8 @@ def fox_profile_text(user):
     storage = min(storage_cap, int(user.fox_storage or 0))
     produced_total = int(user.fox_total_earned or 0)
     rate = int(fox_production_per_second(lvl))
+    if getattr(user, 'fox_skin_active', 0) and getattr(user, 'fox_skin', '') == VIP_SKIN_LIGHTNING:
+        rate += VIP_SKIN_BONUS_PER_SECOND
     lines = [
         f"🦊 روباه {user.fox_name or 'مکار'}",
         "",
@@ -3181,6 +3200,8 @@ def _fox_produce(user, now):
     # فقط مدتی حساب می‌شود که شکم واقعاً غذا داشته (قبل از کم شدن گرسنگی)
     elapsed = _fox_active_seconds(user, start, now)
     rate = fox_production_per_second(level)
+    if getattr(user, 'fox_skin_active', 0) and getattr(user, 'fox_skin', '') == VIP_SKIN_LIGHTNING:
+        rate += VIP_SKIN_BONUS_PER_SECOND
 
     room = max(0, storage_cap - storage)
     total = float(user.fox_production_remainder or 0.0) + elapsed * rate
@@ -3231,6 +3252,8 @@ def next_fox_point_seconds(user):
     if (user.fox_belly or 0) < 2:
         return 0
     rate = fox_production_per_second(max(1, min(FOX_MAX_LEVEL, int(user.fox_level or 1))))
+    if getattr(user, 'fox_skin_active', 0) and getattr(user, 'fox_skin', '') == VIP_SKIN_LIGHTNING:
+        rate += VIP_SKIN_BONUS_PER_SECOND
     if rate <= 0:
         return 0
     remainder = float(user.fox_production_remainder or 0.0)
@@ -3266,9 +3289,15 @@ async def fox_command(update, context):
         session.commit()
         text = fox_profile_text(user)
         owner_level=user.level; owner_fox_level=user.fox_level; owner_prestige=user.fox_prestige_count
+        skin_gender = user.fox_gender if user.fox_skin_active and user.fox_skin == VIP_SKIN_LIGHTNING else ''
     finally:
         session.close()
-    await update.message.reply_text(text, reply_markup=fox_keyboard(update.effective_user.id, owner_level, owner_fox_level, owner_prestige), **reply_kwargs(update.message))
+    skin_path = vip_image_path(skin_gender) if skin_gender in ('male', 'female') else None
+    markup = fox_keyboard(update.effective_user.id, owner_level, owner_fox_level, owner_prestige)
+    if skin_path and os.path.exists(skin_path):
+        await update.message.reply_photo(photo=InputFile(skin_path), caption=text, reply_markup=markup, **reply_kwargs(update.message))
+    else:
+        await update.message.reply_text(text, reply_markup=markup, **reply_kwargs(update.message))
 
 
 async def fox_button(update, context):
@@ -5472,6 +5501,7 @@ def gift_shop_keyboard():
     rows = [
         [InlineKeyboardButton("🦊 خرید روب پوینت", callback_data="points:shop:0:0")],
         [InlineKeyboardButton("🎁 خرید گیفت استارزی", callback_data="gift:tiers:0:0")],
+        [InlineKeyboardButton("VIP🪄", callback_data="vip:home")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -5551,6 +5581,166 @@ def gift_order_summary_text(flow):
         f"⚠️ توجه: فقط عکس رسید رو بفرست. اگه غیر از عکس رسید چیز دیگه‌ای بفرستی، "
         f"به‌طور دائم از ربات بن می‌شی."
     )
+
+
+# ---------- VIP اسکین‌های روباه 🪄 ----------
+
+def vip_home_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚡ اسکین رعد و برق", callback_data="vip:skin")],
+        [InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="vip:back")],
+    ])
+
+
+def vip_gender_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("♂️ مرد", callback_data="vip:gender:male"),
+            InlineKeyboardButton("♀️ زن", callback_data="vip:gender:female"),
+        ],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="vip:home")],
+    ])
+
+
+def vip_skin_keyboard(gender):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛒 بخرش", callback_data=f"vip:buy:{gender}")],
+        [InlineKeyboardButton("🔙 انتخاب جنسیت", callback_data="vip:skin")],
+    ])
+
+
+def vip_confirm_keyboard(gender):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ بله دوسش دارم", callback_data=f"vip:confirm:yes:{gender}")],
+        [InlineKeyboardButton("❌ نه منصرف شدم", callback_data=f"vip:confirm:no:{gender}")],
+    ])
+
+
+def vip_home_text():
+    return (
+        "✨ VIP🪄 فروشگاه روبی\n\n"
+        "اسکین‌های ویژه روباه اینجاست!\n"
+        "اسکین‌ها می‌تونن ظاهر روباه و توانایی‌های ویژه بهش اضافه کنن.\n\n"
+        "⚡ اسکین رعد و برق\n"
+        f"💰 قیمت: {VIP_SKIN_PRICE:,} روب‌پوینت"
+    )
+
+
+def vip_gender_text(user):
+    current = fox_gender_label(user.fox_gender)
+    return (
+        "⚡ اسکین رعد و برق\n\n"
+        f"⚧ جنسیت فعلی روباه شما: {current}\n\n"
+        "جنسیت روباه شما چیست؟"
+    )
+
+
+def vip_skin_text(gender, owned=False):
+    gender_label = "مرد ♂️" if gender == "male" else "زن ♀️"
+    status = "\n\n✅ این اسکین را داری و فعال است." if owned else ""
+    return (
+        "⚡ اسکین رعد و برق\n\n"
+        f"🦊 مدل: روباه {gender_label}\n"
+        "✨ توانایی: وقتی اسکین فعال باشد، تولید روب‌پوینت روباه "
+        f"در هر ثانیه +{VIP_SKIN_BONUS_PER_SECOND} روب‌پوینت بیشتر می‌شود.\n"
+        f"💰 قیمت: {VIP_SKIN_PRICE:,} روب‌پوینت"
+        f"{status}"
+    )
+
+
+def vip_image_path(gender):
+    return VIP_SKIN_MALE_IMAGE if gender == 'male' else VIP_SKIN_FEMALE_IMAGE
+
+
+async def vip_button(update, context):
+    q = update.callback_query
+    parts = q.data.split(":")
+    if not await require_membership(update, context):
+        return
+    if len(parts) < 2:
+        await q.answer(); return
+    session = get_session()
+    try:
+        user = get_or_create_user(session, q.from_user)
+        if q.data == "vip:home":
+            await q.answer()
+            await q.message.edit_text(vip_home_text(), reply_markup=vip_home_keyboard())
+            return
+        if q.data == "vip:back":
+            await q.answer()
+            await q.message.edit_text(gift_shop_text(), reply_markup=gift_shop_keyboard())
+            return
+        if q.data == "vip:skin":
+            if (user.fox_gender or '') not in ('male', 'female'):
+                await q.answer("⚠️ اول جنسیت روباهت رو از پنل روباه مشخص کن.", show_alert=True)
+                return
+            await q.answer()
+            await q.message.edit_text(vip_gender_text(user), reply_markup=vip_gender_keyboard())
+            return
+        if len(parts) == 3 and parts[1] == 'gender':
+            gender = parts[2]
+            if gender not in ('male', 'female'):
+                return
+            if (user.fox_gender or '') != gender:
+                current = "مرد ♂️" if user.fox_gender == 'male' else "زن ♀️"
+                await q.answer(f"⛔ روباه شما {current} است؛ اسکین جنسیت مقابل قابل خرید نیست.", show_alert=True)
+                return
+            owned = (user.fox_skin == VIP_SKIN_LIGHTNING and int(user.fox_skin_active or 0) == 1)
+            await q.answer()
+            text = vip_skin_text(gender, owned=owned)
+            try:
+                await q.message.edit_text(text, reply_markup=None if owned else vip_skin_keyboard(gender))
+            except Exception:
+                pass
+            path = vip_image_path(gender)
+            if os.path.exists(path):
+                try:
+                    await q.message.reply_photo(photo=InputFile(path), caption=f"⚡ اسکین رعد و برق — روباه {('مرد ♂️' if gender == 'male' else 'زن ♀️')}")
+                except Exception as exc:
+                    logger.warning("VIP skin image send failed: %s", exc)
+            return
+        if len(parts) == 3 and parts[1] == 'buy':
+            gender = parts[2]
+            if gender != user.fox_gender:
+                await q.answer("⛔ این اسکین با جنسیت روباه شما مطابقت ندارد.", show_alert=True); return
+            if user.fox_skin == VIP_SKIN_LIGHTNING and int(user.fox_skin_active or 0) == 1:
+                await q.answer("✅ این اسکین را از قبل خریدی و فعال است.", show_alert=True); return
+            await q.answer()
+            await q.message.edit_text(
+                "⚡ خرید اسکین رعد و برق\n\n"
+                f"💰 قیمت: {VIP_SKIN_PRICE:,} روب‌پوینت\n\n"
+                "آیا از خرید این اسکین مطمئن هستید؟",
+                reply_markup=vip_confirm_keyboard(gender)
+            )
+            return
+        if len(parts) == 4 and parts[1] == 'confirm':
+            decision, gender = parts[2], parts[3]
+            if gender != user.fox_gender:
+                await q.answer("⛔ جنسیت اسکین با روباه شما یکی نیست.", show_alert=True); return
+            if decision == 'no':
+                await q.answer("خرید لغو شد.")
+                await q.message.edit_text(vip_skin_text(gender), reply_markup=vip_skin_keyboard(gender))
+                return
+            if decision == 'yes':
+                if user.fox_skin == VIP_SKIN_LIGHTNING and int(user.fox_skin_active or 0) == 1:
+                    await q.answer("این اسکین را از قبل داری.", show_alert=True); return
+                if int(user.fox_points or 0) < VIP_SKIN_PRICE:
+                    await q.answer(f"❌ روب‌پوینت کافی نداری. {VIP_SKIN_PRICE:,} روب‌پوینت لازم داری.", show_alert=True)
+                    return
+                user.fox_points = int(user.fox_points or 0) - VIP_SKIN_PRICE
+                user.fox_skin = VIP_SKIN_LIGHTNING
+                user.fox_skin_active = 1
+                user.fox_last_production_at = now_utc()
+                user.fox_production_remainder = 0.0
+                session.commit()
+                await q.answer("🎉 اسکین رعد و برق خریداری و فعال شد!", show_alert=True)
+                await q.message.edit_text(
+                    vip_skin_text(gender, owned=True) + "\n\n⚡ از این به بعد تولید روباه +5 روب‌پوینت در ثانیه است.",
+                    reply_markup=vip_home_keyboard()
+                )
+                return
+    finally:
+        session.close()
 
 
 async def gift_shop_command(update, context):
@@ -11846,6 +12036,7 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_giftcode_callback,pattern=r"^gc:(?:home|cancel|create|opt:(?:fmt|max|reward|ttl)|set:(?:fmt|max|reward|ttl):[A-Za-z0-9]+)$"))
     app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|opt|qty|qtyok|backshop|backopt|tiers|backtiers|notext|noop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(points_button,pattern=r"^points:(?:shop|pick|backshop):[^:]+:[^:]+$"))
+    app.add_handler(CallbackQueryHandler(vip_button,pattern=r"^vip:(?:home|back|skin|gender:(?:male|female)|buy:(?:male|female)|confirm:(?:yes|no):(?:male|female))$"))
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))

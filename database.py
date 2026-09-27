@@ -61,6 +61,8 @@ class User(Base):
     # داده‌های روباه؛ همه nullable/default هستند تا دیتابیس قبلی بدون حذف کاربران مهاجرت کند.
     fox_name = Column(String, nullable=False, default='مکار')
     fox_gender = Column(String, nullable=False, default='')  # '' نامشخص، 'male' مرد، 'female' زن
+    fox_skin = Column(String, nullable=False, default='')  # active/purchased fox skin key, e.g. lightning
+    fox_skin_active = Column(Integer, nullable=False, default=0)
     marriage_lock_until = Column(DateTime(timezone=True), nullable=True)
     potion_count = Column(Integer, nullable=False, default=0)
     fox_level = Column(Integer, nullable=False, default=1)
@@ -600,6 +602,8 @@ def init_db():
         'spam_window_at': DT_SQL_TYPE,
         'spam_count': 'INTEGER NOT NULL DEFAULT 0',
         'fox_gender': "VARCHAR NOT NULL DEFAULT ''",
+        'fox_skin': "VARCHAR NOT NULL DEFAULT ''",
+        'fox_skin_active': 'INTEGER NOT NULL DEFAULT 0',
         'marriage_lock_until': DT_SQL_TYPE,
         'potion_count': 'INTEGER NOT NULL DEFAULT 0',
     }
