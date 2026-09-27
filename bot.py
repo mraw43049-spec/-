@@ -77,6 +77,7 @@ FOX_MAX_LEVEL = 25
 VIP_SKIN_LIGHTNING = 'lightning'
 VIP_SKIN_PRICE = 5_000_000
 VIP_SKIN_BONUS_PER_SECOND = 5  # اسکین رعد و برق: +5 روب‌پوینت در ثانیه
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIP_SKIN_MALE_IMAGE = os.path.join(BASE_DIR, 'vip_lightning_male.png')
 VIP_SKIN_FEMALE_IMAGE = os.path.join(BASE_DIR, 'vip_lightning_female.png')
 FOX_HUNGER_INTERVAL_SECONDS = 35 * 60  # هر ۳۵ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
@@ -4782,7 +4783,6 @@ async def factory_button(update, context):
 
 # ---------- روباه زخمی در گپ ----------
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INJURED_FOX_TRAPPED_IMAGE = os.path.join(BASE_DIR, "injured_fox_trapped.png")
 INJURED_FOX_RESCUED_IMAGE = os.path.join(BASE_DIR, "injured_fox_rescued.png")
 
