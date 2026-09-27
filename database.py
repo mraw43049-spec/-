@@ -83,6 +83,7 @@ class User(Base):
     wheel_last_reward = Column(Integer, nullable=True)
     last_ruby_game_at = Column(DateTime(timezone=True), nullable=True)
     last_casino_game_at = Column(DateTime(timezone=True), nullable=True)
+    last_attack_at = Column(DateTime(timezone=True), nullable=True)
 
     # مریضی روباه (از لول 6 به بعد، هر 48 ساعت یک‌بار)
     fox_sick_since = Column(DateTime(timezone=True), nullable=True)
@@ -180,6 +181,9 @@ class GroupChat(Base):
     title = Column(String, nullable=True)
     active = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    # ---------- کیف روب پوینت (اتفاق رندوم گروهی) ----------
+    lucky_bag_msg_counter = Column(Integer, nullable=False, default=0)      # شمارنده‌ی پیام‌های اخیر گپ
+    last_lucky_bag_at = Column(DateTime(timezone=True), nullable=True)      # آخرین باری که کیف افتاد (برای کول‌داون)
     # ---------- شهر روبی ----------
     city_owner_id = Column(BigInteger, nullable=True)
     city_owner_name = Column(String, nullable=True)
@@ -359,6 +363,17 @@ class JailWallMemory(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     author_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
     text = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class RubyLuckyBag(Base):
+    __tablename__ = 'ruby_lucky_bags'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False)
+    message_id = Column(BigInteger, nullable=True)
+    status = Column(String, nullable=False, default='pending')  # pending | opened | expired
+    winner_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=True)
+    amount = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -560,6 +575,7 @@ def init_db():
         'wheel_last_reward': 'INTEGER',
         'last_casino_game_at': DT_SQL_TYPE,
         'last_ruby_game_at': DT_SQL_TYPE,
+        'last_attack_at': DT_SQL_TYPE,
         'fox_sick_since': DT_SQL_TYPE,
         'fox_sick_reason': 'VARCHAR',
         'fox_sick_treatment': 'VARCHAR',
@@ -605,6 +621,12 @@ def init_db():
             marriage_cols = {c['name'] for c in inspector.get_columns('ruby_marriages')}
             if 'post_abort_actions' not in marriage_cols:
                 conn.execute(text("ALTER TABLE ruby_marriages ADD COLUMN post_abort_actions INTEGER NOT NULL DEFAULT 0"))
+        if 'group_chats' in inspector.get_table_names():
+            group_chat_cols = {c['name'] for c in inspector.get_columns('group_chats')}
+            if 'lucky_bag_msg_counter' not in group_chat_cols:
+                conn.execute(text("ALTER TABLE group_chats ADD COLUMN lucky_bag_msg_counter INTEGER NOT NULL DEFAULT 0"))
+            if 'last_lucky_bag_at' not in group_chat_cols:
+                conn.execute(text(f'ALTER TABLE group_chats ADD COLUMN last_lucky_bag_at {DT_SQL_TYPE}'))
         if 'fox_hunts' in inspector.get_table_names():
             hunt_cols = {c['name'] for c in inspector.get_columns('fox_hunts')}
             hunt_additions = {

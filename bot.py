@@ -22,7 +22,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, get_session, init_db
 )
 import ai_service as ai
 import fox_brain as brain
@@ -93,6 +93,8 @@ TRANSFER_COOLDOWN = 60
 BANK_CARD_TRANSFER_COOLDOWN = 5 * 60
 BANK_CARD_TRANSFER_FEE_RATE = 0.05
 TRANSFER_MAX = 500_000
+ATTACK_COOLDOWN_SECONDS = 45 * 60
+ATTACK_STEAL_RATE = 0.002  # 0.2 درصد
 WHEEL_COOLDOWN = 24 * 60 * 60
 WHEEL_REWARDS = [100, 250, 350, 450, 0, 500, 750, 1000]
 WHEEL_LABELS = ['100 روب پوینت', '250 روب پوینت', '350 روب پوینت', '450 روب پوینت', 'پوچ', '500 روب پوینت', '750 روب پوینت', '1000 روب پوینت']
@@ -264,6 +266,34 @@ def extract_mentions(text):
     out.append(text[pos:])
     clean = ''.join(out).replace(_M_OPEN, '').replace(_M_SEP, '')
     return clean, (ents or None)
+
+def code_span_entities(text, targets, base_entities=None):
+    """
+    entity های CODE (کپی با لمس) برای هر مورد در targets که داخل text پیدا بشه می‌سازد
+    (هر مورد از جایی که مورد قبلی تمام شده به بعد جست‌وجو می‌شود تا با موارد تکراری اشتباه نگیرد).
+    base_entities (مثلاً entity های TEXT_MENTION قبلاً ساخته‌شده) هم به خروجی اضافه می‌شود.
+    """
+    ents = list(base_entities or [])
+    pos = 0
+    for target in targets:
+        if not target:
+            continue
+        target = str(target)
+        idx = text.find(target, pos)
+        if idx == -1:
+            continue
+        ents.append(MessageEntity(type=MessageEntity.CODE, offset=_u16len(text[:idx]), length=_u16len(target)))
+        pos = idx + len(target)
+    return ents or None
+
+def compose_copyable(text, targets):
+    """
+    متن ممکن است شامل نشانه‌های منشن (mention_of) باشد. این تابع متن تمیز (بدون نشانه) و
+    لیست entity (هم منشن‌های آبی و هم CODE برای هر مورد در targets که قابل کپی با لمس شود)
+    را برمی‌گرداند تا مستقیم به reply_text/edit_message_text با پارامتر entities داده شود.
+    """
+    clean, mention_ents = extract_mentions(text)
+    return clean, code_span_entities(clean, targets, mention_ents)
 
 def _wrap_bot_method(name, text_key, ent_key, pos):
     orig = getattr(ExtBot, name)
@@ -1361,7 +1391,7 @@ def dice_bet_wins(bet, my_value, other_value):
 # دیکد مقدار اسلات‌ماشین تلگرام (1 تا 64) به سه مهره‌ی هر ردیف.
 # فرمول استاندارد: v=value-1 در مبنای 4 نوشته می‌شه؛ رقم‌ها: 0=BAR ، 1=🍇 ، 2=🍋 ، 3=7️⃣
 WHEEL_REEL_SYMBOL = {0: "bar", 1: "🍇", 2: "🍋", 3: "7️⃣"}
-WHEEL_REEL_POINTS = {0: 2, 1: 9, 2: 13, 3: 20}
+WHEEL_REEL_POINTS = {0: 0, 1: 10, 2: 17, 3: 21}
 
 def wheel_decode(value):
     v = value - 1
@@ -2042,7 +2072,9 @@ async def ruby_create_table(update,context):
         if key in RUBY_GAME_EMOJI:
             emoji=RUBY_GAME_EMOJI.get(key)
             move_line=f"\n\nروی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا بچرخونی/بندازی."
-            await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!\n{fee_line}{move_line}",reply_markup=None)
+            _txt=f"🕹 {name}\n\n🎮 بازی شروع شد!\n{fee_line}{move_line}"
+            _clean,_ents=compose_copyable(_txt,[emoji])
+            await q.message.edit_text(_clean,reply_markup=None,entities=_ents)
         else:
             await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!\n{fee_line}",reply_markup=None)
         return
@@ -2098,7 +2130,9 @@ async def ruby_dice_bet_select(update, context):
             session.close()
         emoji = RUBY_GAME_EMOJI.get(key)
         move_line = f"\n\nروی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست تا بندازی."
-        await q.message.edit_text(f"🕹 {name}\n\n🎮 بازی شروع شد!\n{fee_line}{bet_line}{move_line}", reply_markup=None)
+        _txt=f"🕹 {name}\n\n🎮 بازی شروع شد!\n{fee_line}{bet_line}{move_line}"
+        _clean,_ents=compose_copyable(_txt,[emoji])
+        await q.message.edit_text(_clean, reply_markup=None, entities=_ents)
         return
     await q.message.edit_text(
         f"🕹 {name}\n\n{fee_line}{bet_line}\n\n1️⃣ بازیکن : {creator_name}\n" +
@@ -2208,9 +2242,12 @@ async def ruby_join_table(update,context):
                 player_lines='\n'.join(f"{i+1}️⃣ بازیکن : {user_mention(u)} — ⏳ در انتظار چرخوندن" for i,u in enumerate(players))
             else:
                 player_lines='\n'.join(f"{i+1}️⃣ بازیکن : {user_mention(u)} — ⏳ در انتظار پرتاب" for i,u in enumerate(players))
+            _txt=f"🕹 {name}\n\n🎮 بازی شروع شد!{pot_line}\n\n"+player_lines+move_line
+            _clean,_ents=compose_copyable(_txt,[emoji])
             await q.message.edit_text(
-                f"🕹 {name}\n\n🎮 بازی شروع شد!{pot_line}\n\n"+player_lines+move_line,
-                reply_markup=None
+                _clean,
+                reply_markup=None,
+                entities=_ents
             )
         elif game_type=='rps':
             state=json.loads(state_raw or '{}')
@@ -2737,18 +2774,16 @@ async def ruby_dice_reply(update, context):
                     # تک‌نفره: ضریب دقیق بر اساس امتیاز نهایی
                     for uid, v in scores.items():
                         pts, _combo = wheel_score(v)
-                        if pts < 30:
+                        if pts < 20:
                             multiplier = 0.0
-                        elif pts <= 39:
+                        elif pts <= 31:
                             multiplier = 0.5
-                        elif pts <= 45:
-                            multiplier = 1.0
-                        elif pts <= 49:
+                        elif pts <= 44:
                             multiplier = 1.5
-                        elif pts <= 53:
-                            multiplier = 1.7
+                        elif pts <= 56:
+                            multiplier = 2.3
                         else:
-                            multiplier = 2.0
+                            multiplier = 2.7
                         wheel_multipliers[uid] = multiplier
                         win_amount = int(round(t.entry_amount * multiplier))
                         if win_amount > 0:
@@ -2866,8 +2901,9 @@ async def ruby_dice_reply(update, context):
             )
         else:
             text = f"🕹 {name}\n\n" + "\n".join(lines) + "\n\n🏁 بازی تموم شد."
+        _clean, _ents = compose_copyable(text, ["🎰"])
         try:
-            await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=_clean, entities=_ents)
         except Exception:
             pass
         return
@@ -2884,8 +2920,8 @@ async def ruby_dice_reply(update, context):
                 lines.append(f"{i+1}️⃣ {uname}{bet_label} — عدد {scores[uid]} 🎲")
             else:
                 lines.append(f"{i+1}️⃣ {uname}{bet_label} — ⏳ در انتظار پرتاب")
+        emoji = RUBY_GAME_EMOJI.get(game_type)
         if not finished:
-            emoji = RUBY_GAME_EMOJI.get(game_type)
             text = (
                 f"🕹 {name}\n\n🎮 بازی در جریانه!{pot_line}\n\n" + "\n".join(lines) +
                 f"\n\nنفرات بعدی: روی همین پیام ریپلای کن و ایموجی {emoji} رو بفرست."
@@ -2904,8 +2940,9 @@ async def ruby_dice_reply(update, context):
             winner_uid = next(iter(dice_wins), None)
             wname = names_by_id.get(winner_uid, str(winner_uid))
             text = f"🕹 {name}\n\n" + "\n".join(lines) + f"\n\n🏆 {wname} برنده شد و {dice_wins[winner_uid]:,} روب‌پوینت گرفت! 🎉"
+        _clean, _ents = compose_copyable(text, [emoji])
         try:
-            await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=_clean, entities=_ents)
         except Exception:
             pass
         return
@@ -2937,8 +2974,9 @@ async def ruby_dice_reply(update, context):
             result_line = "🏁 بازی تموم شد."
         text = f"🕹 {name}\n\n" + "\n".join(lines) + f"\n\n{result_line}"
 
+    _clean, _ents = compose_copyable(text, [RUBY_GAME_EMOJI.get(game_type)])
     try:
-        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=_clean, entities=_ents)
     except Exception:
         pass
 
@@ -4789,6 +4827,7 @@ async def register_group_chat(update, context):
     if not chat or chat.type not in ("group", "supergroup"):
         return
     session = get_session()
+    trigger_lucky_bag = False
     try:
         row = session.get(GroupChat, chat.id)
         is_new = row is None
@@ -4798,6 +4837,15 @@ async def register_group_chat(update, context):
         else:
             row.title = chat.title or row.title
             row.active = 1
+        # ---- کیف روب پوینت: شمارش شلوغی گپ برای انداختن اتفاق رندوم ----
+        if not is_new:
+            row.lucky_bag_msg_counter = int(row.lucky_bag_msg_counter or 0) + 1
+            if row.lucky_bag_msg_counter >= LUCKY_BAG_MESSAGE_THRESHOLD:
+                row.lucky_bag_msg_counter = 0
+                cooldown_ok = (not row.last_lucky_bag_at) or (now_utc() - aware(row.last_lucky_bag_at)).total_seconds() >= LUCKY_BAG_COOLDOWN_MINUTES * 60
+                if cooldown_ok and not is_feature_disabled(chat.id, 'lucky_bag') and random.random() < LUCKY_BAG_TRIGGER_CHANCE:
+                    row.last_lucky_bag_at = now_utc()
+                    trigger_lucky_bag = True
         session.commit()
         if is_new:
             schedule_injured_fox_job(context.application, chat.id, row.city_level or 1)
@@ -4810,6 +4858,128 @@ async def register_group_chat(update, context):
         logger.warning("register group failed: %s", e)
     finally:
         session.close()
+    if trigger_lucky_bag:
+        await post_lucky_bag_event(context, chat.id)
+
+
+# ── کیف روب پوینت: اتفاق رندوم گروهی؛ تو گپ‌های شلوغ خودش سروکله‌اش پیدا میشه ──
+LUCKY_BAG_MESSAGE_THRESHOLD = 40      # این‌قدر پیام تو گپ رد و بدل بشه، شانسش رو امتحان می‌کنیم
+LUCKY_BAG_COOLDOWN_MINUTES = 60       # حداقل فاصله بین دو کیف تو یک گپ
+LUCKY_BAG_TRIGGER_CHANCE = 0.35       # حتی وقتی شرایط جوره، فقط با این احتمال واقعاً می‌افته
+LUCKY_BAG_EXPIRE_MINUTES = 10         # اگه کسی بازش نکنه، بعد این‌مدت جمعش می‌کنیم
+LUCKY_BAG_OUTCOMES = [
+    # (وزن شانس, حداقل مبلغ, حداکثر مبلغ) — مبلغ منفی یعنی از موجودی کم میشه
+    (20, 0, 0),
+    (40, 500, 2000),
+    (25, 2000, 6000),
+    (10, 6000, 12000),
+    (5, -3000, -500),
+]
+
+def roll_lucky_bag_amount():
+    weights = [w for w, _, _ in LUCKY_BAG_OUTCOMES]
+    _, lo, hi = random.choices(LUCKY_BAG_OUTCOMES, weights=weights, k=1)[0]
+    if lo == hi:
+        return lo
+    step = 50
+    return random.randint(lo // step, hi // step) * step
+
+def lucky_bag_keyboard(bag_id):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🎒 بازش می‌کنم", callback_data=f"luckybag:open:{bag_id}"),
+        InlineKeyboardButton("🙅 بازش نمی‌کنم", callback_data=f"luckybag:skip:{bag_id}"),
+    ]])
+
+async def post_lucky_bag_event(context, chat_id):
+    try:
+        session = get_session()
+        try:
+            bag = RubyLuckyBag(chat_id=chat_id, status='pending')
+            session.add(bag); session.commit(); bag_id = bag.id
+        finally:
+            session.close()
+        msg = await context.bot.send_message(
+            chat_id=chat_id,
+            text="🎒 یه کیف روب پوینت وسط گپ افتاده!\n\n❓ بازش می‌کنی؟ شانسیه... ممکنه جایزه بگیری، ممکنه هم یه‌کم ازت کم بشه!",
+            reply_markup=lucky_bag_keyboard(bag_id),
+        )
+        session = get_session()
+        try:
+            bag = session.get(RubyLuckyBag, bag_id)
+            if bag:
+                bag.message_id = msg.message_id
+                session.commit()
+        finally:
+            session.close()
+        if context.application and context.application.job_queue:
+            context.application.job_queue.run_once(
+                expire_lucky_bag_job, LUCKY_BAG_EXPIRE_MINUTES * 60,
+                data={'bag_id': bag_id, 'chat_id': chat_id, 'message_id': msg.message_id},
+                name=f"luckybag-expire-{bag_id}",
+            )
+    except Exception as e:
+        logger.warning("post lucky bag failed in %s: %s", chat_id, e)
+
+async def expire_lucky_bag_job(context):
+    data = context.job.data
+    session = get_session()
+    try:
+        bag = session.get(RubyLuckyBag, data['bag_id'])
+        if not bag or bag.status != 'pending':
+            return
+        bag.status = 'expired'
+        session.commit()
+    finally:
+        session.close()
+    try:
+        await context.bot.edit_message_text(chat_id=data['chat_id'], message_id=data['message_id'], text="🎒 کیف روب پوینت رو کسی برنداشت... موند برای دفعه‌ی بعد 😌")
+    except Exception:
+        pass
+
+async def lucky_bag_button(update, context):
+    q = update.callback_query
+    parts = q.data.split(":")
+    if len(parts) != 3:
+        return
+    _, action, bag_s = parts
+    try:
+        bag_id = int(bag_s)
+    except Exception:
+        return
+    if action == 'skip':
+        await q.answer("باشه، شاید یکی دیگه بازش کنه 😄")
+        return
+    if action != 'open':
+        return
+    if not await require_membership(update, context):
+        return
+    session = get_session()
+    try:
+        bag = session.query(RubyLuckyBag).filter(RubyLuckyBag.id == bag_id).with_for_update().first()
+        if not bag or bag.status != 'pending':
+            await q.answer("😅 دیر کردی، یکی دیگه زودتر بازش کرد.", show_alert=True)
+            return
+        user = get_or_create_user(session, q.from_user)
+        amount = roll_lucky_bag_amount()
+        if amount < 0 and (user.fox_points or 0) < abs(amount):
+            amount = -int(user.fox_points or 0)
+        user.fox_points = (user.fox_points or 0) + amount
+        bag.status = 'opened'; bag.winner_id = user.telegram_id; bag.amount = amount
+        session.commit()
+        display = user_mention(user)
+    finally:
+        session.close()
+    await q.answer()
+    if amount > 0:
+        result_text = f"🎉 {display} کیف رو باز کرد و توش {amount:,} روب‌پوینت بود! 🤑"
+    elif amount < 0:
+        result_text = f"😬 {display} کیف رو باز کرد ولی یکی قبلش خالیش کرده بود... {abs(amount):,} روب‌پوینت هم از خودش کم شد!"
+    else:
+        result_text = f"😐 {display} کیف رو باز کرد ولی خالی بود... دفعه‌ی بعد شانس بیشتری داشته باش."
+    try:
+        await q.message.edit_text(result_text)
+    except Exception:
+        pass
 
 
 def injured_fox_interval_seconds(city_level):
@@ -5080,7 +5250,13 @@ def bank_text(user, account):
     principal=int(account.balance or 0)
     estimated=int(principal * BANK_INTEREST_RATE)
     total=principal + estimated
-    return (f'🦊 بانک روبی 🏦\n\n💳 شماره کارت: `{account.account_number}`\n👤 به نام: {user_mention(user)}\n\n💰 موجودی حساب: {principal:,} روب‌پوینت\n\n🤑 محاسبه سود دوره بعد\n┘─ درصد سود: {int(BANK_INTEREST_RATE*100)}٪\n┘─ مبلغ سود: {estimated:,} روب‌پوینت\n┘─ مبلغ کل با سود: {total:,} روب‌پوینت\n┘─ زمان محاسبه: هر ۱۲ ساعت\n\n❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.')
+    return (f'🦊 بانک روبی 🏦\n\n💳 شماره کارت (برای کپی لمس کن): {account.account_number}\n👤 به نام: {user_mention(user)}\n\n💰 موجودی حساب: {principal:,} روب‌پوینت\n\n🤑 محاسبه سود دوره بعد\n┘─ درصد سود: {int(BANK_INTEREST_RATE*100)}٪\n┘─ مبلغ سود: {estimated:,} روب‌پوینت\n┘─ مبلغ کل با سود: {total:,} روب‌پوینت\n┘─ زمان محاسبه: هر ۱۲ ساعت\n\n❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.')
+
+def bank_send_kwargs(user, account, extra_text=''):
+    """متن پنل بانک + هر پسوندی که به آن اضافه شده را می‌سازد و entity کپی‌شدنی شماره کارت را هم می‌سازد."""
+    text = bank_text(user, account) + extra_text
+    clean, ents = compose_copyable(text, [account.account_number])
+    return clean, ents
 
 def parse_amount(raw):
     trans=str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
@@ -5104,9 +5280,10 @@ async def bank_command(update,context):
         account,ok=ensure_bank(session,user)
         if not ok:
             await update.message.reply_text('❌ برای افتتاح شعبه بانک 5,000 روب‌پوینت لازم داری.',**reply_kwargs(update.message)); return
-        apply_bank_interest(account,session); session.commit(); text=bank_text(user,account); kb=bank_keyboard(account)
+        apply_bank_interest(account,session); session.commit()
+        clean,ents=bank_send_kwargs(user,account); kb=bank_keyboard(account)
     finally: session.close()
-    await update.message.reply_text(text,reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text(clean,reply_markup=kb,entities=ents,**reply_kwargs(update.message))
 
 async def bank_button(update,context):
     q=update.callback_query
@@ -5121,18 +5298,27 @@ async def bank_button(update,context):
         apply_bank_interest(account,session); session.commit()
         if action=='withdraw':
             kb=InlineKeyboardMarkup([[InlineKeyboardButton('25٪',callback_data=f'bank:w:{uid}:25'),InlineKeyboardButton('50٪',callback_data=f'bank:w:{uid}:50')],[InlineKeyboardButton('75٪',callback_data=f'bank:w:{uid}:75'),InlineKeyboardButton('100٪',callback_data=f'bank:w:{uid}:100')]])
-            await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n➖ درصد برداشت را انتخاب کن:',reply_markup=kb); return
+            _clean,_ents=bank_send_kwargs(user,account,'\n\n➖ درصد برداشت را انتخاب کن:')
+            await q.answer(); await q.message.edit_text(_clean,reply_markup=kb,entities=_ents); return
         if action=='w': return
         if action=='back':
             context.user_data.pop('bank_action',None)
             await q.answer()
-            await q.message.edit_text(bank_text(user,account),reply_markup=bank_keyboard(account)); return
-        if action=='deposit': context.user_data['bank_action']='deposit'; await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n➕ مبلغ واریز را در جواب همین پنل بفرست.\nمثال: 50k / 50کا / 50میل / 50م / 50m',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{uid}')]])); return
-        if action=='transfer': context.user_data['bank_action']='transfer'; await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n🦊 کارت به کارت روبی 💳\n\n🔺 مبلغ و شماره حساب مقصد را در جواب همین پنل بفرست.\nمثال: 500 123456789000\n\n⏱ هر 5 دقیقه یک‌بار · کارمزد 5٪',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{uid}')]])); return
+            _clean,_ents=bank_send_kwargs(user,account)
+            await q.message.edit_text(_clean,reply_markup=bank_keyboard(account),entities=_ents); return
+        if action=='deposit':
+            context.user_data['bank_action']='deposit'; await q.answer()
+            _clean,_ents=bank_send_kwargs(user,account,'\n\n➕ مبلغ واریز را در جواب همین پنل بفرست.\nمثال: 50k / 50کا / 50میل / 50م / 50m')
+            await q.message.edit_text(_clean,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{uid}')]]),entities=_ents); return
+        if action=='transfer':
+            context.user_data['bank_action']='transfer'; await q.answer()
+            _clean,_ents=bank_send_kwargs(user,account,'\n\n🦊 کارت به کارت روبی 💳\n\n🔺 مبلغ و شماره حساب مقصد را در جواب همین پنل بفرست.\nمثال: 500 123456789000\n\n⏱ هر 5 دقیقه یک‌بار · کارمزد 5٪')
+            await q.message.edit_text(_clean,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{uid}')]]),entities=_ents); return
         if action=='transactions':
             rows=session.query(BankTransaction).filter(BankTransaction.account_number==account.account_number).order_by(BankTransaction.id.desc()).limit(10).all()
             txt='📃 آخرین تراکنش‌ها\n\n' + ('\n'.join(f"{r.created_at:%Y-%m-%d %H:%M} | {('به حساب ' + str(r.counterparty_user_id)) if r.direction in ('card_out','card_transfer_out') else ('از حساب ' + str(r.counterparty_user_id)) if r.counterparty_user_id else r.description or r.direction} | {r.amount:,} 🪙" for r in rows[:3]) if rows else 'تراکنشی ثبت نشده است.')
-            await q.answer(); await q.message.edit_text(bank_text(user,account)+'\n\n'+txt,reply_markup=bank_keyboard(account)); return
+            _clean,_ents=bank_send_kwargs(user,account,'\n\n'+txt)
+            await q.answer(); await q.message.edit_text(_clean,reply_markup=bank_keyboard(account),entities=_ents); return
         if action=='copy':
             await q.answer()
             await q.message.reply_text(f"📋 شماره حساب روبی برای کپی:\n`{account.account_number}`", parse_mode='Markdown')
@@ -5232,7 +5418,8 @@ async def bank_withdraw_button(update,context):
         amount=(account.balance*pct)//100
         if amount<=0: await q.answer('موجودی کافی نیست.',show_alert=True); return
         account.balance-=amount; user.fox_points+=amount; session.add(BankTransaction(account_number=account.account_number,direction='withdraw',amount=amount,description=f'برداشت {pct}%')); session.commit()
-        await q.answer('برداشت انجام شد.'); await q.message.edit_text(bank_text(user,account),reply_markup=bank_keyboard(account))
+        _clean,_ents=bank_send_kwargs(user,account)
+        await q.answer('برداشت انجام شد.'); await q.message.edit_text(_clean,reply_markup=bank_keyboard(account),entities=_ents)
     finally: session.close()
 
 # ---------- فروشگاه گیفت روبی ----------
@@ -5978,6 +6165,8 @@ def _looks_like_bot_command(text, context):
         return True
     if t in _JAIL_CLAIM_ALIASES or (CLAIM_KEYWORD and t == CLAIM_KEYWORD):
         return True
+    if t.lower() in ATTACK_KEYWORDS:
+        return True
     if t in FOX_COMMAND_PHRASES:
         return True
     if _feature_key_for_text(t):
@@ -6061,6 +6250,57 @@ async def jail_callback_gate(update, context):
         raise ApplicationHandlerStop
     finally:
         session.close()
+
+
+# ---------- حمله روبی ----------
+
+ATTACK_KEYWORDS = {"حمله", "اتک", "attack"}
+
+async def attack_command(update, context):
+    if not await require_membership(update, context):
+        return
+    msg = update.message
+    if not msg.reply_to_message or not msg.reply_to_message.from_user:
+        await msg.reply_text("⚔️ برای حمله، روی پیام کاربر موردنظر ریپلای کن و بنویس «حمله».", **reply_kwargs(msg))
+        return
+    target_tg = msg.reply_to_message.from_user
+    if target_tg.id == update.effective_user.id or target_tg.is_bot:
+        await msg.reply_text("❌ نمی‌تونی به خودت یا ربات حمله کنی.", **reply_kwargs(msg))
+        return
+    session = get_session()
+    try:
+        attacker = get_or_create_user(session, update.effective_user)
+        target = get_or_create_user(session, target_tg)
+        left = seconds_left(attacker.last_attack_at, ATTACK_COOLDOWN_SECONDS)
+        if left:
+            await msg.reply_text(f"⏳ حمله بعدی رو {format_duration(left)} دیگه می‌تونی انجام بدی.", **reply_kwargs(msg))
+            return
+        target_balance = int(target.fox_points or 0)
+        stolen = int(target_balance * ATTACK_STEAL_RATE)
+        attacker.last_attack_at = now_utc()
+        if stolen > 0:
+            target.fox_points = target_balance - stolen
+            attacker.fox_points = int(attacker.fox_points or 0) + stolen
+        session.commit()
+        attacker_balance = int(attacker.fox_points or 0)
+        target_balance_after = int(target.fox_points or 0)
+        attacker_name = user_mention(attacker)
+        target_name = user_mention(target)
+    finally:
+        session.close()
+    if stolen > 0:
+        text = (
+            f"⚔️ {attacker_name} به {target_name} حمله کرد!\n\n"
+            f"💰 مبلغ برداشت‌شده: {stolen:,} روب‌پوینت\n"
+            f"🦊 موجودی حمله‌کننده: {attacker_balance:,} روب‌پوینت\n"
+            f"🎯 موجودی حمله‌خورده: {target_balance_after:,} روب‌پوینت"
+        )
+    else:
+        text = (
+            f"⚔️ {attacker_name} به {target_name} حمله کرد!\n\n"
+            f"❌ موجودی طرف مقابل خیلی کم بود و چیزی گرفته نشد."
+        )
+    await msg.reply_text(text, **reply_kwargs(msg))
 
 
 # ---------- انتقال روب‌پوینت ----------
@@ -11169,6 +11409,7 @@ FEATURE_DISPLAY_NAMES = {
     'football': 'پیش بینی فوتبال', 'fridge': 'یخچال روبی', 'factory': 'کارخونه روبی',
     'mood': 'روباهیو حال', 'flag': 'پرچم', 'fox_panel': 'روباه', 'claim': 'روب روب',
     'city_news': 'اخبار شهر', 'city_mayor': 'شهردار روبی', 'emoji': 'ایموجی روبی',
+    'lucky_bag': 'کیف روب پوینت',
 }
 
 # اسم‌های جایگزین که پشتیبانی ممکنه به‌جای اسم اصلی بنویسه (برای تشخیص دستور غیرفعال/فعال)
@@ -11200,6 +11441,7 @@ FEATURE_NAME_ALIASES = {
     'claim': ['روب روب', 'هور هور', 'عو عو'],
     'city_news': ['اخبار شهر'],
     'city_mayor': ['شهردار روبی', 'شهردار'],
+    'lucky_bag': ['کیف روب پوینت', 'کیف پول روبی', 'کیف پول'],
     'emoji': ['ایموجی روبی', 'شکلک روبی'],
 }
 
@@ -11428,6 +11670,9 @@ async def text_router(update, context):
     if m:
         context.user_data["transfer_amount"] = m.group(1)
         await transfer_command(update, context); return
+    # حمله / اتک — فقط با ریپلای به فرد مورد نظر
+    if text.strip().lower() in ATTACK_KEYWORDS:
+        await attack_command(update, context); return
     # «روباهیو حال» → ۵ سوال و آهنگ مناسب حال کاربر
     if mood_is_start(text, update.effective_chat.type):
         await mood_start(update, context); return
@@ -11604,6 +11849,7 @@ def main():
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
+    app.add_handler(CallbackQueryHandler(lucky_bag_button,pattern=r"^luckybag:(?:open|skip):\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|potion|rest):\d+$"))
     app.add_handler(CallbackQueryHandler(jail_button,pattern=r"^jail:(memory|pay):\d+$"))
     app.add_handler(CallbackQueryHandler(smuggling_button,pattern=r"^smuggle:(plus|minus|all|confirm):\d+:\d+$"))
