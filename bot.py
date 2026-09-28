@@ -91,6 +91,10 @@ VIP_VAMPIRE_BANK_RATE = 0.05              # اسکین خون‌آشامی: سو
 VIP_VAMPIRE_SMUGGLE_REFUND_RATE = 0.25    # اسکین خون‌آشامی: ۲۵٪ مبلغ قاچاق لورفته برمی‌گردد
 # کازینو فعلاً کلاً غیرفعال است. برای روشن کردن دوباره: در Railway متغیر CASINO_DISABLED=0 بگذار.
 CASINO_DISABLED = os.getenv("CASINO_DISABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+VIP_SKIN_BASKETBALL = 'basketball'
+# اسکین‌های رایگان: برای روباه همه در دسترس‌اند (نیازی به خرید نیست)، هیچ قدرتی ندارند و فقط ظاهری‌اند.
+# کاربر خودش با دکمه‌ی 🟢/🔴 در بخش VIP فعال/غیرفعال می‌کند.
+VIP_FREE_SKINS = (VIP_SKIN_BASKETBALL,)
 VIP_SKIN_FIRE = 'fire'
 VIP_FIRE_PRICE = 20_000_000
 VIP_FIRE_HUNGER_INTERVAL_SECONDS = 40 * 60  # اسکین آتشین: هر ۴۰ دقیقه (به‌جای ۳۵) یک واحد غذا کم می‌شود
@@ -134,6 +138,19 @@ VIP_SKINS = {
             'female': os.path.join(BASE_DIR, 'vip_fire_female.png'),
         },
     },
+    VIP_SKIN_BASKETBALL: {
+        'title': '🏀 اسکین بسکتبالیست',
+        'button': 'اسکین بسکتبالیست🏀 (رایگان)',
+        'price': 0,
+        'free': True,
+        'abilities': [],
+        'note': 'این اسکین کاملاً رایگانه و فقط ظاهر روباهت رو عوض می‌کنه؛ هیچ قدرتی نداره. '
+                'وقتی فعاله، به‌جای عکس پروفایل تلگرامت توی «روبام / روباش» نشون داده می‌شه.',
+        'images': {
+            'male': os.path.join(BASE_DIR, 'vip_basketball_male.jpg'),
+            'female': os.path.join(BASE_DIR, 'vip_basketball_female.jpg'),
+        },
+    },
     VIP_SKIN_VAMPIRE: {
         'title': '🧛🏻‍♀️ اسکین خون‌آشامی',
         'button': 'اسکین خون‌آشامی🧛🏻‍♀️',
@@ -154,11 +171,15 @@ VIP_SKINS = {
 
 
 def vip_owned_skins(user):
+    """اسکین‌های خریداری‌شده + اسکین‌های رایگان (که برای همه در دسترس‌اند)."""
     raw = (getattr(user, 'fox_skin', '') or '')
     out = []
     for k in raw.split(','):
         k = k.strip()
         if k in VIP_SKINS and k not in out:
+            out.append(k)
+    for k in VIP_FREE_SKINS:
+        if k not in out:
             out.append(k)
     return out
 
@@ -168,7 +189,7 @@ def vip_active_skins(user):
     owned = vip_owned_skins(user)
     raw = getattr(user, 'fox_skins_active', None)
     if raw is None:  # داده‌ی قدیمی: فقط ستون fox_skin_active وجود داشت
-        return owned[:] if int(getattr(user, 'fox_skin_active', 0) or 0) == 1 else []
+        return [k for k in owned if k not in VIP_FREE_SKINS] if int(getattr(user, 'fox_skin_active', 0) or 0) == 1 else []
     out = []
     for k in raw.split(','):
         k = k.strip()
@@ -178,6 +199,7 @@ def vip_active_skins(user):
 
 
 def vip_set_skins(user, owned, active):
+    owned = [k for k in owned if k not in VIP_FREE_SKINS]   # اسکین رایگان در دیتابیس ذخیره نمی‌شود؛ همیشه در دسترس است
     user.fox_skin = ','.join(owned)
     user.fox_skins_active = ','.join(active)
     user.fox_skin_active = 1 if active else 0
@@ -5839,7 +5861,7 @@ def vip_home_text():
         "یکی رو انتخاب کن تا عکس و توضیحاتش رو ببینی ⬇️", "",
     ]
     for s in VIP_SKINS.values():
-        lines.append(f"{s['title']} — 💰 {s['price']:,} روب‌پوینت")
+        lines.append(f"{s['title']} — " + ("🎁 رایگان" if s.get('free') else f"💰 {s['price']:,} روب‌پوینت"))
     return "\n".join(lines)
 
 
@@ -5857,12 +5879,15 @@ def vip_skin_text(key, gender, user=None):
     lines = [
         s['title'], "",
         f"🦊 مدل: روباه {gender_label}",
-        "✨ توانایی‌ها (فقط وقتی اسکین فعال باشد):",
     ]
-    lines += [f"   {a}" for a in s['abilities']]
+    if s['abilities']:
+        lines += ["✨ توانایی‌ها (فقط وقتی اسکین فعال باشد):"]
+        lines += [f"   {a}" for a in s['abilities']]
+    else:
+        lines += ["✨ این اسکین فقط ظاهریه و هیچ قدرتی نداره."]
     if s.get('note'):
         lines += ["", f"ℹ️ {s['note']}"]
-    lines += ["", f"💰 قیمت: {s['price']:,} روب‌پوینت"]
+    lines += ["", "🎁 قیمت: رایگان" if s.get('free') else f"💰 قیمت: {s['price']:,} روب‌پوینت"]
     if user is not None and key in vip_owned_skins(user):
         state = "🟢 فعال" if key in vip_active_skins(user) else "⚪ غیرفعال"
         lines += ["", f"✅ این اسکین رو داری — وضعیت: {state}"]
@@ -8010,7 +8035,32 @@ def fox_level_requirement(level):
     value=7250;step=900
     for _ in range(21,level+1):value+=step;step+=250
     return value
-async def _send_roobam_panel(msg,text,label,uid,username,bot=None):
+_SKIN_FILE_IDS={}  # مسیر عکس اسکین -> file_id تلگرام (برای اینکه هر بار فایل دوباره آپلود نشود)
+
+async def _reply_skin_photo(msg,path,caption,markup):
+    """عکس اسکین را با کپشن (در صورت جا شدن) ارسال می‌کند. اگه کپشن از ۱۰۲۴ کاراکتر بلندتر بود، عکس و بعدش متن جدا می‌آید."""
+    fid=_SKIN_FILE_IDS.get(path)
+    long_caption=len(caption)>1024
+    async def _send(photo):
+        if long_caption:
+            sent=await msg.reply_photo(photo=photo,**reply_kwargs(msg))
+            await msg.reply_text(caption,reply_markup=markup,**reply_kwargs(msg))
+        else:
+            sent=await msg.reply_photo(photo=photo,caption=caption,reply_markup=markup,**reply_kwargs(msg))
+        return sent
+    if fid:
+        try:
+            await _send(fid);return
+        except BadRequest as e:
+            logger.info("skin file_id rejected (%s); re-uploading",e)
+            _SKIN_FILE_IDS.pop(path,None)
+    with open(path,"rb") as f:
+        sent=await _send(InputFile(f))
+    try:
+        if sent.photo:_SKIN_FILE_IDS[path]=sent.photo[-1].file_id
+    except Exception:pass
+
+async def _send_roobam_panel(msg,text,label,uid,username,bot=None,skin_path=None):
     """همان متن روبام/روباش را با عکس پروفایل تلگرامی کاربر نشان می‌دهد؛ اگر عکس قابل دریافت نباشد، متن بدون عکس ارسال می‌شود."""
     label=strip_mentions(label) or str(uid)
     attempts=[InlineKeyboardMarkup([[InlineKeyboardButton(label,url=f"tg://user?id={uid}")]])]
@@ -8018,7 +8068,19 @@ async def _send_roobam_panel(msg,text,label,uid,username,bot=None):
         attempts.append(InlineKeyboardMarkup([[InlineKeyboardButton(label,url=f"https://t.me/{username}")]]))
     attempts.append(None)
 
-    # اول تلاش می‌کنیم عکس پروفایل تلگرام کاربر را بگیریم.
+    # اگه کاربر اسکین فعال دارد، عکس اسکین به‌جای عکس پروفایل تلگرام نشان داده می‌شود.
+    if skin_path and os.path.exists(skin_path):
+        for markup in attempts:
+            try:
+                await _reply_skin_photo(msg,skin_path,text,markup)
+                return
+            except BadRequest as e:
+                logger.warning("roobam skin panel rejected (%s); retrying",e)
+            except Exception as e:
+                logger.warning("roobam skin panel failed: %s",e)
+                break
+
+    # وگرنه تلاش می‌کنیم عکس پروفایل تلگرام کاربر را بگیریم.
     photo_file_id=None
     if bot is not None:
         try:
@@ -8819,8 +8881,10 @@ async def roobam_command(update,context):
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
         text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 🦊 روباه : {user.fox_name or 'مکار'}\n┘─ ⚧ جنسیت روباه : {fox_gender_label(user.fox_gender)}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points or 0):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╰─ 💍 وضعیت ازدواج : {('متاهل'+active_marriage(session,user.telegram_id).gift_emoji) if active_marriage(session,user.telegram_id) else 'مجرد'}\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
         label=user_display_name(user)
+        _act=vip_active_skins(user);_sk=_act[-1] if _act else ''
+        skin_path=vip_image_path(_sk,user.fox_gender) if _sk and (user.fox_gender or '') in ('male','female') else None
     finally:session.close()
-    await _send_roobam_panel(update.message,text,label,target_id,target_username,context.bot)
+    await _send_roobam_panel(update.message,text,label,target_id,target_username,context.bot,skin_path=skin_path)
 
 # ---------- دوستان روباهیو 🦊 ----------
 FRIEND_LIMIT = 3
