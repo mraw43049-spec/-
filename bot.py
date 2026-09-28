@@ -6787,6 +6787,23 @@ async def jail_callback_gate(update, context):
 
 ATTACK_KEYWORDS = {"حمله", "اتک", "attack"}
 
+ATTACK_EMOJIS = ("💉", "🧨", "💣", "🚀", "💥", "⚡")
+
+async def _attack_reply(msg, text):
+    """مثل شکار: اول یک ایموجی تصادفی (انیمیشن) می‌آید، ۳ ثانیه بعد نتیجه‌ی حمله به‌صورت ریپلای روی همان ایموجی."""
+    try:
+        emoji_msg = await msg.reply_text(random.choice(ATTACK_EMOJIS), **reply_kwargs(msg))
+    except Exception as e:
+        logger.info("attack emoji send failed: %s", e)
+        await msg.reply_text(text, **reply_kwargs(msg))
+        return
+    await asyncio.sleep(3)
+    try:
+        await emoji_msg.reply_text(text)
+    except Exception:
+        await msg.reply_text(text, **reply_kwargs(msg))
+
+
 async def attack_command(update, context):
     if not await require_membership(update, context):
         return
@@ -6820,10 +6837,10 @@ async def attack_command(update, context):
     finally:
         session.close()
     if shielded:
-        await msg.reply_text(
+        await _attack_reply(
+            msg,
             f"⚔️ {attacker_name} به {target_name} حمله کرد!\n\n"
-            "🔥 آتش‌های روباه این فرد را از حملات نجات دادند 🔥",
-            **reply_kwargs(msg)
+            "🔥 آتش‌های روباه این فرد را از حملات نجات دادند 🔥"
         )
         return
     session = get_session()
@@ -6855,7 +6872,7 @@ async def attack_command(update, context):
             f"⚔️ {attacker_name} به {target_name} حمله کرد!\n\n"
             f"❌ موجودی طرف مقابل خیلی کم بود و چیزی گرفته نشد."
         )
-    await msg.reply_text(text, **reply_kwargs(msg))
+    await _attack_reply(msg, text)
 
 
 # ---------- انتقال روب‌پوینت ----------
