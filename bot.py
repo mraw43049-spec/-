@@ -75,7 +75,7 @@ for _lv in range(1, BABY_MAX_LEVEL + 1):
 
 FOX_MAX_LEVEL = 25
 VIP_SKIN_LIGHTNING = 'lightning'
-VIP_SKIN_PRICE = 5_000_000
+VIP_SKIN_PRICE = 7_500_000
 VIP_SKIN_BONUS_PER_SECOND = 5  # اسکین رعد و برق: +5 روب‌پوینت در ثانیه
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIP_SKIN_MALE_IMAGE = os.path.join(BASE_DIR, 'vip_lightning_male.png')
@@ -84,6 +84,16 @@ VIP_SKIN_ICE = 'ice'
 VIP_ICE_PRICE = 10_000_000
 VIP_ICE_FRIDGE_BONUS = 1                  # اسکین یخی: +۱ ظرفیت یخچال (فقط وقتی فعال است)
 VIP_ICE_FACTORY_REDUCE_SECONDS = 10 * 60  # اسکین یخی: ۱۰ دقیقه کمتر برای تولید کارخونه
+FOX_HUNGER_INTERVAL_SECONDS = 35 * 60  # هر ۳۵ دقیقه یک واحد غذا از شکم روباه کم می‌شود (پایه).
+VIP_SKIN_VAMPIRE = 'vampire'
+VIP_VAMPIRE_PRICE = 50_000_000
+VIP_VAMPIRE_BANK_RATE = 0.05              # اسکین خون‌آشامی: سود بانک ۵٪ (پایه ۳٪)
+VIP_VAMPIRE_SMUGGLE_REFUND_RATE = 0.25    # اسکین خون‌آشامی: ۲۵٪ مبلغ قاچاق لورفته برمی‌گردد
+# کازینو فعلاً کلاً غیرفعال است. برای روشن کردن دوباره: در Railway متغیر CASINO_DISABLED=0 بگذار.
+CASINO_DISABLED = os.getenv("CASINO_DISABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+VIP_SKIN_FIRE = 'fire'
+VIP_FIRE_PRICE = 20_000_000
+VIP_FIRE_HUNGER_INTERVAL_SECONDS = 40 * 60  # اسکین آتشین: هر ۴۰ دقیقه (به‌جای ۳۵) یک واحد غذا کم می‌شود
 VIP_SKINS = {
     VIP_SKIN_LIGHTNING: {
         'title': '⚡ اسکین رعد و برق',
@@ -108,6 +118,36 @@ VIP_SKINS = {
         'images': {
             'male': os.path.join(BASE_DIR, 'vip_ice_male.png'),
             'female': os.path.join(BASE_DIR, 'vip_ice_female.png'),
+        },
+    },
+    VIP_SKIN_FIRE: {
+        'title': '🔥 اسکین آتشین',
+        'button': 'اسکین آتشین🔥',
+        'price': VIP_FIRE_PRICE,
+        'abilities': [
+            "🛡 حمله‌ی بقیه‌ی کاربرها روی تو بی‌اثره و آتش‌های روباه از حملات نجاتت میدن.",
+            f"🍖 غذای روباه هر {VIP_FIRE_HUNGER_INTERVAL_SECONDS // 60} دقیقه یک واحد کم میشه (به‌جای {FOX_HUNGER_INTERVAL_SECONDS // 60} دقیقه).",
+        ],
+        'note': "با غیرفعال کردن اسکین، حمله دوباره روی تو اثر داره و گرسنگی روباه به حالت عادی برمی‌گرده.",
+        'images': {
+            'male': os.path.join(BASE_DIR, 'vip_fire_male.png'),
+            'female': os.path.join(BASE_DIR, 'vip_fire_female.png'),
+        },
+    },
+    VIP_SKIN_VAMPIRE: {
+        'title': '🧛🏻‍♀️ اسکین خون‌آشامی',
+        'button': 'اسکین خون‌آشامی🧛🏻‍♀️',
+        'price': VIP_VAMPIRE_PRICE,
+        'abilities': [
+            f"🏦 سود بانک روبی {int(VIP_VAMPIRE_BANK_RATE * 100)}٪ می‌شود (به‌جای ۳٪).",
+            f"🥷 اگه تو قاچاق روبی گیر بیفتی، {int(VIP_VAMPIRE_SMUGGLE_REFUND_RATE * 100)}٪ از مبلغ اون قاچاق به حسابت برمی‌گرده.",
+            "🛡 روباهت هیچ‌وقت مریض نمی‌شه.",
+        ],
+        'note': "با غیرفعال کردن اسکین، سود بانک و قاچاق به حالت عادی برمی‌گردن و روباهت دوباره می‌تونه مریض بشه "
+                "(اولین مریضی ۴۸ ساعت بعد از غیرفعال کردن).",
+        'images': {
+            'male': os.path.join(BASE_DIR, 'vip_vampire_male.png'),
+            'female': os.path.join(BASE_DIR, 'vip_vampire_female.png'),
         },
     },
 }
@@ -154,12 +194,36 @@ def vip_fridge_capacity(user, level=None):
     return cap
 
 
+def vip_hunger_interval(user):
+    """فاصله‌ی کم شدن یک واحد غذا؛ با اسکین آتشین فعال ۴۰ دقیقه، وگرنه ۳۵ دقیقه."""
+    if VIP_SKIN_FIRE in vip_active_skins(user):
+        return VIP_FIRE_HUNGER_INTERVAL_SECONDS
+    return FOX_HUNGER_INTERVAL_SECONDS
+
+
+def vip_bank_rate(user):
+    return VIP_VAMPIRE_BANK_RATE if VIP_SKIN_VAMPIRE in vip_active_skins(user) else BANK_INTEREST_RATE
+
+
+def vip_no_sickness(user):
+    return VIP_SKIN_VAMPIRE in vip_active_skins(user)
+
+
+def vip_smuggle_refund(user, reward):
+    if VIP_SKIN_VAMPIRE in vip_active_skins(user):
+        return int(int(reward) * VIP_VAMPIRE_SMUGGLE_REFUND_RATE)
+    return 0
+
+
+def vip_attack_shielded(user):
+    return VIP_SKIN_FIRE in vip_active_skins(user)
+
+
 def vip_factory_seconds(user, seconds):
     seconds = int(seconds)
     if VIP_SKIN_ICE in vip_active_skins(user):
         return max(60, seconds - VIP_ICE_FACTORY_REDUCE_SECONDS)
     return seconds
-FOX_HUNGER_INTERVAL_SECONDS = 35 * 60  # هر ۳۵ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
 # روباه زخمی: پایه هر ۴۵ دقیقه؛ به ازای هر سطح ارتقای شهر روبی، ۲ دقیقه زودتر می‌آید
 # (سطح ۱ = ۴۵ دقیقه، سطح ۲ = ۴۳ دقیقه، سطح ۳ = ۴۱ دقیقه و ...).
 INJURED_FOX_BASE_INTERVAL_MINUTES = 45
@@ -659,6 +723,12 @@ def sync_fox_sickness(user):
     if (user.level or 1) < FOX_SICK_UNLOCK_LEVEL:
         return False
     now = now_utc()
+    if vip_no_sickness(user):
+        # اسکین خون‌آشامی فعال: روباه هیچ‌وقت مریض نمی‌شود (اگه از قبل مریض بوده، خوب می‌شود).
+        if user.fox_sick_since:
+            clear_fox_sickness(user)
+            return True
+        return False
     if user.fox_sick_since:
         if user.fox_sick_treatment == 'rest' and user.fox_sick_rest_until and now >= aware(user.fox_sick_rest_until):
             clear_fox_sickness(user)
@@ -933,7 +1003,10 @@ async def complete_smuggling(session, record):
     if not user:
         record.status='success'; record.reward=0; session.commit(); return None
     if random.random()*100 < float(record.risk_percent):
-        record.status='caught'; record.reward=0
+        record.status='caught'
+        record.reward=vip_smuggle_refund(user, int(record.count)*SMUGGLING_PRICE_PER_FOX)   # اسکین خون‌آشامی: ۲۵٪ برمی‌گردد
+        if record.reward > 0:
+            user.fox_points=int(user.fox_points or 0)+int(record.reward)
         user.jail_until=now_utc()+timedelta(seconds=SMUGGLING_JAIL_SECONDS)
         user.jail_reason='قاچاق کردن روباه های بی گناه'
         user.jail_fine=SMUGGLING_FINE
@@ -957,9 +1030,9 @@ async def settle_all_smuggling(context):
                 status,user,record=result
                 try:
                     if status=='success':
-                        await context.bot.send_message(user.telegram_id,f"🦊 قاچاق روباهیو با موفقیت انجام شد!\\n\\n🥩 {record.count} روباه به کباب تبدیل شدند.\\n💰 پاداش: +{record.reward:,} روب‌پوینت 🪙")
+                        await context.bot.send_message(user.telegram_id,f"🦊 قاچاق روباهیو با موفقیت انجام شد!\n\n🥩 {record.count} روباه به کباب تبدیل شدند.\n💰 پاداش: +{record.reward:,} روب‌پوینت 🪙")
                     else:
-                        await context.bot.send_message(user.telegram_id,"🚨 قاچاق روباهیو لو رفت!\\n\\n⛓️ توسط گرگ‌های پلیس دستگیر شدی و به زندان روبی افتادی. برای دیدن سلولت بنویس «زندان روبی».")
+                        await context.bot.send_message(user.telegram_id,"🚨 قاچاق روباهیو لو رفت!\n\n⛓️ توسط گرگ‌های پلیس دستگیر شدی و به زندان روبی افتادی. برای دیدن سلولت بنویس «زندان روبی»." + (f"\n\n🧛🏻‍♀️ اسکین خون‌آشامی: {record.reward:,} روب‌پوینت (۲۵٪ مبلغ قاچاق) به حسابت برگشت." if record.reward else ""))
                 except Exception: pass
     finally: session.close()
 
@@ -1005,7 +1078,7 @@ async def smuggling_command(update,context):
                 if status=='success':
                     await update.message.reply_text(f"🦊 قاچاق روباهیو تمام شد!\\n\\n🥩 {rec.count} روباه قاچاق شد.\\n💰 پاداش: +{rec.reward:,} روب‌پوینت 🪙".replace("\\n","\n"),**reply_kwargs(update.message))
                 else:
-                    await update.message.reply_text("🚨 گیر افتادی!\\n\\n⛓️ به زندان روبی افتادی. برای دیدن سلولت بنویس «زندان روبی».".replace("\\n","\n"),**reply_kwargs(update.message))
+                    await update.message.reply_text(("🚨 گیر افتادی!\\n\\n⛓️ به زندان روبی افتادی. برای دیدن سلولت بنویس «زندان روبی»." + (f"\\n\\n🧛🏻‍♀️ اسکین خون‌آشامی: {rec.reward:,} روب‌پوینت (۲۵٪ مبلغ قاچاق) به حسابت برگشت." if rec.reward else "")).replace("\\n","\n"),**reply_kwargs(update.message))
                 return
             await update.message.reply_text(smuggling_status_text(user,pending),**reply_kwargs(update.message)); return
         stock=int(user.injured_fox_stock or 0)
@@ -1414,8 +1487,44 @@ async def ruby_games_command(update, context):
     await update.message.reply_text("🕹 بازی های روبی 🦊\n\n❗️ لطفا بازی مورد نظر را انتخاب کنید ⬇️\n\n🧩 بازی روبی دوز XO\n┘─ محدودیت بازیکن : 2 روباه🦊\n\n🔫 بازی روبی سنگ کاغذ قیچی\n┘─ محدودیت بازیکن : 2 روباه🦊\n\n🎯 بازی روبی دارت\n┘─ محدودیت بازیکن : 2 - 4 روباه🦊\n\n🏀 بازی روبی بسکتبال\n┘─ محدودیت بازیکن : 2 - 3 روباه🦊\n\n🎳 بازی روبی بولینگ\n┘─ محدودیت بازیکن : 2 - 4 روباه🦊\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 
+CASINO_DISABLED_TEXT = "🃏 کازینو روبی فعلاً غیرفعال است و در حال تعمیر می‌باشد 🛠\nبه‌زودی دوباره باز می‌شود."
+
+
+async def casino_disabled_gate(update, context):
+    """کازینو کلاً خاموش است: ساخت میز، انتخاب بازی و پیوستن به میزهای کازینو بسته می‌شود.
+    بازی‌های نیمه‌تمام (حرکت‌ها/برداشت) بسته نمی‌شوند تا پول کسی گیر نکند."""
+    if not CASINO_DISABLED:
+        return
+    q = update.callback_query
+    if not q or not q.data:
+        return
+    data = q.data
+    if data.startswith("rjoin:"):
+        session = get_session()
+        try:
+            t = session.get(RubyTable, int(data.split(":")[1]))
+            if not t or not str(t.game_type or "").startswith("cz_"):
+                return
+            if t.status == "open":
+                t.status = "expired"
+                await _refund_ruby_table(session, t)
+                session.commit()
+        except Exception as exc:
+            logger.warning("casino gate rjoin failed: %s", exc)
+            return
+        finally:
+            session.close()
+    try:
+        await q.answer("🃏 کازینو روبی فعلاً غیرفعال است و در حال تعمیر می‌باشد 🛠", show_alert=True)
+    except Exception:
+        pass
+    raise ApplicationHandlerStop
+
+
 async def casino_command(update, context):
     if not await require_membership(update, context): return
+    if CASINO_DISABLED:
+        await update.message.reply_text(CASINO_DISABLED_TEXT, **reply_kwargs(update.message)); return
     session=get_session()
     try:
         user=get_or_create_user(session,update.effective_user)
@@ -2082,6 +2191,8 @@ async def casino_setup_callback(update,context):
 async def handle_casino_entry_text(update,context):
     state=context.user_data.get('casino_setup')
     if not state or state.get('awaiting')!='amount': return False
+    if CASINO_DISABLED and str(state.get('key','')).startswith('cz_'):
+        context.user_data.pop('casino_setup',None); return False
     if update.effective_user.id!=state.get('owner_id'):
         return False
     if not await require_membership(update,context): return True
@@ -3224,14 +3335,15 @@ def fox_profile_text(user):
 
 
 def settle_fox_hunger(user):
-    """هر FOX_HUNGER_INTERVAL_SECONDS (۳۵ دقیقه) یک واحد غذا از شکم روباه کم می‌شود؛
+    """هر vip_hunger_interval(user) (پایه ۳۵ دقیقه؛ با اسکین آتشین ۴۰ دقیقه) یک واحد غذا از شکم روباه کم می‌شود؛
     این کار مدام و بدون توقف ادامه دارد (زیر صفر نمی‌رود)."""
     now = now_utc()
     if user.fox_last_hunger_at is None:
         user.fox_last_hunger_at = now
         return 0
     elapsed = max(0.0, (now - aware(user.fox_last_hunger_at)).total_seconds())
-    intervals = int(elapsed // FOX_HUNGER_INTERVAL_SECONDS)
+    interval = vip_hunger_interval(user)
+    intervals = int(elapsed // interval)
     if intervals <= 0:
         return 0
     belly = max(0, int(user.fox_belly or 0))
@@ -3240,7 +3352,7 @@ def settle_fox_hunger(user):
     # ساعت را فقط به اندازه‌ی بازه‌های کامل‌شده جلو می‌بریم (نه تا "now")
     # تا باقیمانده‌ی زمانِ ناقص برای بازه‌ی بعدی از دست نرود؛ حتی وقتی شکم
     # صفر است ساعت باید جلو برود، وگرنه با اولین غذا چند بازه‌ی قبلی یکجا کم می‌شود.
-    user.fox_last_hunger_at = aware(user.fox_last_hunger_at) + timedelta(seconds=intervals * FOX_HUNGER_INTERVAL_SECONDS)
+    user.fox_last_hunger_at = aware(user.fox_last_hunger_at) + timedelta(seconds=intervals * interval)
     return lost
 
 
@@ -3252,7 +3364,7 @@ def _fox_active_seconds(user, start, now):
     if belly < 2:
         return 0.0
     hunger_at = aware(user.fox_last_hunger_at) or now
-    starve_at = hunger_at + timedelta(seconds=(belly - 1) * FOX_HUNGER_INTERVAL_SECONDS)
+    starve_at = hunger_at + timedelta(seconds=(belly - 1) * vip_hunger_interval(user))
     end = min(now, starve_at)
     return max(0.0, (end - start).total_seconds())
 
@@ -5336,8 +5448,13 @@ def ensure_bank(session, user):
     return account, True
 
 def apply_bank_interest(account, session):
-    # سود 3 درصد به ازای هر 12 ساعت کامل؛ اگر چند بازه گذشته باشد، سود مرکب اعمال می‌شود.
+    # سود ۳٪ (با اسکین خون‌آشامی ۵٪) به ازای هر 12 ساعت کامل؛ اگر چند بازه گذشته باشد، سود مرکب اعمال می‌شود.
     now = now_utc()
+    try:
+        _owner = session.get(User, account.user_id)
+        rate = vip_bank_rate(_owner) if _owner else BANK_INTEREST_RATE
+    except Exception:
+        rate = BANK_INTEREST_RATE
     if not account.last_interest_at:
         account.last_interest_at = now
         return 0
@@ -5345,7 +5462,7 @@ def apply_bank_interest(account, session):
     if elapsed < BANK_INTEREST_INTERVAL_SECONDS or account.balance <= 0:
         return 0
     periods=int(elapsed//BANK_INTEREST_INTERVAL_SECONDS)
-    gain=int(account.balance*((1+BANK_INTEREST_RATE)**periods-1))
+    gain=int(account.balance*((1+rate)**periods-1))
     if gain>0:
         account.balance += gain
         session.add(BankTransaction(
@@ -5367,9 +5484,10 @@ def bank_keyboard(account):
 
 def bank_text(user, account):
     principal=int(account.balance or 0)
-    estimated=int(principal * BANK_INTEREST_RATE)
+    _rate = vip_bank_rate(user)
+    estimated=int(principal * _rate)
     total=principal + estimated
-    return (f'🦊 بانک روبی 🏦\n\n💳 شماره کارت (برای کپی لمس کن): {account.account_number}\n👤 به نام: {user_mention(user)}\n\n💰 موجودی حساب: {principal:,} روب‌پوینت\n\n🤑 محاسبه سود دوره بعد\n┘─ درصد سود: {int(BANK_INTEREST_RATE*100)}٪\n┘─ مبلغ سود: {estimated:,} روب‌پوینت\n┘─ مبلغ کل با سود: {total:,} روب‌پوینت\n┘─ زمان محاسبه: هر ۱۲ ساعت\n\n❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.')
+    return (f'🦊 بانک روبی 🏦\n\n💳 شماره کارت (برای کپی لمس کن): {account.account_number}\n👤 به نام: {user_mention(user)}\n\n💰 موجودی حساب: {principal:,} روب‌پوینت\n\n🤑 محاسبه سود دوره بعد\n┘─ درصد سود: {int(round(_rate*100))}٪\n┘─ مبلغ سود: {estimated:,} روب‌پوینت\n┘─ مبلغ کل با سود: {total:,} روب‌پوینت\n┘─ زمان محاسبه: هر ۱۲ ساعت\n\n❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.')
 
 def bank_send_kwargs(user, account, extra_text=''):
     """متن پنل بانک + هر پسوندی که به آن اضافه شده را می‌سازد و entity کپی‌شدنی شماره کارت را هم می‌سازد."""
@@ -5803,6 +5921,16 @@ def vip_settle_production(user):
         settle_fox_production(user)
     except Exception as exc:
         logger.warning("VIP settle production failed: %s", exc)
+    # سود بانکی معوق هم با نرخ قبلی حساب شود
+    try:
+        from sqlalchemy.orm import object_session
+        _s = object_session(user)
+        if _s is not None:
+            _acc = _s.query(BankAccount).filter(BankAccount.user_id == user.telegram_id).first()
+            if _acc:
+                apply_bank_interest(_acc, _s)
+    except Exception as exc:
+        logger.warning("VIP settle bank interest failed: %s", exc)
 
 
 async def vip_button(update, context):
@@ -5920,6 +6048,8 @@ async def vip_button(update, context):
                 else:
                     vip_settle_production(user)
                     vip_set_skins(user, owned, [k for k in active if k != key])
+                    if key == VIP_SKIN_VAMPIRE:
+                        user.fox_last_sick_at = now_utc()   # چرخه‌ی ۴۸ ساعته‌ی مریضی از همین لحظه شروع می‌شود
                     session.commit()
                     await q.answer("🔴 اسکین غیرفعال شد.")
             await vip_show(q, vip_skin_text(key, gender, user), vip_skin_keyboard(user, key, gender), photo_path=photo, same_photo=True)
@@ -6643,6 +6773,9 @@ async def attack_command(update, context):
     if target_tg.id == update.effective_user.id or target_tg.is_bot:
         await msg.reply_text("❌ نمی‌تونی به خودت یا ربات حمله کنی.", **reply_kwargs(msg))
         return
+    if int(target_tg.id) in ADMIN_IDS:
+        await msg.reply_text("شما نمیتوانی به تیم مدیریت حمله کنی⚠️", **reply_kwargs(msg))
+        return
     session = get_session()
     try:
         attacker = get_or_create_user(session, update.effective_user)
@@ -6651,6 +6784,27 @@ async def attack_command(update, context):
         if left:
             await msg.reply_text(f"⏳ حمله بعدی رو {format_duration(left)} دیگه می‌تونی انجام بدی.", **reply_kwargs(msg))
             return
+        if vip_attack_shielded(target):
+            attacker.last_attack_at = now_utc()
+            session.commit()
+            attacker_name = user_mention(attacker)
+            target_name = user_mention(target)
+            shielded = True
+        else:
+            shielded = False
+    finally:
+        session.close()
+    if shielded:
+        await msg.reply_text(
+            f"⚔️ {attacker_name} به {target_name} حمله کرد!\n\n"
+            "🔥 آتش‌های روباه این فرد را از حملات نجات دادند 🔥",
+            **reply_kwargs(msg)
+        )
+        return
+    session = get_session()
+    try:
+        attacker = get_or_create_user(session, update.effective_user)
+        target = get_or_create_user(session, target_tg)
         target_balance = int(target.fox_points or 0)
         stolen = int(target_balance * ATTACK_STEAL_RATE)
         attacker.last_attack_at = now_utc()
@@ -12246,6 +12400,7 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_message_router),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
+    app.add_handler(CallbackQueryHandler(casino_disabled_gate,pattern=r"^(?:rg:cz_|csetup:[a-z]+:cz_|csetup:setcount:cz_|rcreate:cz_|rdicebet:|rjoin:)"),group=-8)
     app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
     app.add_handler(ChatMemberHandler(bot_joined_group, ChatMemberHandler.MY_CHAT_MEMBER), group=-2)
