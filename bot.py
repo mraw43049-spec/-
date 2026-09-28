@@ -80,6 +80,85 @@ VIP_SKIN_BONUS_PER_SECOND = 5  # اسکین رعد و برق: +5 روب‌پوی
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIP_SKIN_MALE_IMAGE = os.path.join(BASE_DIR, 'vip_lightning_male.png')
 VIP_SKIN_FEMALE_IMAGE = os.path.join(BASE_DIR, 'vip_lightning_female.png')
+VIP_SKIN_ICE = 'ice'
+VIP_ICE_PRICE = 10_000_000
+VIP_ICE_FRIDGE_BONUS = 1                  # اسکین یخی: +۱ ظرفیت یخچال (فقط وقتی فعال است)
+VIP_ICE_FACTORY_REDUCE_SECONDS = 10 * 60  # اسکین یخی: ۱۰ دقیقه کمتر برای تولید کارخونه
+VIP_SKINS = {
+    VIP_SKIN_LIGHTNING: {
+        'title': '⚡ اسکین رعد و برق',
+        'button': '⚡ اسکین رعد و برق',
+        'price': VIP_SKIN_PRICE,
+        'abilities': [f"⚡ تولید روب‌پوینت روباه در هر ثانیه +{VIP_SKIN_BONUS_PER_SECOND} روب‌پوینت بیشتر می‌شود."],
+        'images': {
+            'male': os.path.join(BASE_DIR, 'vip_lightning_male.png'),
+            'female': os.path.join(BASE_DIR, 'vip_lightning_female.png'),
+        },
+    },
+    VIP_SKIN_ICE: {
+        'title': '❄ اسکین یخی',
+        'button': 'اسکین یخی❄',
+        'price': VIP_ICE_PRICE,
+        'abilities': [
+            f"🧊 {VIP_ICE_FRIDGE_BONUS} ظرفیت رایگان به یخچال روبی اضافه می‌شود.",
+            f"🏭 {VIP_ICE_FACTORY_REDUCE_SECONDS // 60} دقیقه از زمان تولید محصولات کارخونه کم می‌شود.",
+        ],
+        'note': "با غیرفعال کردن اسکین، ظرفیت اضافه‌ی یخچال و کاهش زمان کارخونه برداشته می‌شود "
+                "(آیتم‌های داخل یخچال حذف نمی‌شوند، ولی تا وقتی جا خالی نشده چیز جدیدی نمی‌تونی بندازی).",
+        'images': {
+            'male': os.path.join(BASE_DIR, 'vip_ice_male.png'),
+            'female': os.path.join(BASE_DIR, 'vip_ice_female.png'),
+        },
+    },
+}
+
+
+def vip_owned_skins(user):
+    raw = (getattr(user, 'fox_skin', '') or '')
+    out = []
+    for k in raw.split(','):
+        k = k.strip()
+        if k in VIP_SKINS and k not in out:
+            out.append(k)
+    return out
+
+
+def vip_active_skins(user):
+    """لیست اسکین‌های فعال به ترتیب فعال‌سازی (آخری همونیه که روی پنل روباه نشون داده می‌شه)."""
+    owned = vip_owned_skins(user)
+    raw = getattr(user, 'fox_skins_active', None)
+    if raw is None:  # داده‌ی قدیمی: فقط ستون fox_skin_active وجود داشت
+        return owned[:] if int(getattr(user, 'fox_skin_active', 0) or 0) == 1 else []
+    out = []
+    for k in raw.split(','):
+        k = k.strip()
+        if k in owned and k not in out:
+            out.append(k)
+    return out
+
+
+def vip_set_skins(user, owned, active):
+    user.fox_skin = ','.join(owned)
+    user.fox_skins_active = ','.join(active)
+    user.fox_skin_active = 1 if active else 0
+
+
+def vip_rate_bonus(user):
+    return VIP_SKIN_BONUS_PER_SECOND if VIP_SKIN_LIGHTNING in vip_active_skins(user) else 0
+
+
+def vip_fridge_capacity(user, level=None):
+    cap = fridge_capacity(user.fridge_level if level is None else level)
+    if VIP_SKIN_ICE in vip_active_skins(user):
+        cap += VIP_ICE_FRIDGE_BONUS
+    return cap
+
+
+def vip_factory_seconds(user, seconds):
+    seconds = int(seconds)
+    if VIP_SKIN_ICE in vip_active_skins(user):
+        return max(60, seconds - VIP_ICE_FACTORY_REDUCE_SECONDS)
+    return seconds
 FOX_HUNGER_INTERVAL_SECONDS = 35 * 60  # هر ۳۵ دقیقه یک واحد غذا از شکم روباه کم می‌شود.
 # روباه زخمی: پایه هر ۴۵ دقیقه؛ به ازای هر سطح ارتقای شهر روبی، ۲ دقیقه زودتر می‌آید
 # (سطح ۱ = ۴۵ دقیقه، سطح ۲ = ۴۳ دقیقه، سطح ۳ = ۴۱ دقیقه و ...).
@@ -3089,12 +3168,20 @@ def fox_gender_label(gender):
 
 
 async def _safe_edit(message, text, markup=None):
-    """ویرایش پیام پنل؛ خطای «message is not modified» نادیده گرفته می‌شود."""
+    """ویرایش پیام پنل؛ خطای «message is not modified» نادیده گرفته می‌شود.
+    اگر پنل عکس (اسکین VIP) داشته باشد، متن به‌صورت کپشن زیر عکس ویرایش می‌شود."""
     try:
-        await message.edit_text(text, reply_markup=markup)
+        if getattr(message, 'photo', None):
+            await message.edit_caption(caption=text[:1024], reply_markup=markup)
+        else:
+            await message.edit_text(text, reply_markup=markup)
     except BadRequest as e:
         if "not modified" not in str(e).lower():
             raise
+
+
+async def _panel_edit(message, text, reply_markup=None):
+    await _safe_edit(message, text, reply_markup)
 
 
 async def fox_show_panel(message, user, note=None):
@@ -3110,8 +3197,7 @@ def fox_profile_text(user):
     storage = min(storage_cap, int(user.fox_storage or 0))
     produced_total = int(user.fox_total_earned or 0)
     rate = int(fox_production_per_second(lvl))
-    if getattr(user, 'fox_skin_active', 0) and getattr(user, 'fox_skin', '') == VIP_SKIN_LIGHTNING:
-        rate += VIP_SKIN_BONUS_PER_SECOND
+    rate += vip_rate_bonus(user)
     lines = [
         f"🦊 روباه {user.fox_name or 'مکار'}",
         "",
@@ -3201,8 +3287,7 @@ def _fox_produce(user, now):
     # فقط مدتی حساب می‌شود که شکم واقعاً غذا داشته (قبل از کم شدن گرسنگی)
     elapsed = _fox_active_seconds(user, start, now)
     rate = fox_production_per_second(level)
-    if getattr(user, 'fox_skin_active', 0) and getattr(user, 'fox_skin', '') == VIP_SKIN_LIGHTNING:
-        rate += VIP_SKIN_BONUS_PER_SECOND
+    rate += vip_rate_bonus(user)
 
     room = max(0, storage_cap - storage)
     total = float(user.fox_production_remainder or 0.0) + elapsed * rate
@@ -3253,8 +3338,7 @@ def next_fox_point_seconds(user):
     if (user.fox_belly or 0) < 2:
         return 0
     rate = fox_production_per_second(max(1, min(FOX_MAX_LEVEL, int(user.fox_level or 1))))
-    if getattr(user, 'fox_skin_active', 0) and getattr(user, 'fox_skin', '') == VIP_SKIN_LIGHTNING:
-        rate += VIP_SKIN_BONUS_PER_SECOND
+    rate += vip_rate_bonus(user)
     if rate <= 0:
         return 0
     remainder = float(user.fox_production_remainder or 0.0)
@@ -3290,10 +3374,12 @@ async def fox_command(update, context):
         session.commit()
         text = fox_profile_text(user)
         owner_level=user.level; owner_fox_level=user.fox_level; owner_prestige=user.fox_prestige_count
-        skin_gender = user.fox_gender if user.fox_skin_active and user.fox_skin == VIP_SKIN_LIGHTNING else ''
+        _active_skins = vip_active_skins(user)
+        skin_key = _active_skins[-1] if _active_skins else ''
+        skin_gender = user.fox_gender if skin_key else ''
     finally:
         session.close()
-    skin_path = vip_image_path(skin_gender) if skin_gender in ('male', 'female') else None
+    skin_path = vip_image_path(skin_key, skin_gender) if skin_key and skin_gender in ('male', 'female') else None
     markup = fox_keyboard(update.effective_user.id, owner_level, owner_fox_level, owner_prestige)
     if skin_path and os.path.exists(skin_path):
         try:
@@ -3335,7 +3421,7 @@ async def fox_button(update, context):
             nxt = next_fox_point_seconds(user)
             next_text = f"⏱ روب‌پوینت بعدی حدود {format_duration(nxt)} دیگر تولید می‌شود." if nxt else "⏸ تولید متوقف است تا شکم حداقل 2 غذا داشته باشد."
             await q.answer("برداشت انجام شد! 💰")
-            await q.message.edit_text(fox_profile_text(user) + f"\n\n💰 {amount:,} روب‌پوینت به موجودیت اضافه شد.\n{next_text}")
+            await _panel_edit(q.message, fox_profile_text(user) + f"\n\n💰 {amount:,} روب‌پوینت به موجودیت اضافه شد.\n{next_text}")
             asyncio.create_task(restore_fox_panel(context.bot,q.message.chat_id,q.message.message_id,user.telegram_id))
             return
         if action == "upgrade":
@@ -3354,12 +3440,12 @@ async def fox_button(update, context):
                     user.fox_last_production_at = now_utc()
                     session.commit()
                     await q.answer(f"🦊 روباه رفت لول {user.fox_level}!", show_alert=True)
-                    await q.message.edit_text(fox_profile_text(user) + f"\n\n🎉 روباه به لول {user.fox_level} رسید!\n🏅 مقام جدید: {fox_rank(user.fox_level)}")
+                    await _panel_edit(q.message, fox_profile_text(user) + f"\n\n🎉 روباه به لول {user.fox_level} رسید!\n🏅 مقام جدید: {fox_rank(user.fox_level)}")
                     asyncio.create_task(restore_fox_panel(context.bot,q.message.chat_id,q.message.message_id,user.telegram_id))
                     return
         elif action in ("resetask", "resetyes", "resetno"):
             await q.answer("ℹ️ روباه حالا حداکثر تا سطح 25 ارتقا پیدا می‌کنه و ریست چرخه‌ای نداره.", show_alert=True)
-            await q.message.edit_text(fox_profile_text(user), reply_markup=fox_keyboard(user.telegram_id, user.level, user.fox_level, user.fox_prestige_count))
+            await _panel_edit(q.message, fox_profile_text(user), reply_markup=fox_keyboard(user.telegram_id, user.level, user.fox_level, user.fox_prestige_count))
             return
         elif action == "hunt":
             await handle_hunt_request(q, session, user, context)
@@ -3376,7 +3462,7 @@ async def fox_button(update, context):
         elif action == "renamemenu":
             # سازگاری با دکمه‌های نسخه‌های قدیمی؛ تنظیمات اکنون در همان پنل هستند.
             await q.answer()
-            await q.message.edit_text(fox_profile_text(user), reply_markup=fox_keyboard(user.telegram_id, user.level, user.fox_level, user.fox_prestige_count))
+            await _panel_edit(q.message, fox_profile_text(user), reply_markup=fox_keyboard(user.telegram_id, user.level, user.fox_level, user.fox_prestige_count))
             return
         elif action == "rename":
             context.user_data["fox_rename"] = True
@@ -3586,7 +3672,7 @@ async def hunt_button(update, context):
             if user.level < FRIDGE_UNLOCK_LEVEL:
                 await q.answer(f"❄️ یخچال روبی در سطح {FRIDGE_UNLOCK_LEVEL} باز می‌شود.", show_alert=True)
                 return
-            cap = fridge_capacity(user.fridge_level)
+            cap = vip_fridge_capacity(user)
             current_count = session.query(FoxHunt).filter(FoxHunt.user_id == user.telegram_id, FoxHunt.status == "fridge").count()
             if current_count >= cap:
                 await q.answer(f"❄️ یخچال پر است! ({current_count}/{cap}) اول یه چیزی رو بفروش یا بخور.", show_alert=True)
@@ -3656,7 +3742,7 @@ def fridge_item_block(hunt):
 
 def fridge_text(user, items):
     level = max(1, min(FRIDGE_MAX_LEVEL, int(user.fridge_level or 1)))
-    cap = fridge_capacity(level)
+    cap = vip_fridge_capacity(user, level)
     egg_session = get_session()
     try:
         egg_count = egg_session.query(RubyEgg).filter(RubyEgg.user_id == user.telegram_id).count()
@@ -4342,7 +4428,7 @@ def factory_item_text(item_key, user):
         plan = factory_order_plan(item_key, p, storage_level, machine_level)
         lines.append(
             f"┘─ {p}٪ : {plan['quantity']:,} عدد | هزینه: {plan['cost']:,} روب‌پوینت | "
-            f"زمان: {format_duration(plan['seconds'])} | ارزش فروش: {plan['sell_total']:,} روب‌پوینت"
+            f"زمان: {format_duration(vip_factory_seconds(user, plan['seconds']))} | ارزش فروش: {plan['sell_total']:,} روب‌پوینت"
         )
     return "\n".join(lines)
 
@@ -4648,7 +4734,7 @@ async def factory_button(update, context):
             order = FactoryOrder(
                 user_id=user.telegram_id, tier_key=tier_key, item_key=item_key, percent=int(percent_s),
                 quantity=plan["quantity"], cost_paid=plan["cost"], sell_total=plan["sell_total"],
-                started_at=now_utc(), ready_at=now_utc() + timedelta(seconds=plan["seconds"]), collected=0,
+                started_at=now_utc(), ready_at=now_utc() + timedelta(seconds=vip_factory_seconds(user, plan["seconds"])), collected=0,
             )
             session.add(order)
             session.commit()
@@ -5590,70 +5676,133 @@ def gift_order_summary_text(flow):
 # ---------- VIP اسکین‌های روباه 🪄 ----------
 
 def vip_home_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚡ اسکین رعد و برق", callback_data="vip:skin")],
-        [InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="vip:back")],
-    ])
+    rows = [[InlineKeyboardButton(s['button'], callback_data=f"vip:skin:{k}")] for k, s in VIP_SKINS.items()]
+    rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="vip:back")])
+    return InlineKeyboardMarkup(rows)
 
 
-def vip_gender_keyboard():
+def vip_gender_keyboard(key):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("♂️ مرد", callback_data="vip:gender:male"),
-            InlineKeyboardButton("♀️ زن", callback_data="vip:gender:female"),
+            InlineKeyboardButton("♂️ مرد", callback_data=f"vip:gender:{key}:male"),
+            InlineKeyboardButton("♀️ زن", callback_data=f"vip:gender:{key}:female"),
         ],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="vip:home")],
     ])
 
 
-def vip_skin_keyboard(gender):
+def vip_skin_keyboard(user, key, gender):
+    owned = key in vip_owned_skins(user)
+    active = key in vip_active_skins(user)
+    if not owned:
+        first = InlineKeyboardButton("🛒 بخرش", callback_data=f"vip:buy:{key}:{gender}")
+    elif active:
+        first = InlineKeyboardButton("🔴 غیرفعال کردن اسکین", callback_data=f"vip:off:{key}:{gender}")
+    else:
+        first = InlineKeyboardButton("🟢 فعال کردن اسکین", callback_data=f"vip:on:{key}:{gender}")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛒 بخرش", callback_data=f"vip:buy:{gender}")],
-        [InlineKeyboardButton("🔙 انتخاب جنسیت", callback_data="vip:skin")],
+        [first],
+        [InlineKeyboardButton("🔙 بازگشت به VIP", callback_data="vip:home")],
     ])
 
 
-def vip_confirm_keyboard(gender):
+def vip_confirm_keyboard(key, gender):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ بله دوسش دارم", callback_data=f"vip:confirm:yes:{gender}")],
-        [InlineKeyboardButton("❌ نه منصرف شدم", callback_data=f"vip:confirm:no:{gender}")],
+        [InlineKeyboardButton("✅ بله دوسش دارم", callback_data=f"vip:confirm:yes:{key}:{gender}")],
+        [InlineKeyboardButton("❌ نه منصرف شدم", callback_data=f"vip:confirm:no:{key}:{gender}")],
     ])
 
 
 def vip_home_text():
-    return (
-        "✨ VIP🪄 فروشگاه روبی\n\n"
-        "اسکین‌های ویژه روباه اینجاست!\n"
-        "اسکین‌ها می‌تونن ظاهر روباه و توانایی‌های ویژه بهش اضافه کنن.\n\n"
-        "⚡ اسکین رعد و برق\n"
-        f"💰 قیمت: {VIP_SKIN_PRICE:,} روب‌پوینت"
-    )
+    lines = [
+        "✨ VIP🪄 فروشگاه روبی", "",
+        "اسکین‌های ویژه روباه اینجاست!",
+        "اسکین‌ها ظاهر روباه رو عوض می‌کنن و توانایی‌های ویژه بهش اضافه می‌کنن.",
+        "یکی رو انتخاب کن تا عکس و توضیحاتش رو ببینی ⬇️", "",
+    ]
+    for s in VIP_SKINS.values():
+        lines.append(f"{s['title']} — 💰 {s['price']:,} روب‌پوینت")
+    return "\n".join(lines)
 
 
-def vip_gender_text(user):
-    current = fox_gender_label(user.fox_gender)
+def vip_gender_text(user, key):
     return (
-        "⚡ اسکین رعد و برق\n\n"
-        f"⚧ جنسیت فعلی روباه شما: {current}\n\n"
+        f"{VIP_SKINS[key]['title']}\n\n"
+        f"⚧ جنسیت فعلی روباه شما: {fox_gender_label(user.fox_gender)}\n\n"
         "جنسیت روباه شما چیست؟"
     )
 
 
-def vip_skin_text(gender, owned=False):
+def vip_skin_text(key, gender, user=None):
+    s = VIP_SKINS[key]
     gender_label = "مرد ♂️" if gender == "male" else "زن ♀️"
-    status = "\n\n✅ این اسکین را داری و فعال است." if owned else ""
-    return (
-        "⚡ اسکین رعد و برق\n\n"
-        f"🦊 مدل: روباه {gender_label}\n"
-        "✨ توانایی: وقتی اسکین فعال باشد، تولید روب‌پوینت روباه "
-        f"در هر ثانیه +{VIP_SKIN_BONUS_PER_SECOND} روب‌پوینت بیشتر می‌شود.\n"
-        f"💰 قیمت: {VIP_SKIN_PRICE:,} روب‌پوینت"
-        f"{status}"
-    )
+    lines = [
+        s['title'], "",
+        f"🦊 مدل: روباه {gender_label}",
+        "✨ توانایی‌ها (فقط وقتی اسکین فعال باشد):",
+    ]
+    lines += [f"   {a}" for a in s['abilities']]
+    if s.get('note'):
+        lines += ["", f"ℹ️ {s['note']}"]
+    lines += ["", f"💰 قیمت: {s['price']:,} روب‌پوینت"]
+    if user is not None and key in vip_owned_skins(user):
+        state = "🟢 فعال" if key in vip_active_skins(user) else "⚪ غیرفعال"
+        lines += ["", f"✅ این اسکین رو داری — وضعیت: {state}"]
+    return "\n".join(lines)
 
 
-def vip_image_path(gender):
-    return VIP_SKIN_MALE_IMAGE if gender == 'male' else VIP_SKIN_FEMALE_IMAGE
+def vip_image_path(key, gender):
+    return VIP_SKINS[key]['images'].get('male' if gender == 'male' else 'female')
+
+
+async def vip_show(q, text, markup, photo_path=None, same_photo=False):
+    """پنل VIP را در همان پیام نشان می‌دهد: عکس اسکین + توضیحات به‌صورت کپشن زیر عکس."""
+    msg = q.message
+    has_photo = bool(getattr(msg, 'photo', None))
+
+    async def _replace_message(send):
+        await send()
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+
+    if photo_path and os.path.exists(photo_path):
+        try:
+            if has_photo and same_photo:
+                await msg.edit_caption(caption=text, reply_markup=markup)
+            elif has_photo:
+                with open(photo_path, "rb") as f:
+                    await msg.edit_media(media=InputMediaPhoto(media=InputFile(f), caption=text), reply_markup=markup)
+            else:
+                async def _send():
+                    with open(photo_path, "rb") as f:
+                        await msg.reply_photo(photo=InputFile(f), caption=text, reply_markup=markup)
+                await _replace_message(_send)
+            return
+        except BadRequest as exc:
+            if "not modified" in str(exc).lower():
+                return
+            logger.warning("VIP skin photo panel failed: %s", exc)
+        except Exception as exc:
+            logger.warning("VIP skin photo panel failed: %s", exc)
+    # بدون عکس (یا اگر ارسال عکس شکست خورد): پنل متنی
+    try:
+        if has_photo:
+            await _replace_message(lambda: msg.reply_text(text, reply_markup=markup))
+        else:
+            await msg.edit_text(text, reply_markup=markup)
+    except BadRequest as exc:
+        if "not modified" not in str(exc).lower():
+            logger.warning("VIP text panel failed: %s", exc)
+
+
+def vip_settle_production(user):
+    """قبل از عوض شدن اسکین، تولید معوق با نرخ قبلی حساب شود تا بونوس عقب‌رو/جلو‌رو نشود."""
+    try:
+        settle_fox_production(user)
+    except Exception as exc:
+        logger.warning("VIP settle production failed: %s", exc)
 
 
 async def vip_button(update, context):
@@ -5663,87 +5812,119 @@ async def vip_button(update, context):
         return
     if len(parts) < 2:
         await q.answer(); return
+    action = parts[1]
+    # سازگاری با دکمه‌های قدیمی (قبل از اضافه شدن اسکین یخی) که کلید اسکین نداشتن
+    if action == 'skin' and len(parts) == 2:
+        parts = ['vip', 'home']; action = 'home'
+    elif action in ('gender', 'buy') and len(parts) == 3:
+        parts = ['vip', action, VIP_SKIN_LIGHTNING, parts[2]]
+    elif action == 'confirm' and len(parts) == 4:
+        parts = ['vip', 'confirm', parts[2], VIP_SKIN_LIGHTNING, parts[3]]
     session = get_session()
     try:
         user = get_or_create_user(session, q.from_user)
-        if q.data == "vip:home":
+        if action == "home":
             await q.answer()
-            await q.message.edit_text(vip_home_text(), reply_markup=vip_home_keyboard())
+            await vip_show(q, vip_home_text(), vip_home_keyboard())
             return
-        if q.data == "vip:back":
+        if action == "back":
             await q.answer()
-            await q.message.edit_text(gift_shop_text(), reply_markup=gift_shop_keyboard())
+            await vip_show(q, gift_shop_text(), gift_shop_keyboard())
             return
-        if q.data == "vip:skin":
+        if action == "skin":
+            key = parts[2] if len(parts) == 3 else ''
+            if key not in VIP_SKINS:
+                await q.answer(); return
             if (user.fox_gender or '') not in ('male', 'female'):
                 await q.answer("⚠️ اول جنسیت روباهت رو از پنل روباه مشخص کن.", show_alert=True)
                 return
             await q.answer()
-            await q.message.edit_text(vip_gender_text(user), reply_markup=vip_gender_keyboard())
+            await vip_show(q, vip_gender_text(user, key), vip_gender_keyboard(key))
             return
-        if len(parts) == 3 and parts[1] == 'gender':
-            gender = parts[2]
-            if gender not in ('male', 'female'):
-                return
-            if (user.fox_gender or '') != gender:
+
+        # از اینجا به بعد: vip:<action>:<key>:<gender> (confirm یک بخش اضافه دارد)
+        if action == 'confirm':
+            if len(parts) != 5:
+                await q.answer(); return
+            decision, key, gender = parts[2], parts[3], parts[4]
+        else:
+            if len(parts) != 4:
+                await q.answer(); return
+            decision, key, gender = '', parts[2], parts[3]
+        if key not in VIP_SKINS or gender not in ('male', 'female'):
+            await q.answer(); return
+        if gender != (user.fox_gender or ''):
+            if (user.fox_gender or '') in ('male', 'female'):
                 current = "مرد ♂️" if user.fox_gender == 'male' else "زن ♀️"
-                await q.answer(f"⛔ روباه شما {current} است؛ اسکین جنسیت مقابل قابل خرید نیست.", show_alert=True)
-                return
-            owned = (user.fox_skin == VIP_SKIN_LIGHTNING and int(user.fox_skin_active or 0) == 1)
-            await q.answer()
-            text = vip_skin_text(gender, owned=owned)
-            try:
-                await q.message.edit_text(text, reply_markup=None if owned else vip_skin_keyboard(gender))
-            except Exception:
-                pass
-            path = vip_image_path(gender)
-            if os.path.exists(path):
-                try:
-                    with open(path, "rb") as photo_file:
-                        await q.message.reply_photo(photo=InputFile(photo_file), caption=f"⚡ اسکین رعد و برق — روباه {('مرد ♂️' if gender == 'male' else 'زن ♀️')}")
-                except Exception as exc:
-                    logger.warning("VIP skin image send failed: %s", exc)
+                await q.answer(f"⛔ روباه شما {current} است؛ اسکین جنسیت مقابل قابل استفاده نیست.", show_alert=True)
+            else:
+                await q.answer("⚠️ اول جنسیت روباهت رو از پنل روباه مشخص کن.", show_alert=True)
             return
-        if len(parts) == 3 and parts[1] == 'buy':
-            gender = parts[2]
-            if gender != user.fox_gender:
-                await q.answer("⛔ این اسکین با جنسیت روباه شما مطابقت ندارد.", show_alert=True); return
-            if user.fox_skin == VIP_SKIN_LIGHTNING and int(user.fox_skin_active or 0) == 1:
-                await q.answer("✅ این اسکین را از قبل خریدی و فعال است.", show_alert=True); return
+        skin = VIP_SKINS[key]
+        photo = vip_image_path(key, gender)
+        owned = vip_owned_skins(user)
+        active = vip_active_skins(user)
+
+        if action == 'gender':
             await q.answer()
-            await q.message.edit_text(
-                "⚡ خرید اسکین رعد و برق\n\n"
-                f"💰 قیمت: {VIP_SKIN_PRICE:,} روب‌پوینت\n\n"
-                "آیا از خرید این اسکین مطمئن هستید؟",
-                reply_markup=vip_confirm_keyboard(gender)
+            await vip_show(q, vip_skin_text(key, gender, user), vip_skin_keyboard(user, key, gender), photo_path=photo)
+            return
+
+        if action == 'buy':
+            if key in owned:
+                await q.answer("✅ این اسکین رو از قبل داری.", show_alert=True)
+                await vip_show(q, vip_skin_text(key, gender, user), vip_skin_keyboard(user, key, gender), photo_path=photo, same_photo=True)
+                return
+            await q.answer()
+            await vip_show(
+                q,
+                f"{skin['title']}\n\n💰 قیمت: {skin['price']:,} روب‌پوینت\n\nآیا از خرید این اسکین مطمئن هستید؟",
+                vip_confirm_keyboard(key, gender), photo_path=photo, same_photo=True,
             )
             return
-        if len(parts) == 4 and parts[1] == 'confirm':
-            decision, gender = parts[2], parts[3]
-            if gender != user.fox_gender:
-                await q.answer("⛔ جنسیت اسکین با روباه شما یکی نیست.", show_alert=True); return
+
+        if action == 'confirm':
             if decision == 'no':
                 await q.answer("خرید لغو شد.")
-                await q.message.edit_text(vip_skin_text(gender), reply_markup=vip_skin_keyboard(gender))
+                await vip_show(q, vip_skin_text(key, gender, user), vip_skin_keyboard(user, key, gender), photo_path=photo, same_photo=True)
                 return
             if decision == 'yes':
-                if user.fox_skin == VIP_SKIN_LIGHTNING and int(user.fox_skin_active or 0) == 1:
-                    await q.answer("این اسکین را از قبل داری.", show_alert=True); return
-                if int(user.fox_points or 0) < VIP_SKIN_PRICE:
-                    await q.answer(f"❌ روب‌پوینت کافی نداری. {VIP_SKIN_PRICE:,} روب‌پوینت لازم داری.", show_alert=True)
+                if key in owned:
+                    await q.answer("این اسکین رو از قبل داری.", show_alert=True); return
+                if int(user.fox_points or 0) < skin['price']:
+                    await q.answer(f"❌ روب‌پوینت کافی نداری. {skin['price']:,} روب‌پوینت لازم داری.", show_alert=True)
                     return
-                user.fox_points = int(user.fox_points or 0) - VIP_SKIN_PRICE
-                user.fox_skin = VIP_SKIN_LIGHTNING
-                user.fox_skin_active = 1
-                user.fox_last_production_at = now_utc()
-                user.fox_production_remainder = 0.0
+                vip_settle_production(user)
+                user.fox_points = int(user.fox_points or 0) - skin['price']
+                vip_set_skins(user, owned + [key], active + [key])   # بعد از خرید خودکار فعال می‌شود
                 session.commit()
-                await q.answer("🎉 اسکین رعد و برق خریداری و فعال شد!", show_alert=True)
-                await q.message.edit_text(
-                    vip_skin_text(gender, owned=True) + "\n\n⚡ از این به بعد تولید روباه +5 روب‌پوینت در ثانیه است.",
-                    reply_markup=vip_home_keyboard()
-                )
+                await q.answer(f"🎉 {skin['title']} خریداری و فعال شد!", show_alert=True)
+                await vip_show(q, vip_skin_text(key, gender, user), vip_skin_keyboard(user, key, gender), photo_path=photo, same_photo=True)
                 return
+            await q.answer(); return
+
+        if action in ('on', 'off'):
+            if key not in owned:
+                await q.answer("⛔ این اسکین رو نخریدی.", show_alert=True); return
+            if action == 'on':
+                if key in active:
+                    await q.answer("این اسکین الان فعاله.", show_alert=True)
+                else:
+                    vip_settle_production(user)
+                    vip_set_skins(user, owned, active + [key])
+                    session.commit()
+                    await q.answer("🟢 اسکین فعال شد.")
+            else:
+                if key not in active:
+                    await q.answer("این اسکین الان غیرفعاله.", show_alert=True)
+                else:
+                    vip_settle_production(user)
+                    vip_set_skins(user, owned, [k for k in active if k != key])
+                    session.commit()
+                    await q.answer("🔴 اسکین غیرفعال شد.")
+            await vip_show(q, vip_skin_text(key, gender, user), vip_skin_keyboard(user, key, gender), photo_path=photo, same_photo=True)
+            return
+        await q.answer()
     finally:
         session.close()
 
@@ -9408,7 +9589,7 @@ async def market_callback(update, context):
             if item_key == "egg":
                 if user.level < FRIDGE_UNLOCK_LEVEL:
                     await q.answer(f"❌ برای خرید تخم‌مرغ باید یخچال روبی در سطح {FRIDGE_UNLOCK_LEVEL} برایت باز شده باشد.",show_alert=True); return
-                cap=fridge_capacity(user.fridge_level)
+                cap=vip_fridge_capacity(user)
                 used=session.query(FoxHunt).filter(FoxHunt.user_id==user.telegram_id,FoxHunt.status=="fridge").count()
                 used += session.query(RubyEgg).filter(RubyEgg.user_id==user.telegram_id).count()
                 if used + qty > cap:
@@ -12041,7 +12222,7 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_giftcode_callback,pattern=r"^gc:(?:home|cancel|create|opt:(?:fmt|max|reward|ttl)|set:(?:fmt|max|reward|ttl):[A-Za-z0-9]+)$"))
     app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|opt|qty|qtyok|backshop|backopt|tiers|backtiers|notext|noop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(points_button,pattern=r"^points:(?:shop|pick|backshop):[^:]+:[^:]+$"))
-    app.add_handler(CallbackQueryHandler(vip_button,pattern=r"^vip:(?:home|back|skin|gender:(?:male|female)|buy:(?:male|female)|confirm:(?:yes|no):(?:male|female))$"))
+    app.add_handler(CallbackQueryHandler(vip_button,pattern=r"^vip:[a-z]+(?::[a-z]+){0,3}$"))
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))

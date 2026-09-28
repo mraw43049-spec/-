@@ -63,6 +63,7 @@ class User(Base):
     fox_gender = Column(String, nullable=False, default='')  # '' نامشخص، 'male' مرد، 'female' زن
     fox_skin = Column(String, nullable=False, default='')  # active/purchased fox skin key, e.g. lightning
     fox_skin_active = Column(Integer, nullable=False, default=0)
+    fox_skins_active = Column(String, nullable=True, default=None)  # کلیدهای اسکین‌های فعال (با کاما)؛ None = داده‌ی قدیمی
     marriage_lock_until = Column(DateTime(timezone=True), nullable=True)
     potion_count = Column(Integer, nullable=False, default=0)
     fox_level = Column(Integer, nullable=False, default=1)
@@ -604,6 +605,7 @@ def init_db():
         'fox_gender': "VARCHAR NOT NULL DEFAULT ''",
         'fox_skin': "VARCHAR NOT NULL DEFAULT ''",
         'fox_skin_active': 'INTEGER NOT NULL DEFAULT 0',
+        'fox_skins_active': 'VARCHAR',
         'marriage_lock_until': DT_SQL_TYPE,
         'potion_count': 'INTEGER NOT NULL DEFAULT 0',
     }
