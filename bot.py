@@ -3725,7 +3725,15 @@ async def hunt_command(update, context):
             return
         remaining = seconds_left(user.last_hunt_at, HUNT_COOLDOWN)
         if remaining:
-            await update.message.reply_text(f"⏳ شکار بعدی {format_duration(remaining)} دیگر فعال می‌شود.", **reply_kwargs(update.message))
+            kb = None
+            if int(user.ratkiller_count or 0) > 0:
+                kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+                    "استفاده از مرگِ موش🕸", callback_data=f"ratkiller:use:{user.telegram_id}"
+                )]])
+            await update.message.reply_text(
+                f"⏳ شکار بعدی {format_duration(remaining)} دیگر فعال می‌شود.",
+                reply_markup=kb, **reply_kwargs(update.message)
+            )
             return
         # اینجا همان منطق دکمه شکار، اما با پیام واقعیِ ریپلای‌شده اجرا می‌شود.
         emoji = random.choice(list(HUNT_ITEMS.keys()))
@@ -3747,6 +3755,46 @@ async def hunt_command(update, context):
         )
     finally:
         session.close()
+    if update.effective_chat: await maybe_level_up_city(context, update.effective_chat.id)
+
+
+async def ratkiller_use_button(update, context):
+    """دکمه‌ی «استفاده از مرگِ موش🕸» که زیر پیام «شکار بعدی ... دیگر» می‌آید:
+    وقتی شکار هنوز روی کول‌داون است، با مصرف یک مرگ موش خریداری‌شده، درجا فقط یک موش🐭 شکار می‌کند."""
+    q = update.callback_query
+    parts = q.data.split(":")
+    if len(parts) != 3:
+        return
+    owner_id = int(parts[2])
+    if q.from_user.id != owner_id:
+        await q.answer("⛔ این دکمه برای کاربر دیگری است.", show_alert=True); return
+    session = get_session()
+    try:
+        user = session.get(User, owner_id)
+        if not user or int(user.ratkiller_count or 0) <= 0:
+            await q.answer("🪤 مرگ موشی نداری؛ اول از مارکت روبی بخر.", show_alert=True); return
+        emoji = "🐭"
+        item = HUNT_ITEMS[emoji]
+        weight = round(random.uniform(item["weight_min"], item["weight_max"]), 2)
+        hunt = FoxHunt(user_id=user.telegram_id, emoji=emoji, item_name=item["name"], nutrition=item["nutrition"], sell_value=item["sell"], status="pending", weight=weight)
+        user.ratkiller_count -= 1
+        user.hunt_count = (user.hunt_count or 0) + 1
+        session.add(hunt)
+        chat = update.effective_chat
+        if chat: bump_city_stat(session, chat.id, chat.title, city_hunt_total=1)
+        session.commit()
+        kb = hunt_result_keyboard(hunt.id, user.telegram_id, user_has_baby(session, user.telegram_id))
+    finally:
+        session.close()
+    await q.answer("🪤 مرگ موش استفاده شد!")
+    try:
+        await q.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await q.message.reply_text(
+        f"🪤 با مرگ موش درجا شکار کردی!\n\n🎯 شما {item['name']} را شکار کردید!\n🍖 ارزش غذایی: {item['nutrition']}\n💰 ارزش فروش: {item['sell']:,} روب‌پوینت\n\nچه کار خواهید کرد؟\n⏱ 120 ثانیه فرصت تصمیم‌گیری دارید وگرنه شکار می‌پره.",
+        reply_markup=kb
+    )
     if update.effective_chat: await maybe_level_up_city(context, update.effective_chat.id)
 
 
@@ -9258,16 +9306,19 @@ CITY_MARKET_BASE_PRICES = {
     'egg': 15_000,
     'injured_fox': 20_000,
     'potion': 35_000,
+    'ratkiller': 5_000,
 }
 CITY_MARKET_NAMES = {
     'egg': 'تخم مرغ🥚',
     'injured_fox': 'روباه زخمی🦊',
     'potion': 'معجون🥣',
+    'ratkiller': 'مرگ موش🪤',
 }
 CITY_MARKET_DESCRIPTIONS = {
     'egg': '🥚 تخم‌مرغ خام داخل یخچال میره؛ ارزش غذایی خام ۵ و بعد از پخت ۱۱ میشه.',
     'injured_fox': '🦊 روباه زخمی به موجودی روباه‌های زخمی تو اضافه می‌شود.',
     'potion': '🥣 یک معجون روباه مریض را کامل خوب می‌کند و برای سقط نینی روباه هم مصرف می‌شود.',
+    'ratkiller': '🪤 وقتی زمان شکار تموم شده، با مرگ موش می‌تونی درجا فقط یک موش🐭 شکار کنی؛ هر مرگ موش فقط یک‌بار مصرف می‌شود.',
 }
 
 def city_requirements(level):
@@ -9656,7 +9707,7 @@ def market_get_items(session, chat_id):
 def market_tax(amount):
     return max(0, int(amount * CITY_MARKET_TAX_RATE))
 
-CITY_MARKET_ITEM_CODES = {'egg': 'e', 'injured_fox': 'f', 'potion': 'p'}
+CITY_MARKET_ITEM_CODES = {'egg': 'e', 'injured_fox': 'f', 'potion': 'p', 'ratkiller': 'r'}
 CITY_MARKET_CODE_ITEMS = {v: k for k, v in CITY_MARKET_ITEM_CODES.items()}
 
 def market_cb(action, chat_id, owner_id, item_key=None, qty=None):
@@ -9694,6 +9745,10 @@ def market_text(session, row, buyer=None):
         f"┘─ 🧮 موجودی : {int(items['potion'].quantity or 0):,}",
         f"┘─ 💰 قیمت : {int(items['potion'].price or CITY_MARKET_BASE_PRICES['potion']):,} 🪙",
         "",
+        "🪤 مرگ موش",
+        f"┘─ 🧮 موجودی : {int(items['ratkiller'].quantity or 0):,}",
+        f"┘─ 💰 قیمت : {int(items['ratkiller'].price or CITY_MARKET_BASE_PRICES['ratkiller']):,} 🪙",
+        "",
         "〰️〰️〰️〰️〰️〰️〰️",
         "",
         f"🏦 خزانه شهر : {treasury:,} 🪙",
@@ -9716,14 +9771,16 @@ def market_buyer_keyboard(chat_id, owner_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("خرید تخم مرغ🥚", callback_data=market_cb("buy", chat_id, owner_id, "egg")),
          InlineKeyboardButton("خرید روباه زخمی🦊", callback_data=market_cb("buy", chat_id, owner_id, "injured_fox"))],
-        [InlineKeyboardButton("خرید معجون🥣", callback_data=market_cb("buy", chat_id, owner_id, "potion"))]
+        [InlineKeyboardButton("خرید معجون🥣", callback_data=market_cb("buy", chat_id, owner_id, "potion")),
+         InlineKeyboardButton("خرید مرگ موش🪤", callback_data=market_cb("buy", chat_id, owner_id, "ratkiller"))]
     ])
 
 def market_settings_keyboard(chat_id, owner_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🥚 پر کردن تخم مرغ", callback_data=market_cb("stock", chat_id, owner_id, "egg")),
          InlineKeyboardButton("🦊 پر کردن روباه زخمی", callback_data=market_cb("stock", chat_id, owner_id, "injured_fox"))],
-        [InlineKeyboardButton("🥣 پر کردن معجون", callback_data=market_cb("stock", chat_id, owner_id, "potion"))],
+        [InlineKeyboardButton("🥣 پر کردن معجون", callback_data=market_cb("stock", chat_id, owner_id, "potion")),
+         InlineKeyboardButton("🪤 پر کردن مرگ موش", callback_data=market_cb("stock", chat_id, owner_id, "ratkiller"))],
         [InlineKeyboardButton("🔁 واگذاری شهرداری", callback_data=market_cb("transfer", chat_id, owner_id))],
         [InlineKeyboardButton("🔙 مارکت روبی", callback_data=market_cb("open", chat_id, owner_id))]
     ])
@@ -9839,6 +9896,8 @@ async def market_callback(update, context):
                     await q.answer(f"❌ ظرفیت یخچالت کافی نیست. {qty:,} جای خالی لازم داری؛ ظرفیت: {used}/{cap}",show_alert=True); return
             if item_key == "potion" and qty > 20:
                 await q.answer("❌ حداکثر ۲۰ معجون در هر خرید.",show_alert=True); return
+            if item_key == "ratkiller" and qty > 20:
+                await q.answer("❌ حداکثر ۲۰ مرگ موش در هر خرید.",show_alert=True); return
             if (user.fox_points or 0)<grand:
                 await q.answer(f"❌ روب‌پوینت کافی نیست. {grand:,} 🪙 لازم داری (قیمت {total:,} + مالیات {tax:,}).",show_alert=True); return
             user.fox_points-=grand
@@ -9855,6 +9914,8 @@ async def market_callback(update, context):
                     session.add(RubyEgg(user_id=user.telegram_id,cooked=0,cooking_started_at=None,created_at=now_utc()))
             elif item_key=="potion":
                 user.potion_count=(user.potion_count or 0)+qty
+            elif item_key=="ratkiller":
+                user.ratkiller_count=(user.ratkiller_count or 0)+qty
             else:
                 user.injured_fox_stock=(user.injured_fox_stock or 0)+qty
                 user.fox_rescued_count=(user.fox_rescued_count or 0)+qty
@@ -12430,6 +12491,7 @@ def main():
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|renamemenu|renameyes|renameno|gendermenu|genderpick_male|genderpick_female|genderyes_male|genderyes_female|genderno_male|genderno_female|resetask|resetyes|resetno):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge|baby):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(ratkiller_use_button,pattern=r"^ratkiller:use:\d+$"))
     app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|feed|upgrade):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
     app.add_handler(CallbackQueryHandler(referral_admin_button,pattern=r"^ref:(approve|reject):\d+$"))

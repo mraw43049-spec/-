@@ -66,6 +66,7 @@ class User(Base):
     fox_skins_active = Column(String, nullable=True, default=None)  # کلیدهای اسکین‌های فعال (با کاما)؛ None = داده‌ی قدیمی
     marriage_lock_until = Column(DateTime(timezone=True), nullable=True)
     potion_count = Column(Integer, nullable=False, default=0)
+    ratkiller_count = Column(Integer, nullable=False, default=0)  # تعداد مرگ‌موش خریداری‌شده از مارکت روبی
     fox_level = Column(Integer, nullable=False, default=1)
     fox_belly = Column(Integer, nullable=False, default=3)
     fox_belly_capacity = Column(Integer, nullable=False, default=3)
@@ -608,6 +609,7 @@ def init_db():
         'fox_skins_active': 'VARCHAR',
         'marriage_lock_until': DT_SQL_TYPE,
         'potion_count': 'INTEGER NOT NULL DEFAULT 0',
+        'ratkiller_count': 'INTEGER NOT NULL DEFAULT 0',
     }
     with engine.begin() as conn:
         added_user_cols = set()
@@ -699,6 +701,7 @@ def init_db():
             conn.execute(text("UPDATE users SET injured_fox_stock = 0 WHERE injured_fox_stock IS NULL OR injured_fox_stock < 0"))
         conn.execute(text("UPDATE users SET spam_count = 0 WHERE spam_count IS NULL OR spam_count < 0"))
         conn.execute(text("UPDATE users SET potion_count = 0 WHERE potion_count IS NULL OR potion_count < 0"))
+        conn.execute(text("UPDATE users SET ratkiller_count = 0 WHERE ratkiller_count IS NULL OR ratkiller_count < 0"))
         if 'total_earned' not in cols:
             conn.execute(text('UPDATE users SET total_earned = points WHERE total_earned = 0'))
         if 'group_chats' in inspector.get_table_names():
