@@ -89,8 +89,8 @@ VIP_SKIN_VAMPIRE = 'vampire'
 VIP_VAMPIRE_PRICE = 50_000_000
 VIP_VAMPIRE_BANK_RATE = 0.05              # اسکین خون‌آشامی: سود بانک ۵٪ (پایه ۳٪)
 VIP_VAMPIRE_SMUGGLE_REFUND_RATE = 0.25    # اسکین خون‌آشامی: ۲۵٪ مبلغ قاچاق لورفته برمی‌گردد
-# کازینو فعلاً کلاً غیرفعال است. برای روشن کردن دوباره: در Railway متغیر CASINO_DISABLED=0 بگذار.
-CASINO_DISABLED = os.getenv("CASINO_DISABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+# کازینو فعال است. برای خاموش کردنش در آینده: در Railway متغیر CASINO_DISABLED=1 بگذار.
+CASINO_DISABLED = os.getenv("CASINO_DISABLED", "0").strip().lower() not in ("0", "false", "no", "off")
 VIP_SKIN_BASKETBALL = 'basketball'
 # اسکین‌های رایگان: برای روباه همه در دسترس‌اند (نیازی به خرید نیست)، هیچ قدرتی ندارند و فقط ظاهری‌اند.
 # کاربر خودش با دکمه‌ی 🟢/🔴 در بخش VIP فعال/غیرفعال می‌کند.
@@ -1562,7 +1562,7 @@ async def casino_command(update, context):
         [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
         [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
     ])
-    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۱۲ خانه · ۳ بمب رندوم\n┘─ خانه‌های سالم: ۱۵٪ تا ۲۰۰٪ اضافه روی مبلغ ورودی؛ با بمب، جایزه صفر\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۱۲ خانه · ۳ بمب رندوم\n┘─ هر خانه‌ی سالم: ۲۵٪ اضافه روی مبلغ ورودی (تجمعی)؛ با بمب، جایزه صفر\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
@@ -1607,7 +1607,7 @@ def dice_bet_wins(bet, my_value, other_value):
 # دیکد مقدار اسلات‌ماشین تلگرام (1 تا 64) به سه مهره‌ی هر ردیف.
 # فرمول استاندارد: v=value-1 در مبنای 4 نوشته می‌شه؛ رقم‌ها: 0=BAR ، 1=🍇 ، 2=🍋 ، 3=7️⃣
 WHEEL_REEL_SYMBOL = {0: "bar", 1: "🍇", 2: "🍋", 3: "7️⃣"}
-WHEEL_REEL_POINTS = {0: 0, 1: 10, 2: 17, 3: 21}
+WHEEL_REEL_POINTS = {0: 0, 1: 7, 2: 15, 3: 20}
 
 def wheel_decode(value):
     v = value - 1
@@ -1621,6 +1621,10 @@ def wheel_score(value):
     points = sum(WHEEL_REEL_POINTS[d] for d in digits)
     combo = " ".join(WHEEL_REEL_SYMBOL[d] for d in digits)
     return points, combo
+
+def wheel_last_reel_is_bar(value):
+    """اگه رول آخر (سومین مهره) bar باشه، جایزه همیشه صفره؛ فارغ از امتیاز کل."""
+    return WHEEL_REEL_SYMBOL[wheel_decode(value)[-1]] == "bar"
 
 def wheel_is_jackpot(value):
     """دقیقاً سه‌تا 7️⃣ (بیشترین مقدار اسلات‌ماشین یعنی 64)."""
@@ -2863,20 +2867,20 @@ def _parse_ruby_scores(raw):
 
 BOMB_CELLS = 12
 BOMB_COUNT = 3
-# درصد اضافه‌شده به مبلغ ورودی بعد از هر خانه سالم؛ ۹ خانه سالم داریم.
-BOMB_BONUS_RATES = [0.15, 0.25, 0.35, 0.45, 0.50, 1.20, 1.40, 1.70, 2.00]
-
-def bomb_reward(safe, entry=0):
-    """مبلغ جایزه‌ی اضافه‌شده به ورودی؛ خانه‌ها ضریب‌های مشخص دارند و دوباره دوبرابر نمی‌شوند."""
-    safe = max(0, min(int(safe or 0), len(BOMB_BONUS_RATES)))
-    entry = max(0, int(entry or 0))
-    if safe <= 0 or entry <= 0:
-        return 0
-    return int(round(entry * BOMB_BONUS_RATES[safe - 1]))
+# هر خانه‌ی سالم دقیقاً ۰٫۲۵ (۲۵٪) به مبلغ ورودی اضافه می‌کند؛ این مقدار به‌صورت خطی روی هم جمع می‌شود.
+BOMB_SAFE_CELLS = BOMB_CELLS - BOMB_COUNT  # ۹ خانه‌ی سالم
+BOMB_BONUS_PER_SAFE = 0.25
 
 def bomb_bonus_rate(safe):
-    safe = max(0, min(int(safe or 0), len(BOMB_BONUS_RATES)))
-    return BOMB_BONUS_RATES[safe - 1] if safe else 0.0
+    safe = max(0, min(int(safe or 0), BOMB_SAFE_CELLS))
+    return safe * BOMB_BONUS_PER_SAFE
+
+def bomb_reward(safe, entry=0):
+    """مبلغ جایزه‌ی اضافه‌شده به ورودی: هر خانه‌ی سالم ۰٫۲۵ برابر مبلغ ورودی."""
+    entry = max(0, int(entry or 0))
+    if entry <= 0:
+        return 0
+    return int(round(entry * bomb_bonus_rate(safe)))
 
 def bomb_keyboard(tid, state, owner_id):
     revealed = set(state.get("revealed", []))
@@ -2900,7 +2904,7 @@ def bomb_text(state, name, entry):
             f"📈 ضریب فعلی: {rate_text}\n"
             f"💵 دریافتی در صورت «کافیه»: {total:,} روب‌پوینت\n"
             "⚠️ سه بمب مخفی‌اند؛ پیدا کردن بمب بازی را تمام می‌کند و جایزه‌ای نمی‌گیری.\n"
-            "📈 پاداش خانه‌های سالم: ۱۵٪، ۲۵٪، ۳۵٪، ۴۵٪، ۵۰٪، ۱۲۰٪، ۱۴۰٪، ۱۷۰٪، ۲۰۰٪")
+            "📈 پاداش هر خانه‌ی سالم: ۲۵٪ مبلغ ورودی (تجمعی، مثلاً ۴ خانه = ۱۰۰٪)")
 
 async def ruby_bomb_button(update, context):
     q=update.callback_query; parts=q.data.split(":")
@@ -3004,16 +3008,20 @@ async def ruby_dice_reply(update, context):
                     # تک‌نفره: ضریب دقیق بر اساس امتیاز نهایی
                     for uid, v in scores.items():
                         pts, _combo = wheel_score(v)
-                        if pts < 20:
+                        if wheel_last_reel_is_bar(v):
                             multiplier = 0.0
-                        elif pts <= 31:
+                        elif pts >= 55:
+                            multiplier = 2.5
+                        elif pts >= 45:
+                            multiplier = 1.8
+                        elif pts >= 35:
+                            multiplier = 1.2
+                        elif pts >= 30:
+                            multiplier = 1.0
+                        elif pts >= 20:
                             multiplier = 0.5
-                        elif pts <= 44:
-                            multiplier = 1.5
-                        elif pts <= 56:
-                            multiplier = 2.3
                         else:
-                            multiplier = 2.7
+                            multiplier = 0.0
                         wheel_multipliers[uid] = multiplier
                         win_amount = int(round(t.entry_amount * multiplier))
                         if win_amount > 0:
