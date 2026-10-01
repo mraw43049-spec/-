@@ -56,7 +56,7 @@ RELATION_COOLDOWN_SECONDS = 7 * 60
 PREGNANCY_RELATION = 30
 BIRTH_RELATION = 50
 POST_ABORT_BIRTH_ACTIONS = 30  # بعد از سقط، با این تعداد حال/بوسه/بغل یک نینی جدید مستقیم ساخته می‌شود
-BABY_HUNGER_SECONDS = 20 * 60
+BABY_HUNGER_SECONDS = 23 * 60
 BABY_PRODUCTION_SECONDS = 1
 BABY_MAX_LEVEL = 10
 BABY_MILK_COOLDOWN_SECONDS = 3 * 60 * 60  # مادر هر ۳ ساعت یک‌بار می‌تواند به نینی شیر بدهد
@@ -5257,36 +5257,76 @@ async def lucky_bag_button(update, context):
         bag_id = int(bag_s)
     except Exception:
         return
-    if action == 'skip':
-        await q.answer("باشه، شاید یکی دیگه بازش کنه 😄")
-        return
-    if action != 'open':
-        return
+
     if not await require_membership(update, context):
         return
+
     session = get_session()
     try:
-        bag = session.query(RubyLuckyBag).filter(RubyLuckyBag.id == bag_id).with_for_update().first()
-        if not bag or bag.status != 'pending':
+        bag = session.query(RubyLuckyBag).filter(
+            RubyLuckyBag.id == bag_id
+        ).with_for_update().first()
+        if not bag:
+            await q.answer("این کیف پیدا نشد.", show_alert=True)
+            return
+
+        user = get_or_create_user(session, q.from_user)
+        raw_skipped = (bag.skipped_user_ids or "").strip()
+        skipped_ids = {x for x in raw_skipped.split(",") if x}
+
+        if action == 'skip':
+            if bag.status != 'pending':
+                await q.answer("این کیف دیگر قابل انتخاب نیست.", show_alert=True)
+                return
+            skipped_ids.add(str(user.telegram_id))
+            bag.skipped_user_ids = ",".join(sorted(skipped_ids))
+            session.commit()
+            await q.answer("🙅 ثبت شد؛ تو دیگر نمی‌تونی این کیف را باز کنی.")
+            return
+
+        if action != 'open':
+            return
+
+        if bag.status != 'pending':
             await q.answer("😅 دیر کردی، یکی دیگه زودتر بازش کرد.", show_alert=True)
             return
-        user = get_or_create_user(session, q.from_user)
+
+        if str(user.telegram_id) in skipped_ids:
+            await q.answer("🙅 تو قبلاً برای این کیف «بازش نمی‌کنم» زدی و دیگه نمی‌تونی بازش کنی.", show_alert=True)
+            return
+
         amount = roll_lucky_bag_amount()
         if amount < 0 and (user.fox_points or 0) < abs(amount):
             amount = -int(user.fox_points or 0)
+
         user.fox_points = (user.fox_points or 0) + amount
-        bag.status = 'opened'; bag.winner_id = user.telegram_id; bag.amount = amount
-        session.commit()
+        bag.status = 'opened'
+        bag.winner_id = user.telegram_id
+        bag.amount = amount
+
+        total_opened = int(session.query(RubyLuckyBag).filter(
+            RubyLuckyBag.winner_id == user.telegram_id,
+            RubyLuckyBag.status == 'opened'
+        ).count()) + 1
+
         display = user_mention(user)
+        session.commit()
     finally:
         session.close()
+
     await q.answer()
     if amount > 0:
-        result_text = f"🎉 {display} کیف رو باز کرد و توش {amount:,} روب‌پوینت بود! 🤑"
+        prize = f"+{amount:,} روب‌پوینت 🪙"
     elif amount < 0:
-        result_text = f"😬 {display} کیف رو باز کرد ولی یکی قبلش خالیش کرده بود... {abs(amount):,} روب‌پوینت هم از خودش کم شد!"
+        prize = f"-{abs(amount):,} روب‌پوینت 🪙"
     else:
-        result_text = f"😐 {display} کیف رو باز کرد ولی خالی بود... دفعه‌ی بعد شانس بیشتری داشته باش."
+        prize = "0 روب‌پوینت 🪙"
+
+    result_text = (
+        f"{display} یک کیف را باز کرد\n"
+        f"جایزه کیف🎁: {prize}\n"
+        f"مجموع کیف های باز کرده💼: {total_opened:,}"
+    )
     try:
         await q.message.edit_text(result_text)
     except Exception:
@@ -5372,7 +5412,44 @@ async def post_injured_fox_job(context):
 # ---------- جغد روبی: هر ۱ ساعت و ۲۰ دقیقه یک جغد مرموز می‌آید؛ اولی که رمز را ریپلای کند می‌بردش ----------
 OWL_INTERVAL_SECONDS = 80 * 60      # ۱ ساعت و ۲۰ دقیقه
 OWL_CATCH_WINDOW_SECONDS = 120
-OWL_CODE_EMOJIS = ["⚡", "🔥", "💎", "🍀", "🌟", "🎯", "🔔", "🍉", "🎈", "🌙", "🍄", "🎲", "🧿", "🪙", "🍋", "🌸"]
+OWL_DAILY_LIMIT = 7
+
+def make_owl_math():
+    # رمز جغد از این به بعد یک جمع ریاضی است؛ جواب در دیتابیس ذخیره می‌شود
+    # و خود عبارت برای کاربر نمایش داده می‌شود.
+    a = random.randint(1000, 9999)
+    b = random.randint(1000, 9999)
+    return f"{a}+{b}=", str(a + b)
+
+def normalize_math_answer(value):
+    if value is None:
+        return ""
+    value = str(value).strip().replace(",", "").replace("٬", "").replace(" ", "")
+    return value.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+
+def owl_daily_caught_count(session, user_id, now=None):
+    now = now or now_utc()
+    # روز بازی بر اساس UTC محاسبه می‌شود تا ری‌استارت/دیپلوی باعث ریست شدن شمارنده نشود.
+    start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    return int(session.query(RubyOwl).filter(
+        RubyOwl.winner_id == int(user_id),
+        RubyOwl.status == "caught",
+        RubyOwl.created_at >= start,
+    ).count())
+
+def owl_next_remaining_seconds(session, chat_id):
+    latest = (session.query(RubyOwl)
+              .filter(RubyOwl.chat_id == chat_id)
+              .order_by(RubyOwl.created_at.desc())
+              .first())
+    if not latest or not latest.created_at:
+        return OWL_INTERVAL_SECONDS
+    remaining = OWL_INTERVAL_SECONDS - int((now_utc() - aware(latest.created_at)).total_seconds())
+    return max(0, remaining)
+
+def format_minutes_seconds(seconds):
+    seconds = max(0, int(seconds))
+    return seconds // 60, seconds % 60
 
 
 def schedule_owl_job(application, chat_id, first_delay=None):
@@ -5407,11 +5484,11 @@ def schedule_all_owl_jobs(application, first_delay=None):
         schedule_owl_job(application, chat_id, first_delay=first_delay)
 
 
-def owl_text(code_emoji):
+def owl_text(equation):
     return (
         "<b>یک جغد مرموز و پیر پیدا شد😳🦉</b>\n\n"
-        f"رمز: <tg-spoiler>{code_emoji}</tg-spoiler>\n\n"
-        "هر کاربری که سریعتر از بقیه رمز رو وارد کنه جغد مال اون میشه🔖🦉\n\n"
+        f"رمز: <tg-spoiler>{equation}</tg-spoiler>\n\n"
+        "جواب جمع را روی همین پیام ریپلای کن تا جغد را به دام بیندازی🔖🦉\n\n"
         "این جغد 120 ثانیه وقت گرفتن دارد وگرنه میپرد..."
     )
 
@@ -5421,10 +5498,10 @@ async def post_owl_job(context):
     if is_feature_disabled(chat_id, 'owl'):
         return
     try:
-        code_emoji = random.choice(OWL_CODE_EMOJIS)
+        equation, answer = make_owl_math()
         session = get_session()
         try:
-            owl = RubyOwl(chat_id=chat_id, code_emoji=code_emoji, status="pending")
+            owl = RubyOwl(chat_id=chat_id, code_emoji=answer, status="pending")
             session.add(owl)
             session.commit()
             owl_id = owl.id
@@ -5434,7 +5511,7 @@ async def post_owl_job(context):
         # رمزش رو ریپلای کنن، خودش به‌عنوان ریپلای روی همون ایموجی ارسال می‌شود.
         emoji_msg = await context.bot.send_message(chat_id=chat_id, text="🦉")
         await asyncio.sleep(3)
-        msg = await emoji_msg.reply_text(owl_text(code_emoji), parse_mode="HTML")
+        msg = await emoji_msg.reply_text(owl_text(equation), parse_mode="HTML")
         session = get_session()
         try:
             owl = session.get(RubyOwl, owl_id)
@@ -5470,16 +5547,17 @@ async def expire_owl_job(context):
 
 
 async def handle_owl_catch_text(update, context):
-    """اگه پیام، ریپلای روی یه پیام «جغد مرموز» در حال انتظار باشه و متنش دقیقاً همون رمز باشه، جغد رو می‌بره.
-    True برمی‌گرداند یعنی پیام مصرف شد و text_router نباید ادامه بده."""
+    """پاسخ ریپلای‌شده به معادلهٔ جغد را بررسی می‌کند و سقف ۷ شکار روزانه را اعمال می‌کند."""
     msg = update.message
     if not msg or not msg.text or not msg.reply_to_message:
         return False
     chat = update.effective_chat
     if not chat:
         return False
+
     reply_id = msg.reply_to_message.message_id
-    code = msg.text.strip()
+    answer = normalize_math_answer(msg.text)
+
     session = get_session()
     try:
         owl = (session.query(RubyOwl)
@@ -5487,21 +5565,48 @@ async def handle_owl_catch_text(update, context):
                .with_for_update().first())
         if not owl:
             return False
-        if code != owl.code_emoji:
+
+        # پاسخ اشتباه مصرف نمی‌شود؛ کاربران دیگر هنوز می‌توانند جواب درست را بدهند.
+        if answer != normalize_math_answer(owl.code_emoji):
             return False
+
+        user = get_or_create_user(session, update.effective_user)
+        # قفل ردیف کاربر برای جلوگیری از دور زدن سقف ۷ جغد در دو پیام هم‌زمان.
+        user = session.query(User).filter(User.telegram_id == update.effective_user.id).with_for_update().first()
+        daily_count = owl_daily_caught_count(session, user.telegram_id)
+        if daily_count >= OWL_DAILY_LIMIT:
+            await msg.reply_text(
+                "⛔ سهمیه شکار جغد امروزت کامل شده است.\n"
+                f"تعداد امروز: {daily_count}/{OWL_DAILY_LIMIT} 🦉\n"
+                "فردا دوباره می‌تونی جغد شکار کنی.",
+                **reply_kwargs(msg)
+            )
+            return True
+
         owl.status = "caught"
         owl.winner_id = update.effective_user.id
-        user = get_or_create_user(session, update.effective_user)
         user.owl_catch_count = (user.owl_catch_count or 0) + 1
+        total_owls = int(user.owl_catch_count or 0)
+        daily_count += 1
+        remaining = owl_next_remaining_seconds(session, chat.id)
+        minutes, seconds = format_minutes_seconds(remaining)
         session.commit()
+
+        actor = user_mention(user)
+        text = (
+            f"{actor} +1جغد را به دام انداخت🕸🦉\n"
+            f"مجموع جغد ها: {total_owls:,}\n"
+            f"تعداد {daily_count}/{OWL_DAILY_LIMIT}\n"
+            f"تا جغد بعدی {minutes} دقیقه و {seconds} ثانیه دیگر..."
+        )
     finally:
         session.close()
+
     try:
-        await msg.reply_text("شما جغد را به دام انداختید🕸", **reply_kwargs(msg))
+        await msg.reply_text(text, **reply_kwargs(msg))
     except Exception:
         pass
     return True
-
 
 def build_owl_leaderboard_text(session, page=1):
     OWL_TITLES = {1: "👑 جغدشاه", 2: "🥈 جغدگیر برتر", 3: "🥉 جغدگیر توانا"}
@@ -5529,9 +5634,19 @@ def owl_leaderboard_keyboard(page, total_pages):
 
 async def owl_command(update, context):
     if not await require_membership(update, context): return
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        caught_today = owl_daily_caught_count(session, user.telegram_id)
+        remaining = owl_next_remaining_seconds(session, update.effective_chat.id) if update.effective_chat and update.effective_chat.type in ("group", "supergroup") else OWL_INTERVAL_SECONDS
+    finally:
+        session.close()
+    minutes, seconds = format_minutes_seconds(remaining)
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏆 لیدر برد جغد روبی", callback_data="owllb:1")]])
     await update.message.reply_text(
-        "🦉 هر ۱ ساعت و ۲۰ دقیقه یک جغد مرموز و پیر تو گپ پیدا می‌شه؛ هر کی سریع‌تر رمزش رو ریپلای کنه، می‌بردش.",
+        "🦉 هر ۱ ساعت و ۲۰ دقیقه یک جغد مرموز و پیر تو گپ پیدا می‌شه؛ هر کی سریع‌تر جواب جمع رو روی همان پیام ریپلای کنه، می‌بردش.\n\n"
+        f"🦉 جغدهای شکارشده توسط تو امروز: {caught_today}/{OWL_DAILY_LIMIT}\n"
+        f"⏳ تا جغد بعدی: {minutes} دقیقه و {seconds} ثانیه",
         reply_markup=kb, **reply_kwargs(update.message)
     )
 

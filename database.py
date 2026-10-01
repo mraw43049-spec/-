@@ -379,6 +379,9 @@ class RubyLuckyBag(Base):
     status = Column(String, nullable=False, default='pending')  # pending | opened | expired
     winner_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=True)
     amount = Column(Integer, nullable=True)
+    # شناسهٔ کاربرانی که برای همین کیف «🙅 بازش نمی‌کنم» زده‌اند؛
+    # این افراد تا پایان عمر همین کیف دیگر اجازهٔ باز کردنش را ندارند.
+    skipped_user_ids = Column(String, nullable=True, default='')
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -555,6 +558,7 @@ def init_db():
     cols = {c['name'] for c in inspector.get_columns('users')}
     injured_cols = {c['name'] for c in inspector.get_columns('injured_foxes')}
     bank_cols = {c['name'] for c in inspector.get_columns('bank_accounts')}
+    lucky_bag_cols = {c['name'] for c in inspector.get_columns('ruby_lucky_bags')} if 'ruby_lucky_bags' in inspector.get_table_names() else set()
     if 'education_progress' in inspector.get_table_names():
         education_cols = {c['name'] for c in inspector.get_columns('education_progress')}
         education_additions = {
@@ -632,6 +636,8 @@ def init_db():
                 added_user_cols.add(name)
         if 'attempt_log' not in injured_cols:
             conn.execute(text("ALTER TABLE injured_foxes ADD COLUMN attempt_log VARCHAR"))
+        if 'skipped_user_ids' not in lucky_bag_cols:
+            conn.execute(text("ALTER TABLE ruby_lucky_bags ADD COLUMN skipped_user_ids VARCHAR"))
         if 'last_card_transfer_at' not in bank_cols:
             conn.execute(text(f'ALTER TABLE bank_accounts ADD COLUMN last_card_transfer_at {DT_SQL_TYPE}'))
         if 'ruby_babies' in inspector.get_table_names():
