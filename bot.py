@@ -5371,7 +5371,7 @@ async def post_injured_fox_job(context):
 
 # ---------- جغد روبی: هر ۱ ساعت و ۲۰ دقیقه یک جغد مرموز می‌آید؛ اولی که رمز را ریپلای کند می‌بردش ----------
 OWL_INTERVAL_SECONDS = 80 * 60      # ۱ ساعت و ۲۰ دقیقه
-OWL_CATCH_WINDOW_SECONDS = 30
+OWL_CATCH_WINDOW_SECONDS = 120
 OWL_CODE_EMOJIS = ["⚡", "🔥", "💎", "🍀", "🌟", "🎯", "🔔", "🍉", "🎈", "🌙", "🍄", "🎲", "🧿", "🪙", "🍋", "🌸"]
 
 
@@ -5412,7 +5412,7 @@ def owl_text(code_emoji):
         "<b>یک جغد مرموز و پیر پیدا شد😳🦉</b>\n\n"
         f"رمز: <tg-spoiler>{code_emoji}</tg-spoiler>\n\n"
         "هر کاربری که سریعتر از بقیه رمز رو وارد کنه جغد مال اون میشه🔖🦉\n\n"
-        "این جغد 30 ثانیه وقت گرفتن دارد وگرنه میپرد..."
+        "این جغد 120 ثانیه وقت گرفتن دارد وگرنه میپرد..."
     )
 
 
@@ -5430,7 +5430,11 @@ async def post_owl_job(context):
             owl_id = owl.id
         finally:
             session.close()
-        msg = await context.bot.send_message(chat_id=chat_id, text=owl_text(code_emoji), parse_mode="HTML")
+        # اول فقط ایموجی جغد می‌آید (مثل شکار)، چند ثانیه بعد همان پیامی که قراره کاربرها
+        # رمزش رو ریپلای کنن، خودش به‌عنوان ریپلای روی همون ایموجی ارسال می‌شود.
+        emoji_msg = await context.bot.send_message(chat_id=chat_id, text="🦉")
+        await asyncio.sleep(3)
+        msg = await emoji_msg.reply_text(owl_text(code_emoji), parse_mode="HTML")
         session = get_session()
         try:
             owl = session.get(RubyOwl, owl_id)
@@ -5550,6 +5554,79 @@ async def owl_leaderboard_button(update, context):
     except Exception as e:
         if 'not modified' not in str(e).lower():
             logger.warning("owl leaderboard edit failed: %s", e)
+
+
+# ---------- انتقال جغد 🦉 ----------
+
+async def owl_transfer_command(update, context):
+    if not await require_membership(update, context):
+        return
+    if not update.message.reply_to_message or not update.message.reply_to_message.from_user:
+        await update.message.reply_text("👥 برای انتقال، روی پیام کاربر موردنظر ریپلای کن و بنویس: انتقال جغد 1", **reply_kwargs(update.message))
+        return
+    raw_amount = context.args[-1] if context.args else context.user_data.pop("owl_transfer_amount", None)
+    if raw_amount is None:
+        await update.message.reply_text("فرمت: انتقال جغد 1", **reply_kwargs(update.message))
+        return
+    try:
+        amount = parse_amount(raw_amount)
+    except ValueError:
+        await update.message.reply_text("❌ مقدار انتقال باید عدد باشد.", **reply_kwargs(update.message))
+        return
+    target = update.message.reply_to_message.from_user
+    if target.id == update.effective_user.id or target.is_bot:
+        await update.message.reply_text("❌ انتقال به خودت یا ربات مجاز نیست.", **reply_kwargs(update.message))
+        return
+    if amount <= 0:
+        await update.message.reply_text("❌ مقدار انتقال باید حداقل ۱ جغد باشد.", **reply_kwargs(update.message))
+        return
+    session = get_session()
+    try:
+        sender = get_or_create_user(session, update.effective_user)
+        receiver = get_or_create_user(session, target)
+        if int(sender.owl_catch_count or 0) < amount:
+            await update.message.reply_text(f"❌ جغد کافی نداری. موجودی: {int(sender.owl_catch_count or 0):,} 🦉", **reply_kwargs(update.message))
+            return
+        session.commit()
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ تایید", callback_data=f"owltransfer:yes:{sender.telegram_id}:{receiver.telegram_id}:{amount}"), InlineKeyboardButton("❌ لغو", callback_data=f"owltransfer:no:{sender.telegram_id}:{receiver.telegram_id}:{amount}")]])
+        await update.message.reply_text(
+            f"🦉 انتقال جغد\n\n🦊 فرستنده: {mention_of(sender.telegram_id, sender.first_name or sender.telegram_id)}\n👤 گیرنده: {mention_of(receiver.telegram_id, receiver.first_name or receiver.telegram_id)}\n🔢 مقدار: {amount:,} 🦉\n\nتایید می‌کنی؟",
+            reply_markup=kb, **reply_kwargs(update.message)
+        )
+    finally:
+        session.close()
+
+
+async def owl_transfer_button(update, context):
+    q = update.callback_query
+    try:
+        _, action, sender_s, receiver_s, amount_s = q.data.split(":")
+        sender_id, receiver_id, amount = int(sender_s), int(receiver_s), int(amount_s)
+    except Exception:
+        return
+    if q.from_user.id != sender_id:
+        await q.answer("⛔ این انتقال برای کاربر دیگری است.", show_alert=True)
+        return
+    session = get_session()
+    try:
+        sender = session.get(User, sender_id)
+        receiver = session.get(User, receiver_id)
+        if not sender or not receiver:
+            await q.answer("کاربر پیدا نشد.", show_alert=True); return
+        if action == "no":
+            await q.answer("انتقال لغو شد.")
+            await q.message.edit_text("❌ انتقال جغد لغو شد.")
+            return
+        if int(sender.owl_catch_count or 0) < amount:
+            await q.answer("جغد کافی نیست.", show_alert=True); return
+        sender.owl_catch_count -= amount
+        receiver.owl_catch_count = (receiver.owl_catch_count or 0) + amount
+        session.commit()
+        await q.answer("✅ انتقال انجام شد!")
+        await q.message.edit_text(f"✅ {amount:,} 🦉 جغد با موفقیت انتقال یافت.\n👤 گیرنده: {user_mention(receiver)}")
+        await notify_user_private(context.bot, receiver.telegram_id, f"🦉 {amount:,} جغد از طرف {user_mention(sender)} برای شما ارسال شد.")
+    finally:
+        session.close()
 
 
 async def injured_fox_button(update, context):
@@ -10296,6 +10373,22 @@ LEADERBOARD_CATEGORIES = [
 ]
 LEADERBOARD_CATEGORY_MAP = dict(LEADERBOARD_CATEGORIES)
 
+# لقب نفرات ۱ تا ۳ هر لیدر برد؛ هر دسته لقب‌های مخصوص به خودش را دارد.
+LEADERBOARD_TITLES = {
+    'referral_count':    {1: '👑 امپراتور رفرال', 2: '🥈 رفرال‌گیر برتر', 3: '🥉 رفرال‌گیر توانا'},
+    'fox_points':        {1: '👑 ثروتمندترین روباه', 2: '🥈 روباه پولدار', 3: '🥉 روباه خوش‌دست'},
+    'fox_rescued_count': {1: '👑 ناجی بزرگ روباه‌ها', 2: '🥈 ناجی برتر', 3: '🥉 ناجی توانا'},
+    'hunt_count':        {1: '👑 شکارچی افسانه‌ای', 2: '🥈 شکارچی برتر', 3: '🥉 شکارچی توانا'},
+    'fox_claim_count':   {1: '👑 روب‌روب‌کار برتر', 2: '🥈 روب‌روب‌کار توانا', 3: '🥉 روب‌روب‌کار فعال'},
+    'edu_correct':       {1: '👑 نابغه‌ی کلاس', 2: '🥈 دانش‌آموز برتر', 3: '🥉 دانش‌آموز توانا'},
+}
+CITY_LEADERBOARD_TITLES = {
+    'city_hunt_total':    {1: '👑 پایتخت شکار', 2: '🥈 شهر شکارچی', 3: '🥉 شهر شکار توانا'},
+    'city_claim_total':   {1: '👑 شهر پرتلاش', 2: '🥈 شهر فعال', 3: '🥉 شهر کوشا'},
+    'city_treasury':      {1: '👑 ثروتمندترین شهر', 2: '🥈 شهر پولدار', 3: '🥉 شهر مرفه'},
+    'city_rescued_total': {1: '👑 پرجمعیت‌ترین شهر', 2: '🥈 شهر پرجمعیت', 3: '🥉 شهر رو به رشد'},
+}
+
 LEADERBOARD_LIMIT = 100      # حداکثر تعداد نفراتی که در رتبه‌بندی در نظر گرفته می‌شوند
 LEADERBOARD_PAGE_SIZE = 10   # تعداد نفرات در هر صفحه
 
@@ -10345,27 +10438,33 @@ def _render_leaderboard_page(title, entries, page):
 
 def build_city_leaderboard_text(session, field, title, page=1):
     rows = session.query(GroupChat).order_by(getattr(GroupChat, field).desc(), GroupChat.chat_id.asc()).limit(LEADERBOARD_LIMIT).all()
-    entries = [f'{i}. {r.title or "گپ"} — {fa_compact_number(getattr(r, field) or 0)}' for i, r in enumerate(rows, 1)]
+    titles = CITY_LEADERBOARD_TITLES.get(field, {})
+    entries = []
+    for i, r in enumerate(rows, 1):
+        prefix = f'{titles[i]} ' if i in titles else ''
+        entries.append(f'{i}. {prefix}{r.title or "گپ"} — {fa_compact_number(getattr(r, field) or 0)}')
     return _render_leaderboard_page(title, entries, page)
 
 
 def build_leaderboard_text(session, field, title, page=1):
+    titles = LEADERBOARD_TITLES.get(field, {})
+    def _pfx(i): return f'{titles[i]} ' if i in titles else ''
     if field == 'referral_count':
         counts = dict(session.query(Referral.referrer_id, __import__('sqlalchemy').func.count(Referral.id)).filter(Referral.status=='approved').group_by(Referral.referrer_id).all())
         users = session.query(User).filter(User.telegram_id.in_(list(counts.keys()) or [0])).all()
         users.sort(key=lambda u:(-counts.get(u.telegram_id,0),u.telegram_id))
         users=users[:LEADERBOARD_LIMIT]
-        entries=[f'{i}. {user_mention(u)} — {counts.get(u.telegram_id,0):,} رفرال' for i,u in enumerate(users,1)]
+        entries=[f'{i}. {_pfx(i)}{user_mention(u)} — {counts.get(u.telegram_id,0):,} رفرال' for i,u in enumerate(users,1)]
     elif field == 'edu_correct':
         rows = (session.query(User, EducationProgress.correct_answers)
                 .join(EducationProgress, EducationProgress.user_id == User.telegram_id)
                 .filter(EducationProgress.correct_answers > 0)
                 .order_by(EducationProgress.correct_answers.desc(), User.telegram_id.asc())
                 .limit(LEADERBOARD_LIMIT).all())
-        entries = [f'{i}. {user_mention(u)} — {int(c or 0):,} پاسخ درست' for i, (u, c) in enumerate(rows, 1)]
+        entries = [f'{i}. {_pfx(i)}{user_mention(u)} — {int(c or 0):,} پاسخ درست' for i, (u, c) in enumerate(rows, 1)]
     else:
         users = session.query(User).order_by(getattr(User, field).desc(), User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
-        entries = [f'{i}. {user_mention(u)} — {int(getattr(u, field) or 0):,}' for i, u in enumerate(users, 1)]
+        entries = [f'{i}. {_pfx(i)}{user_mention(u)} — {int(getattr(u, field) or 0):,}' for i, u in enumerate(users, 1)]
     return _render_leaderboard_page(title, entries, page)
 
 
@@ -12539,6 +12638,11 @@ async def text_router(update, context):
     if m:
         context.user_data["transfer_amount"] = m.group(1)
         await transfer_command(update, context); return
+    # انتقال جغد 1 — فقط با ریپلای به گیرنده
+    m = re.fullmatch(r"انتقال\s+جغد\s+([0-9۰-۹]+)", text, re.I)
+    if m:
+        context.user_data["owl_transfer_amount"] = m.group(1)
+        await owl_transfer_command(update, context); return
     # حمله / اتک — فقط با ریپلای به فرد مورد نظر
     if text.strip().lower() in ATTACK_KEYWORDS:
         await attack_command(update, context); return
@@ -12720,6 +12824,7 @@ def main():
     app.add_handler(CallbackQueryHandler(vip_button,pattern=r"^vip:[a-z]+(?::[a-z]+){0,3}$"))
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(owl_transfer_button,pattern=r"^owltransfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     app.add_handler(CallbackQueryHandler(lucky_bag_button,pattern=r"^luckybag:(?:open|skip):\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|potion|rest):\d+$"))
