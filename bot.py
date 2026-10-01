@@ -22,7 +22,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, RubyOwl, get_session, init_db
 )
 import ai_service as ai
 import fox_brain as brain
@@ -5126,6 +5126,7 @@ async def bot_joined_group(update, context):
     finally:
         session.close()
     schedule_injured_fox_job(context.application, cm.chat.id, 1)
+    schedule_owl_job(context.application, cm.chat.id, first_delay=5)
     try:
         await context.bot.send_message(chat_id=cm.chat.id, text="یه روباه مکار و باهوش اینجاست 🦊 نمی‌خوای روب روب کنی براش💲🎃")
     except Exception:
@@ -5158,6 +5159,7 @@ async def register_group_chat(update, context):
         session.commit()
         if is_new:
             schedule_injured_fox_job(context.application, chat.id, row.city_level or 1)
+            schedule_owl_job(context.application, chat.id, first_delay=5)
             try:
                 await context.bot.send_message(chat_id=chat.id, text="یه روباه مکار و باهوش اینجاست 🦊 نمی‌خوای روب روب کنی براش💲🎃")
             except Exception:
@@ -5365,6 +5367,189 @@ async def post_injured_fox_job(context):
             session.close()
     except Exception as e:
         logger.warning("post injured fox failed in %s: %s", chat_id, e)
+
+
+# ---------- جغد روبی: هر ۱ ساعت و ۲۰ دقیقه یک جغد مرموز می‌آید؛ اولی که رمز را ریپلای کند می‌بردش ----------
+OWL_INTERVAL_SECONDS = 80 * 60      # ۱ ساعت و ۲۰ دقیقه
+OWL_CATCH_WINDOW_SECONDS = 30
+OWL_CODE_EMOJIS = ["⚡", "🔥", "💎", "🍀", "🌟", "🎯", "🔔", "🍉", "🎈", "🌙", "🍄", "🎲", "🧿", "🪙", "🍋", "🌸"]
+
+
+def schedule_owl_job(application, chat_id, first_delay=None):
+    """جاب جغد مخصوص یک گپ را (دوباره) زمان‌بندی می‌کند؛ نسخهٔ قبلی همان گپ حذف می‌شود."""
+    job_queue = application.job_queue if application else None
+    if job_queue is None:
+        return
+    job_name = f"owl-{chat_id}"
+    for job in job_queue.get_jobs_by_name(job_name):
+        job.schedule_removal()
+    if first_delay is None:
+        first_delay = random.randint(5, min(OWL_INTERVAL_SECONDS, 120))
+    job_queue.run_repeating(
+        post_owl_job,
+        interval=OWL_INTERVAL_SECONDS,
+        first=first_delay,
+        name=job_name,
+        chat_id=chat_id,
+        data={"chat_id": chat_id},
+    )
+
+
+def schedule_all_owl_jobs(application, first_delay=None):
+    """موقع استارت ربات، برای همهٔ گپ‌های فعال، جاب جغد می‌سازد.
+    first_delay=5 یعنی همون لحظه‌ی دیپلوی، اولین جغد تقریباً فوری میاد (برای فعال‌سازی این آپدیت)."""
+    session = get_session()
+    try:
+        chat_ids = [c.chat_id for c in session.query(GroupChat).filter(GroupChat.active == 1).all()]
+    finally:
+        session.close()
+    for chat_id in chat_ids:
+        schedule_owl_job(application, chat_id, first_delay=first_delay)
+
+
+def owl_text(code_emoji):
+    return (
+        "<b>یک جغد مرموز و پیر پیدا شد😳🦉</b>\n\n"
+        f"رمز: <tg-spoiler>{code_emoji}</tg-spoiler>\n\n"
+        "هر کاربری که سریعتر از بقیه رمز رو وارد کنه جغد مال اون میشه🔖🦉\n\n"
+        "این جغد 30 ثانیه وقت گرفتن دارد وگرنه میپرد..."
+    )
+
+
+async def post_owl_job(context):
+    chat_id = context.job.chat_id
+    if is_feature_disabled(chat_id, 'owl'):
+        return
+    try:
+        code_emoji = random.choice(OWL_CODE_EMOJIS)
+        session = get_session()
+        try:
+            owl = RubyOwl(chat_id=chat_id, code_emoji=code_emoji, status="pending")
+            session.add(owl)
+            session.commit()
+            owl_id = owl.id
+        finally:
+            session.close()
+        msg = await context.bot.send_message(chat_id=chat_id, text=owl_text(code_emoji), parse_mode="HTML")
+        session = get_session()
+        try:
+            owl = session.get(RubyOwl, owl_id)
+            if owl:
+                owl.message_id = msg.message_id
+                session.commit()
+        finally:
+            session.close()
+        if context.application and context.application.job_queue:
+            context.application.job_queue.run_once(
+                expire_owl_job, OWL_CATCH_WINDOW_SECONDS, data={"owl_id": owl_id}
+            )
+    except Exception as e:
+        logger.warning("post owl failed in %s: %s", chat_id, e)
+
+
+async def expire_owl_job(context):
+    data = context.job.data
+    session = get_session()
+    try:
+        owl = session.get(RubyOwl, data["owl_id"])
+        if not owl or owl.status != "pending":
+            return
+        owl.status = "expired"
+        session.commit()
+        chat_id, message_id = owl.chat_id, owl.message_id
+    finally:
+        session.close()
+    try:
+        await context.bot.send_message(chat_id=chat_id, text="🦉 جغد پرید...", reply_to_message_id=message_id)
+    except Exception:
+        pass
+
+
+async def handle_owl_catch_text(update, context):
+    """اگه پیام، ریپلای روی یه پیام «جغد مرموز» در حال انتظار باشه و متنش دقیقاً همون رمز باشه، جغد رو می‌بره.
+    True برمی‌گرداند یعنی پیام مصرف شد و text_router نباید ادامه بده."""
+    msg = update.message
+    if not msg or not msg.text or not msg.reply_to_message:
+        return False
+    chat = update.effective_chat
+    if not chat:
+        return False
+    reply_id = msg.reply_to_message.message_id
+    code = msg.text.strip()
+    session = get_session()
+    try:
+        owl = (session.query(RubyOwl)
+               .filter(RubyOwl.chat_id == chat.id, RubyOwl.message_id == reply_id, RubyOwl.status == "pending")
+               .with_for_update().first())
+        if not owl:
+            return False
+        if code != owl.code_emoji:
+            return False
+        owl.status = "caught"
+        owl.winner_id = update.effective_user.id
+        user = get_or_create_user(session, update.effective_user)
+        user.owl_catch_count = (user.owl_catch_count or 0) + 1
+        session.commit()
+    finally:
+        session.close()
+    try:
+        await msg.reply_text("شما جغد را به دام انداختید🕸", **reply_kwargs(msg))
+    except Exception:
+        pass
+    return True
+
+
+def build_owl_leaderboard_text(session, page=1):
+    OWL_TITLES = {1: "👑 جغدشاه", 2: "🥈 جغدگیر برتر", 3: "🥉 جغدگیر توانا"}
+    users = (session.query(User)
+             .filter(User.owl_catch_count > 0)
+             .order_by(User.owl_catch_count.desc(), User.telegram_id.asc())
+             .limit(LEADERBOARD_LIMIT).all())
+    entries = []
+    for i, u in enumerate(users, 1):
+        title = OWL_TITLES.get(i)
+        prefix = f"{title} " if title else ""
+        entries.append(f"{i}. {prefix}{user_mention(u)} — {int(u.owl_catch_count or 0):,} جغد🦉")
+    return _render_leaderboard_page("🦉 لیدر برد جغد روبی", entries, page)
+
+
+def owl_leaderboard_keyboard(page, total_pages):
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"owllb:{page-1}"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("بعدی ➡️", callback_data=f"owllb:{page+1}"))
+    rows = [nav] if nav else []
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+async def owl_command(update, context):
+    if not await require_membership(update, context): return
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏆 لیدر برد جغد روبی", callback_data="owllb:1")]])
+    await update.message.reply_text(
+        "🦉 هر ۱ ساعت و ۲۰ دقیقه یک جغد مرموز و پیر تو گپ پیدا می‌شه؛ هر کی سریع‌تر رمزش رو ریپلای کنه، می‌بردش.",
+        reply_markup=kb, **reply_kwargs(update.message)
+    )
+
+
+async def owl_leaderboard_button(update, context):
+    q = update.callback_query
+    try:
+        page = int(q.data.split(":")[1])
+    except Exception:
+        page = 1
+    session = get_session()
+    try:
+        text, page, total_pages = build_owl_leaderboard_text(session, page)
+    finally:
+        session.close()
+    kb = owl_leaderboard_keyboard(page, total_pages)
+    await q.answer()
+    try:
+        await q.message.edit_text(text, reply_markup=kb)
+    except Exception as e:
+        if 'not modified' not in str(e).lower():
+            logger.warning("owl leaderboard edit failed: %s", e)
 
 
 async def injured_fox_button(update, context):
@@ -8952,7 +9137,7 @@ async def roobam_command(update,context):
     try:
         user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0);ref_count=session.query(Referral).filter(Referral.referrer_id==user.telegram_id,Referral.status=='approved').count();ref_rank=session.query(Referral.referrer_id).filter(Referral.status=='approved').group_by(Referral.referrer_id).having(__import__('sqlalchemy').func.count(Referral.id)>ref_count).count()+1
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
-        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 🦊 روباه : {user.fox_name or 'مکار'}\n┘─ ⚧ جنسیت روباه : {fox_gender_label(user.fox_gender)}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points or 0):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╰─ 💍 وضعیت ازدواج : {('متاهل'+active_marriage(session,user.telegram_id).gift_emoji) if active_marriage(session,user.telegram_id) else 'مجرد'}\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
+        text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 🦊 روباه : {user.fox_name or 'مکار'}\n┘─ ⚧ جنسیت روباه : {fox_gender_label(user.fox_gender)}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points or 0):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 🦉 جغدهای شکارشده : {int(user.owl_catch_count or 0):,}\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╰─ 💍 وضعیت ازدواج : {('متاهل'+active_marriage(session,user.telegram_id).gift_emoji) if active_marriage(session,user.telegram_id) else 'مجرد'}\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
         label=user_display_name(user)
         _act=vip_active_skins(user);_sk=_act[-1] if _act else ''
         skin_path=vip_image_path(_sk,user.fox_gender) if _sk and (user.fox_gender or '') in ('male','female') else None
@@ -12089,7 +12274,7 @@ FEATURE_DISPLAY_NAMES = {
     'football': 'پیش بینی فوتبال', 'fridge': 'یخچال روبی', 'factory': 'کارخونه روبی',
     'mood': 'روباهیو حال', 'flag': 'پرچم', 'fox_panel': 'روباه', 'claim': 'روب روب',
     'city_news': 'اخبار شهر', 'city_mayor': 'شهردار روبی', 'emoji': 'ایموجی روبی',
-    'lucky_bag': 'کیف روب پوینت',
+    'lucky_bag': 'کیف روب پوینت', 'owl': 'جغد روبی',
 }
 
 # اسم‌های جایگزین که پشتیبانی ممکنه به‌جای اسم اصلی بنویسه (برای تشخیص دستور غیرفعال/فعال)
@@ -12123,6 +12308,7 @@ FEATURE_NAME_ALIASES = {
     'city_mayor': ['شهردار روبی', 'شهردار'],
     'lucky_bag': ['کیف روب پوینت', 'کیف پول روبی', 'کیف پول'],
     'emoji': ['ایموجی روبی', 'شکلک روبی'],
+    'owl': ['جغد روبی', 'جغد'],
 }
 
 # متن‌های دقیقی که در پایین همین فایل برای رسیدن به هر بخش چک می‌شوند؛ اگر بخشی
@@ -12156,6 +12342,7 @@ FEATURE_TRIGGER_TEXTS = {
     'football': {"پیش بینی", "پیش بینی فوتبال", "⚽ پیش بینی", "پیشبینی"},
     'city_news': {"اخبار شهر", "اخبار شهر روبی", "خبر شهر", "📰 اخبار شهر"},
     'emoji': {"ایموجی روبی", "شکلک روبی"},
+    'owl': {"جغد روبی", "جغد"},
 }
 
 
@@ -12268,6 +12455,7 @@ async def text_router(update, context):
     if await support_text(update, context): return
     if await emoji_transfer_text(update, context): return
     if not update.message or not update.message.text: return
+    if await handle_owl_catch_text(update, context): return
     if await feature_toggle_command(update, context): return
     if await handle_jail_memory_text(update, context): return
     if await handle_friend_text(update, context): return
@@ -12312,6 +12500,7 @@ async def text_router(update, context):
     if text in {"دوست روبی","فرند روب","دوست روباهیو","فرند روبی","friends"}: await friends_command(update,context); return
     if text in {"کد هدیه","کد جایزه","gift code","giftcode"}: await gift_code_command(update,context); return
     if text in {"لیدر برد","لیدربرد","leaderboard","Leaderboard"}: await leaderboard_command(update,context); return
+    if text in {"جغد روبی","جغد"}: await owl_command(update,context); return
     if text in {"شهر روبی","شهر روباهیو","شهر روباه","🦊 شهر روبی"}: await city_command(update,context); return
     if text in {"مارکت روبی","مارکت","🛍 مارکت روبی"}: await city_market_command(update,context); return
     if text in {"شهردار روبی","شهردار","🦁 شهردار روبی"}: await city_mayor_command(update,context); return
@@ -12492,6 +12681,7 @@ def main():
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|renamemenu|renameyes|renameno|gendermenu|genderpick_male|genderpick_female|genderyes_male|genderyes_female|genderno_male|genderno_female|resetask|resetyes|resetno):\d+$"))
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge|baby):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ratkiller_use_button,pattern=r"^ratkiller:use:\d+$"))
+    app.add_handler(CallbackQueryHandler(owl_leaderboard_button,pattern=r"^owllb:\d+$"))
     app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|feed|upgrade):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
     app.add_handler(CallbackQueryHandler(referral_admin_button,pattern=r"^ref:(approve|reject):\d+$"))
@@ -12570,6 +12760,7 @@ def main():
     if app.job_queue:
         app.job_queue.run_repeating(settle_all_smuggling, interval=30, first=10, name="ruby-smuggling-settler")
         schedule_all_injured_fox_jobs(app)  # هر گپ جاب روباه زخمی مخصوص خودش را با فاصلهٔ متناسب با سطح شهرش می‌گیرد
+        schedule_all_owl_jobs(app, first_delay=5)  # همین که این آپدیت بالا میاد، اولین جغد تقریباً فوری توی هر گپ میاد
         app.job_queue.run_repeating(update_market_prices_job, interval=FACTORY_MARKET_UPDATE_SECONDS, first=15, name="factory-market")
         app.job_queue.run_repeating(marriage_expire_job, interval=60, first=20, name="marriage-expire")
         if ADMIN_IDS:

@@ -67,6 +67,7 @@ class User(Base):
     marriage_lock_until = Column(DateTime(timezone=True), nullable=True)
     potion_count = Column(Integer, nullable=False, default=0)
     ratkiller_count = Column(Integer, nullable=False, default=0)  # تعداد مرگ‌موش خریداری‌شده از مارکت روبی
+    owl_catch_count = Column(Integer, nullable=False, default=0)  # تعداد جغدهایی که گرفته
     fox_level = Column(Integer, nullable=False, default=1)
     fox_belly = Column(Integer, nullable=False, default=3)
     fox_belly_capacity = Column(Integer, nullable=False, default=3)
@@ -381,6 +382,17 @@ class RubyLuckyBag(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class RubyOwl(Base):
+    __tablename__ = 'ruby_owls'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False)
+    message_id = Column(BigInteger, nullable=True)
+    code_emoji = Column(String, nullable=False)
+    status = Column(String, nullable=False, default='pending')  # pending | caught | expired
+    winner_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class InjuredFox(Base):
     __tablename__ = 'injured_foxes'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -610,6 +622,7 @@ def init_db():
         'marriage_lock_until': DT_SQL_TYPE,
         'potion_count': 'INTEGER NOT NULL DEFAULT 0',
         'ratkiller_count': 'INTEGER NOT NULL DEFAULT 0',
+        'owl_catch_count': 'INTEGER NOT NULL DEFAULT 0',
     }
     with engine.begin() as conn:
         added_user_cols = set()
@@ -702,6 +715,7 @@ def init_db():
         conn.execute(text("UPDATE users SET spam_count = 0 WHERE spam_count IS NULL OR spam_count < 0"))
         conn.execute(text("UPDATE users SET potion_count = 0 WHERE potion_count IS NULL OR potion_count < 0"))
         conn.execute(text("UPDATE users SET ratkiller_count = 0 WHERE ratkiller_count IS NULL OR ratkiller_count < 0"))
+        conn.execute(text("UPDATE users SET owl_catch_count = 0 WHERE owl_catch_count IS NULL OR owl_catch_count < 0"))
         if 'total_earned' not in cols:
             conn.execute(text('UPDATE users SET total_earned = points WHERE total_earned = 0'))
         if 'group_chats' in inspector.get_table_names():
