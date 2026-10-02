@@ -7,65 +7,90 @@
 <title>روبی 🦊</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#120f0d;color:#f7eee7;font-family:Tahoma,Vazirmatn,system-ui,sans-serif;min-height:100vh;padding:14px 12px 86px}
-header{text-align:center;padding:8px 0 14px}h1{font-size:23px;margin:0;color:#ff9b3d}header p{color:#bba99a;font-size:12px;margin:6px 0 0}
-.view{display:none}.view.active{display:block}.card{background:#211a16;border:1px solid #352a23;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 8px 24px #0003}
-.fox{display:flex;gap:14px;align-items:center}.fox-img{width:92px;height:92px;border-radius:20px;background:#2d211a;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:52px;flex:none}.fox-img img{width:100%;height:100%;object-fit:cover}.fox-main{min-width:0;flex:1}.fox-name{font-size:21px;font-weight:800}.muted{color:#bba99a;font-size:12px}.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}.chip{background:#2c231d;border:1px solid #43342a;border-radius:999px;padding:6px 9px;font-size:11px}
-.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}.stat{background:#1b1512;border-radius:14px;padding:12px}.stat b{display:block;font-size:16px;color:#ffb347;margin-top:4px}
-.section-title{font-weight:800;margin:4px 0 10px;font-size:15px}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:9px}.action{border:0;border-radius:14px;padding:13px 8px;font-weight:800;font-size:13px;background:#ff9a3c;color:#1b120c;cursor:pointer}.action.secondary{background:#30251f;color:#f8eee6;border:1px solid #49372b}.action:active{transform:scale(.98)}
-.tabs{position:fixed;bottom:0;left:0;right:0;padding:9px 10px calc(9px + env(safe-area-inset-bottom));background:#181310ee;backdrop-filter:blur(10px);display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid #342921}.tab{border:1px solid #3d2f27;background:#241b17;color:#e9ddd4;border-radius:14px;padding:11px;font-weight:800}.tab.active{background:#ff9a3c;color:#1b120c}
-ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}li{display:flex;align-items:center;gap:10px;background:#211a16;border:1px solid #352a23;border-radius:14px;padding:12px}.rank{width:32px;text-align:center;font-weight:900}.name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.value{font-weight:900;color:#ffb347}
-.filters{display:flex;gap:7px;overflow:auto;padding-bottom:7px}.filter{white-space:nowrap;border:1px solid #49372b;background:#241b17;color:#eee1d8;border-radius:999px;padding:8px 10px}.filter.active{background:#ff9a3c;color:#1b120c}
-#msg{text-align:center;color:#c2b1a4;padding:25px 10px;line-height:2}
-.skin-empty{color:#bba99a;text-align:center;padding:10px}.skin-name{font-weight:900;color:#ffb347}
+*{box-sizing:border-box}
+body{margin:0;background:#120f0d;color:#f7eee7;font-family:Tahoma,Vazirmatn,system-ui,sans-serif;min-height:100vh;padding:14px 12px 86px}
+header{text-align:center;padding:6px 0 12px}h1{font-size:22px;margin:0;color:#ff9b3d}
+.view{display:none}.view.active{display:block}
+.card{background:#211a16;border:1px solid #352a23;border-radius:20px;padding:16px;margin-bottom:12px}
+.hero{text-align:center}
+.fox-img{width:200px;height:200px;max-width:70vw;max-height:70vw;margin:0 auto 12px;border-radius:24px;background:#2d211a;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:96px}
+.fox-img img{width:100%;height:100%;object-fit:cover}
+.fox-name{font-size:22px;font-weight:800}
+.muted{color:#bba99a;font-size:12px;margin-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin-top:10px}
+.chip{background:#2c231d;border:1px solid #43342a;border-radius:999px;padding:6px 10px;font-size:12px}
+.chip.skin{border-color:#ff9a3c;color:#ffb347}
+.section-title{font-weight:800;margin:2px 0 10px;font-size:15px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat{background:#1b1512;border-radius:14px;padding:11px;font-size:12px;color:#c9b8aa}
+.stat b{display:block;font-size:16px;color:#ffb347;margin-top:4px}
+.bar{height:8px;background:#1b1512;border-radius:99px;overflow:hidden;margin-top:6px}
+.bar>i{display:block;height:100%;background:#ff9a3c;width:0}
+.buttons{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.action{border:0;border-radius:14px;padding:14px 8px;font-weight:800;font-size:14px;background:#ff9a3c;color:#1b120c;font-family:inherit}
+.action.secondary{background:#30251f;color:#f8eee6;border:1px solid #49372b}
+.action.wide{grid-column:1/-1}
+.action:active{transform:scale(.98)}.action:disabled{opacity:.5}
+.banner{border-radius:14px;padding:12px;margin-bottom:12px;font-size:13px;line-height:1.9;text-align:center;display:none}
+.banner.err{display:block;background:#3a1b1b;border:1px solid #7a3030}
+.banner.ok{display:block;background:#1d3322;border:1px solid #3c7a4a}
+.tabs{position:fixed;bottom:0;left:0;right:0;padding:9px 10px calc(9px + env(safe-area-inset-bottom));background:#181310ee;display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid #342921}
+.tab{border:1px solid #3d2f27;background:#241b17;color:#e9ddd4;border-radius:14px;padding:11px;font-weight:800;font-family:inherit;font-size:14px}
+.tab.active{background:#ff9a3c;color:#1b120c}
+ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+li{display:flex;align-items:center;gap:10px;background:#1b1512;border:1px solid #352a23;border-radius:14px;padding:11px}
+li.me{border-color:#ff9a3c;background:#2b1e12}
+.rank{width:32px;text-align:center;font-weight:900}.name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.value{font-weight:900;color:#ffb347}
+.filters{display:flex;gap:7px;overflow:auto;padding-bottom:4px}
+.filter{white-space:nowrap;border:1px solid #49372b;background:#241b17;color:#eee1d8;border-radius:999px;padding:8px 12px;font-family:inherit;font-size:13px}
+.filter.active{background:#ff9a3c;color:#1b120c}
+#msg{text-align:center;color:#c2b1a4;padding:22px 10px;line-height:2}
+.modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;padding:20px;z-index:10}
+.modal.open{display:flex}
+.sheet{background:#211a16;border:1px solid #43342a;border-radius:20px;padding:18px;width:100%;max-width:360px}
+.sheet h3{margin:0 0 12px;font-size:16px}
+.sheet input{width:100%;padding:12px;border-radius:12px;border:1px solid #49372b;background:#15100d;color:#fff;font-size:15px;font-family:inherit}
+.sheet .row{display:flex;gap:8px;margin-top:12px}.sheet .row .action{flex:1}
 </style>
 </head>
 <body>
-<header><h1>🦊 روبی</h1><p>پروفایل روباه، اسکین فعال و لیدربرد</p></header>
+<header><h1>🦊 روبی</h1></header>
 
 <section id="foxView" class="view active">
-  <div class="card">
-    <div class="fox">
-      <div id="foxImg" class="fox-img">🦊</div>
-      <div class="fox-main">
-        <div id="foxName" class="fox-name">در حال بارگذاری...</div>
-        <div id="userName" class="muted"></div>
-        <div class="chips">
-          <span id="levelChip" class="chip">سطح —</span>
-          <span id="genderChip" class="chip">جنسیت —</span>
-          <span id="skinChip" class="chip">اسکین —</span>
-        </div>
-      </div>
-    </div>
-  </div>
+  <div id="banner" class="banner"></div>
 
-  <div class="card">
-    <div class="section-title">📊 وضعیت روباه</div>
-    <div class="stats">
-      <div class="stat">💰 روب‌پوینت<b id="points">—</b></div>
-      <div class="stat">🏆 رتبه<b id="rank">—</b></div>
-      <div class="stat">🍖 شکم<b id="belly">—</b></div>
-      <div class="stat">⚔️ شکار<b id="hunt">—</b></div>
+  <div class="card hero">
+    <div id="foxImg" class="fox-img">🦊</div>
+    <div id="foxName" class="fox-name">در حال بارگذاری...</div>
+    <div id="userName" class="muted"></div>
+    <div class="chips">
+      <span id="levelChip" class="chip">سطح —</span>
+      <span id="rankChip" class="chip">مقام —</span>
+      <span id="genderChip" class="chip">جنسیت —</span>
+      <span id="skinChip" class="chip skin" style="display:none"></span>
     </div>
   </div>
 
   <div class="card">
     <div class="section-title">🦊 دکمه‌های روباه</div>
     <div class="buttons">
-      <button class="action" data-action="fox">🦊 روباه</button>
-      <button class="action" data-action="rubrub">🫰 روب روب</button>
-      <button class="action" data-action="hunt">⚔️ شکار</button>
-      <button class="action" data-action="game">🎮 بازی روبی</button>
-      <button class="action secondary" data-action="shop">🛍️ فروشگاه روبی</button>
-      <button class="action secondary" data-action="marriage">💕 ازدواج روبی</button>
-      <button class="action secondary" data-action="lesson">📚 روباهیو درس</button>
-      <button class="action secondary" data-action="support">🆘 پشتیبانی</button>
+      <button id="btnCollect" class="action wide">🧲 برداشت روب پوینت ها</button>
+      <button id="btnUpgrade" class="action wide">⭐ ارتقای سطح روباه</button>
+      <button id="btnRename" class="action secondary">✏️ تغییر نام</button>
+      <button id="btnGender" class="action secondary">⚧ تغییر جنسیت</button>
     </div>
   </div>
 
   <div class="card">
-    <div class="section-title">✨ اسکین فعال</div>
-    <div id="skinBox" class="skin-empty">در حال بارگذاری...</div>
+    <div class="section-title">📊 وضعیت روباه</div>
+    <div class="stats">
+      <div class="stat">💰 موجودی<b id="points">—</b></div>
+      <div class="stat">🏆 رتبه<b id="rank">—</b></div>
+      <div class="stat">💫 تولید در ثانیه<b id="rate">—</b></div>
+      <div class="stat">🍖 شکم<b id="belly">—</b></div>
+    </div>
+    <div class="stat" style="margin-top:8px">📦 انبار روباه<b id="storage">—</b><div class="bar"><i id="storageBar"></i></div></div>
+    <div id="upgradeInfo" class="muted" style="text-align:center;margin-top:10px"></div>
   </div>
 </section>
 
@@ -88,95 +113,163 @@ ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px
   <button id="leaderTab" class="tab">🏆 لیدربرد</button>
 </nav>
 
+<div id="renameModal" class="modal"><div class="sheet">
+  <h3>✏️ اسم جدید روباه (حداکثر ۱۶ کاراکتر)</h3>
+  <input id="renameInput" maxlength="16" placeholder="مثلاً مکار">
+  <div class="row"><button id="renameOk" class="action">✅ ذخیره</button><button id="renameNo" class="action secondary">لغو</button></div>
+</div></div>
+
+<div id="genderModal" class="modal"><div class="sheet">
+  <h3>⚧ جنسیت روباه رو انتخاب کن</h3>
+  <div class="row"><button class="action" data-g="female">♀️ زن</button><button class="action" data-g="male">♂️ مرد</button></div>
+  <div class="row"><button id="genderNo" class="action secondary">لغو</button></div>
+</div></div>
+
 <script>
 (function(){
-  const tg=window.Telegram&&window.Telegram.WebApp;
-  if(tg){try{tg.ready();tg.expand();tg.enableClosingConfirmation&&tg.enableClosingConfirmation()}catch(e){}}
-  const initData=tg?tg.initData:"";
-  const $=id=>document.getElementById(id);
-  const fa=n=>Number(n||0).toLocaleString("fa-IR");
+  var tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) { try { tg.ready(); tg.expand(); } catch(e){} }
+  var initData = tg ? tg.initData : "";
+  function $(id){ return document.getElementById(id); }
+  function fa(n){ return Number(n||0).toLocaleString("fa-IR"); }
+  var busy = false, current = null;
 
-  function api(path){
-    if(!initData) return Promise.reject(new Error("این صفحه باید داخل تلگرام باز شود."));
-    return fetch(path,{headers:{"X-Init-Data":initData}})
-      .then(async r=>{let b={};try{b=await r.json()}catch(e){};if(!r.ok)throw new Error(b.detail||"خطا");return b});
+  function banner(text, ok){
+    var b = $("banner");
+    b.className = "banner " + (ok ? "ok" : "err");
+    b.textContent = text;
+    if (ok) setTimeout(function(){ if (b.textContent === text) b.className = "banner"; }, 4000);
   }
-  function toast(text){
-    if(tg&&tg.showPopup) tg.showPopup({title:"روبی 🦊",message:text,buttons:[{type:"ok"}]});
-    else alert(text);
-  }
-  function haptic(){try{tg&&tg.HapticFeedback&&tg.HapticFeedback.impactOccurred("light")}catch(e){}}
 
-  function renderProfile(d){
-    const f=d.fox||d;
-    $("foxName").textContent=f.name||"مکار";
-    $("userName").textContent=d.display_name?"@"+d.display_name.replace(/^@/,""):"";
-    $("levelChip").textContent="سطح "+fa(f.level);
-    $("genderChip").textContent="جنسیت "+(f.gender||"ثبت نشده");
-    $("skinChip").textContent="اسکین "+((f.active_skin&&f.active_skin.name)||"پیش‌فرض");
-    $("points").textContent=fa(f.points);
-    $("rank").textContent=fa(d.points_rank);
-    $("belly").textContent=fa(f.belly)+" / "+fa(f.belly_capacity);
-    $("hunt").textContent=fa(d.hunt_count);
-
-    const img=f.active_skin_image||(f.active_skin&&f.active_skin.image);
-    $("foxImg").innerHTML="";
-    if(img){const im=new Image();im.alt="اسکین فعال روباه";im.src=img;im.onerror=()=>{$("foxImg").textContent="🦊"};$("foxImg").appendChild(im)}
-    else $("foxImg").textContent="🦊";
-
-    const skin=f.active_skin;
-    $("skinBox").innerHTML=skin
-      ? '<span class="skin-name">✨ '+escapeHtml(skin.name)+'</span>'+(skin.gender?' · '+escapeHtml(String(skin.gender)):'')
-      : "اسکین فعالی برای این کاربر ثبت نشده است.";
-  }
-  function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
-
-  function loadProfile(){return api("/api/profile").then(renderProfile).catch(e=>toast(e.message))}
-  function loadLeader(cat="points"){
-    $("msg").textContent="🦊 در حال بارگذاری...";
-    $("list").innerHTML="";
-    return api("/api/leaderboard?category="+encodeURIComponent(cat)).then(data=>{
-      if(!data.entries||!data.entries.length){$("msg").textContent="هنوز کسی توی لیدربرد نیست.";return}
-      $("msg").style.display="none";
-      data.entries.forEach(e=>{
-        const li=document.createElement("li");
-        const r=document.createElement("span");r.className="rank";r.textContent=e.rank===1?"🥇":e.rank===2?"🥈":e.rank===3?"🥉":fa(e.rank);
-        const n=document.createElement("span");n.className="name";n.textContent=e.name;
-        const v=document.createElement("span");v.className="value";v.textContent=fa(e.value)+" "+data.emoji;
-        li.append(r,n,v);$("list").appendChild(li);
+  function api(path, method, body){
+    if (!initData) return Promise.reject(new Error("این صفحه باید از داخل تلگرام (دکمه‌ی منوی بات) باز بشه."));
+    var opts = { method: method || "GET", headers: { "X-Init-Data": initData } };
+    if (body) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+    return fetch(path, opts).then(function(r){
+      return r.json().catch(function(){ return {}; }).then(function(b){
+        if (!r.ok) {
+          var d = b.detail;
+          if (Array.isArray(d)) d = "ورودی نامعتبره.";
+          throw new Error((d || "خطای سرور") + " (کد " + r.status + ")");
+        }
+        return b;
       });
-    }).catch(e=>{$("msg").textContent="خطا: "+e.message});
+    });
   }
 
-  // If the Mini App was opened from a KeyboardButton, sendData can reach
-  // the bot. When opened from the BotFather Menu Button, Telegram does not
-  // guarantee sendData delivery; we therefore show a precise fallback.
-  function runAction(action){
-    haptic();
-    const labels={fox:"روباه",rubrub:"روب روب",hunt:"شکار",game:"بازی روبی",shop:"فروشگاه روبی",marriage:"ازدواج روبی",lesson:"روباهیو درس",support:"پشتیبانی"};
-    const label=labels[action]||action;
-    try{
-      if(tg&&typeof tg.sendData==="function"&&tg.initDataUnsafe){
-        tg.sendData(JSON.stringify({type:"ruby_fox_action",action}));
-        return;
-      }
-    }catch(e){}
-    toast("دکمه «"+label+"» در مینی‌اپ ثبت شد، اما اجرای واقعی آن باید توسط هندلر بات انجام شود. این نسخه هیچ روب‌پوینت یا داده‌ای را مستقیم تغییر نمی‌دهد.");
+  function genderLabel(g){ return g === "male" ? "مرد 👦" : g === "female" ? "زن 👧" : "نامشخص"; }
+
+  function render(d){
+    current = d;
+    $("foxName").textContent = "🦊 " + (d.fox_name || "مکار");
+    $("userName").textContent = d.display_name ? "@" + String(d.display_name).replace(/^@/, "") : "";
+    $("levelChip").textContent = "سطح " + fa(d.fox_level) + " / " + fa(d.max_level);
+    $("rankChip").textContent = "🌟 " + (d.fox_rank || "—");
+    $("genderChip").textContent = "⚧ " + genderLabel(d.fox_gender);
+    var sc = $("skinChip");
+    if (d.skin_title) { sc.style.display = ""; sc.textContent = "✨ اسکین " + d.skin_title; } else { sc.style.display = "none"; }
+
+    var box = $("foxImg"); box.innerHTML = "";
+    if (d.skin_image) {
+      var im = new Image(); im.alt = "روباه";
+      im.onerror = function(){ box.textContent = "🦊"; };
+      im.src = d.skin_image;
+      box.appendChild(im);
+    } else { box.textContent = "🦊"; }
+
+    $("points").textContent = fa(d.fox_points);
+    $("rank").textContent = fa(d.points_rank);
+    $("rate").textContent = d.rate != null ? fa(d.rate) : "—";
+    $("belly").textContent = fa(d.fox_belly) + " / " + fa(d.fox_belly_capacity);
+    var cap = d.storage_capacity || 0;
+    $("storage").textContent = fa(d.fox_storage) + (cap ? " / " + fa(cap) : "");
+    $("storageBar").style.width = cap ? Math.min(100, Math.round(d.fox_storage * 100 / cap)) + "%" : "0";
+
+    var up = $("upgradeInfo");
+    if (d.upgrade_cost == null) up.textContent = d.max_level ? "🏆 روباه به آخرین سطح رسیده!" : "";
+    else up.textContent = "⭐ هزینه‌ی ارتقای بعدی: " + fa(d.upgrade_cost) + " روب‌پوینت";
+
+    if (d.locked) banner("🔒 روباه از سطح " + fa(d.unlock_level) + " باز می‌شه.", false);
+    else if (d.sick) banner("🤒 روباهت مریضه؛ اول توی بات درمانش کن.", false);
+    else if (d.fox_belly < 2) banner("😡 شکم روباه باید حداقل ۲ غذا داشته باشه تا تولید کنه.", false);
+    else if (d.storage_capacity && d.fox_storage >= d.storage_capacity) banner("🔴 ظرفیت پره! برداشت بزن تا روباه دوباره کار کنه.", false);
+    else $("banner").className = "banner";
+
+    var off = d.locked || d.sick;
+    $("btnCollect").disabled = off; $("btnUpgrade").disabled = off || d.upgrade_cost == null;
+    $("btnRename").disabled = off; $("btnGender").disabled = off;
   }
 
-  function show(view){
-    $("foxView").classList.toggle("active",view==="fox");
-    $("leaderView").classList.toggle("active",view==="leader");
-    $("foxTab").classList.toggle("active",view==="fox");
-    $("leaderTab").classList.toggle("active",view==="leader");
-    if(view==="leader")loadLeader();
+  function loadProfile(){
+    return api("/api/profile").then(render).catch(function(e){
+      $("foxName").textContent = "خطا";
+      banner("نتونستم اطلاعات روباه رو بگیرم: " + e.message, false);
+    });
   }
-  $("foxTab").onclick=()=>show("fox");
-  $("leaderTab").onclick=()=>show("leader");
-  document.querySelectorAll("[data-action]").forEach(b=>b.onclick=()=>runAction(b.dataset.action));
-  document.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{
-    document.querySelectorAll("[data-cat]").forEach(x=>x.classList.remove("active"));b.classList.add("active");loadLeader(b.dataset.cat)
+
+  function act(path, body){
+    if (busy) return;
+    busy = true;
+    try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred("light"); } catch(e){}
+    api(path, "POST", body).then(function(r){
+      banner(r.message || "انجام شد.", true);
+      return loadProfile();
+    }).catch(function(e){ banner(e.message, false); }).then(function(){ busy = false; });
+  }
+
+  $("btnCollect").onclick = function(){ act("/api/fox/collect"); };
+  $("btnUpgrade").onclick = function(){
+    var cost = current && current.upgrade_cost;
+    if (cost != null && !confirm("ارتقای روباه " + fa(cost) + " روب‌پوینت هزینه داره. ادامه بدم؟")) return;
+    act("/api/fox/upgrade");
+  };
+  $("btnRename").onclick = function(){ $("renameInput").value = current ? current.fox_name : ""; $("renameModal").classList.add("open"); };
+  $("renameNo").onclick = function(){ $("renameModal").classList.remove("open"); };
+  $("renameOk").onclick = function(){
+    var v = $("renameInput").value;
+    $("renameModal").classList.remove("open");
+    act("/api/fox/rename", { name: v });
+  };
+  $("btnGender").onclick = function(){ $("genderModal").classList.add("open"); };
+  $("genderNo").onclick = function(){ $("genderModal").classList.remove("open"); };
+  document.querySelectorAll("[data-g]").forEach(function(b){
+    b.onclick = function(){ $("genderModal").classList.remove("open"); act("/api/fox/gender", { gender: b.dataset.g }); };
   });
+
+  // ---------- لیدربرد ----------
+  var cat = "points";
+  function loadLeader(){
+    var list = $("list"), msg = $("msg");
+    list.innerHTML = ""; msg.style.display = "block"; msg.textContent = "🦊 در حال بارگذاری...";
+    api("/api/leaderboard?category=" + encodeURIComponent(cat)).then(function(data){
+      if (!data.entries || !data.entries.length) { msg.textContent = "هنوز کسی توی این لیدربرد نیست."; return; }
+      msg.style.display = "none";
+      data.entries.forEach(function(e){
+        var li = document.createElement("li"); if (e.me) li.className = "me";
+        var r = document.createElement("span"); r.className = "rank";
+        r.textContent = e.rank === 1 ? "🥇" : e.rank === 2 ? "🥈" : e.rank === 3 ? "🥉" : fa(e.rank);
+        var n = document.createElement("span"); n.className = "name"; n.textContent = e.name + (e.skin ? " " + e.skin.split(" ")[0] : "");
+        var v = document.createElement("span"); v.className = "value"; v.textContent = fa(e.value) + " " + (data.emoji || "");
+        li.appendChild(r); li.appendChild(n); li.appendChild(v); list.appendChild(li);
+      });
+    }).catch(function(e){ msg.style.display = "block"; msg.textContent = "خطا: " + e.message; });
+  }
+  document.querySelectorAll("[data-cat]").forEach(function(b){
+    b.onclick = function(){
+      document.querySelectorAll("[data-cat]").forEach(function(x){ x.classList.remove("active"); });
+      b.classList.add("active"); cat = b.dataset.cat; loadLeader();
+    };
+  });
+
+  function show(v){
+    $("foxView").classList.toggle("active", v === "fox");
+    $("leaderView").classList.toggle("active", v === "leader");
+    $("foxTab").classList.toggle("active", v === "fox");
+    $("leaderTab").classList.toggle("active", v === "leader");
+    if (v === "leader") loadLeader(); else loadProfile();
+  }
+  $("foxTab").onclick = function(){ show("fox"); };
+  $("leaderTab").onclick = function(){ show("leader"); };
 
   loadProfile();
 })();
