@@ -1,0 +1,298 @@
+:root {
+  --bg: #15110d;
+  --surface: #1f1811;
+  --surface-raised: #271e15;
+  --hairline: #3a2d1f;
+  --amber: #e68a2e;
+  --amber-dim: #a86423;
+  --ruby: #c23b53;
+  --forest: #4c7a52;
+  --text: #f5eada;
+  --text-muted: #b8a894;
+  --radius-sm: 10px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: "Vazirmatn", sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  padding-bottom: calc(64px + var(--safe-bottom));
+}
+
+:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ---------- حالت لودینگ / خطا ---------- */
+
+.state-screen {
+  min-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.fox-spinner {
+  font-size: 40px;
+  animation: tilt 1.4s ease-in-out infinite;
+}
+
+@keyframes tilt {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(8deg); }
+}
+
+.state-screen .retry-btn {
+  margin-top: 6px;
+  background: var(--amber);
+  color: #1a1309;
+  border: none;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  padding: 10px 22px;
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- هویت بالای صفحه ---------- */
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 20px 18px;
+}
+
+.identity-avatar {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+}
+
+.identity-text { min-width: 0; }
+
+.identity-name {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.identity-level {
+  color: var(--amber);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ---------- عدد بزرگ روب‌پوینت ---------- */
+
+.hero-stat {
+  margin: 0 20px 22px;
+  padding: 22px 20px;
+  background: var(--surface);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.hero-stat-label {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.hero-stat-value {
+  font-size: 44px;
+  font-weight: 800;
+  color: var(--amber);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.hero-stat-rank {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ---------- لیست آمار (بدون کارت‌چینی یکدست) ---------- */
+
+.stat-grid {
+  list-style: none;
+  margin: 0 20px;
+  padding: 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 2px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.stat-icon { font-size: 19px; width: 22px; text-align: center; }
+
+.stat-label { flex: 1; color: var(--text-muted); font-size: 15px; }
+
+.stat-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+}
+
+/* ---------- لیدربرد ---------- */
+
+.view-leaderboard { padding: 22px 20px 10px; }
+
+.view-title {
+  margin: 0 0 16px;
+  font-size: 21px;
+  font-weight: 800;
+}
+
+.category-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 14px;
+  margin-bottom: 8px;
+  scrollbar-width: none;
+}
+.category-row::-webkit-scrollbar { display: none; }
+
+.category-pill {
+  flex-shrink: 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--hairline);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.category-pill.is-active {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #1a1309;
+  font-weight: 700;
+}
+
+.rank-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.rank-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 2px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.rank-number {
+  width: 26px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-row.is-top1 .rank-number,
+.rank-row.is-top2 .rank-number,
+.rank-row.is-top3 .rank-number { color: var(--amber); }
+
+.rank-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rank-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--amber-dim);
+}
+
+.rank-row.is-top1 .rank-value,
+.rank-row.is-top2 .rank-value,
+.rank-row.is-top3 .rank-value { color: var(--amber); }
+
+.rank-empty {
+  padding: 30px 4px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* ---------- تب‌بار پایین ---------- */
+
+.tabbar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--hairline);
+  padding-bottom: var(--safe-bottom);
+  z-index: 10;
+}
+
+.tabbar-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 0 8px;
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.tabbar-btn.is-active {
+  color: var(--amber);
+  box-shadow: inset 0 2px 0 var(--amber);
+}
+
+.tabbar-icon { font-size: 20px; }

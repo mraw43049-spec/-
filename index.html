@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>روبی</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+
+<main id="app" aria-live="polite">
+  <div class="state-screen" id="loading-screen">
+    <div class="fox-spinner" aria-hidden="true">🦊</div>
+    <p>در حال باز کردن لونه‌ی روباه...</p>
+  </div>
+</main>
+
+<nav class="tabbar" id="tabbar" hidden>
+  <button class="tabbar-btn is-active" data-view="profile" type="button">
+    <span class="tabbar-icon" aria-hidden="true">🦊</span>
+    <span>من</span>
+  </button>
+  <button class="tabbar-btn" data-view="leaderboard" type="button">
+    <span class="tabbar-icon" aria-hidden="true">🏆</span>
+    <span>لیدربرد</span>
+  </button>
+</nav>
+
+<template id="tpl-profile">
+  <section class="view view-profile">
+    <header class="identity">
+      <div class="identity-avatar" aria-hidden="true">🦊</div>
+      <div class="identity-text">
+        <h1 class="identity-name"></h1>
+        <span class="identity-level"></span>
+      </div>
+    </header>
+
+    <div class="hero-stat">
+      <span class="hero-stat-label">روب‌پوینت</span>
+      <span class="hero-stat-value"></span>
+      <span class="hero-stat-rank"></span>
+    </div>
+
+    <ul class="stat-grid">
+      <li class="stat-row" data-stat="hunt_count">
+        <span class="stat-icon" aria-hidden="true">⚔️</span>
+        <span class="stat-label">شکار</span>
+        <span class="stat-value"></span>
+      </li>
+      <li class="stat-row" data-stat="fox_claim_count">
+        <span class="stat-icon" aria-hidden="true">🐾</span>
+        <span class="stat-label">روب روب</span>
+        <span class="stat-value"></span>
+      </li>
+      <li class="stat-row" data-stat="fox_rescued_count">
+        <span class="stat-icon" aria-hidden="true">🩹</span>
+        <span class="stat-label">روباه‌های نجات‌یافته</span>
+        <span class="stat-value"></span>
+      </li>
+      <li class="stat-row" data-stat="owl_catch_count">
+        <span class="stat-icon" aria-hidden="true">🦉</span>
+        <span class="stat-label">جغد شکارشده</span>
+        <span class="stat-value"></span>
+      </li>
+      <li class="stat-row" data-stat="referral_count">
+        <span class="stat-icon" aria-hidden="true">👑</span>
+        <span class="stat-label">رفرال تاییدشده</span>
+        <span class="stat-value"></span>
+      </li>
+      <li class="stat-row" data-stat="belly">
+        <span class="stat-icon" aria-hidden="true">🍖</span>
+        <span class="stat-label">شکم روباه</span>
+        <span class="stat-value"></span>
+      </li>
+    </ul>
+  </section>
+</template>
+
+<template id="tpl-leaderboard">
+  <section class="view view-leaderboard">
+    <h1 class="view-title">لیدربرد</h1>
+    <div class="category-row" role="tablist">
+      <button class="category-pill is-active" data-category="points" role="tab">💰 روب‌پوینت</button>
+      <button class="category-pill" data-category="hunt" role="tab">⚔️ شکار</button>
+      <button class="category-pill" data-category="owl" role="tab">🦉 جغد</button>
+      <button class="category-pill" data-category="rescued" role="tab">🩹 نجات</button>
+      <button class="category-pill" data-category="referral" role="tab">👑 رفرال</button>
+    </div>
+    <ol class="rank-list"></ol>
+  </section>
+</template>
+
+</body>
+</html>
