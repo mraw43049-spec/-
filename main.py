@@ -13,10 +13,10 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import func, inspect
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from auth import extract_telegram_user, validate_init_data
@@ -264,5 +264,11 @@ def health():
     return {"ok": True, "service": "ruby-miniapp", "version": "2.0"}
 
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
-app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+# Flat layout: index.html sits next to main.py. Only this one file is served
+# (never mount the whole folder, it would expose bot.py / config.py).
+INDEX_FILE = Path(__file__).resolve().parent / "index.html"
+
+
+@app.get("/")
+def index():
+    return FileResponse(str(INDEX_FILE), media_type="text/html")
