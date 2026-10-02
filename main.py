@@ -17,12 +17,11 @@ from pathlib import Path
 
 # پوشه‌ی ریشه‌ی پروژه (جایی که bot.py و database.py هستن) رو به مسیر پایتون اضافه می‌کنیم
 # تا بتونیم database.py رو مستقیم ایمپورت کنیم؛ بدون اینکه هیچ مدلی رو دوباره تعریف کنیم.
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func
 
 from auth import extract_telegram_user, validate_init_data
@@ -158,6 +157,23 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
         session.close()
 
 
-# فایل‌های فرانت‌اند (index.html / app.js / style.css) رو از همین سرویس سرو می‌کنیم.
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
-app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+# نسخه‌ی بدون پوشه: فایل‌ها همه کنار هم توی ریشه‌ی ریپو هستن.
+# فقط این سه فایل عمداً عمومی هستن (نه کل پوشه، تا bot.py و config.py لو نرن).
+from fastapi.responses import FileResponse
+
+BASE_DIR = Path(__file__).resolve().parent
+
+
+@app.get("/")
+def index_page():
+    return FileResponse(BASE_DIR / "index.html")
+
+
+@app.get("/app.js")
+def app_js():
+    return FileResponse(BASE_DIR / "app.js", media_type="application/javascript")
+
+
+@app.get("/style.css")
+def style_css():
+    return FileResponse(BASE_DIR / "style.css", media_type="text/css")
