@@ -1,110 +1,184 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<title>لیدربرد روبی</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate">
+<title>روبی 🦊</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: Tahoma, "Vazirmatn", system-ui, sans-serif;
-    background: #14110f; color: #f5ece4;
-    min-height: 100vh; padding: 16px 14px 32px;
-  }
-  header { text-align: center; padding: 10px 0 18px; }
-  header h1 { font-size: 22px; color: #ff9a3c; }
-  header p { font-size: 13px; color: #b9a99a; margin-top: 6px; }
-  ol { list-style: none; display: flex; flex-direction: column; gap: 8px; }
-  li {
-    display: flex; align-items: center; gap: 12px;
-    background: #211b17; border: 1px solid #2f2721;
-    border-radius: 14px; padding: 12px 14px;
-  }
-  li.top1 { background: #3a2a12; border-color: #ffb347; }
-  li.top2 { background: #2c2a2a; border-color: #c0c0c0; }
-  li.top3 { background: #33231a; border-color: #cd7f32; }
-  .rank { width: 34px; text-align: center; font-weight: 700; font-size: 16px; }
-  .name { flex: 1; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .value { font-weight: 700; color: #ffb347; font-size: 15px; }
-  .msg { text-align: center; color: #b9a99a; padding: 40px 10px; line-height: 2; }
-  button {
-    margin-top: 14px; padding: 10px 22px; border: 0; border-radius: 12px;
-    background: #ff9a3c; color: #1b1410; font-size: 14px; font-weight: 700;
-  }
+*{box-sizing:border-box}body{margin:0;background:#120f0d;color:#f7eee7;font-family:Tahoma,Vazirmatn,system-ui,sans-serif;min-height:100vh;padding:14px 12px 86px}
+header{text-align:center;padding:8px 0 14px}h1{font-size:23px;margin:0;color:#ff9b3d}header p{color:#bba99a;font-size:12px;margin:6px 0 0}
+.view{display:none}.view.active{display:block}.card{background:#211a16;border:1px solid #352a23;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 8px 24px #0003}
+.fox{display:flex;gap:14px;align-items:center}.fox-img{width:92px;height:92px;border-radius:20px;background:#2d211a;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:52px;flex:none}.fox-img img{width:100%;height:100%;object-fit:cover}.fox-main{min-width:0;flex:1}.fox-name{font-size:21px;font-weight:800}.muted{color:#bba99a;font-size:12px}.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}.chip{background:#2c231d;border:1px solid #43342a;border-radius:999px;padding:6px 9px;font-size:11px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}.stat{background:#1b1512;border-radius:14px;padding:12px}.stat b{display:block;font-size:16px;color:#ffb347;margin-top:4px}
+.section-title{font-weight:800;margin:4px 0 10px;font-size:15px}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:9px}.action{border:0;border-radius:14px;padding:13px 8px;font-weight:800;font-size:13px;background:#ff9a3c;color:#1b120c;cursor:pointer}.action.secondary{background:#30251f;color:#f8eee6;border:1px solid #49372b}.action:active{transform:scale(.98)}
+.tabs{position:fixed;bottom:0;left:0;right:0;padding:9px 10px calc(9px + env(safe-area-inset-bottom));background:#181310ee;backdrop-filter:blur(10px);display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid #342921}.tab{border:1px solid #3d2f27;background:#241b17;color:#e9ddd4;border-radius:14px;padding:11px;font-weight:800}.tab.active{background:#ff9a3c;color:#1b120c}
+ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}li{display:flex;align-items:center;gap:10px;background:#211a16;border:1px solid #352a23;border-radius:14px;padding:12px}.rank{width:32px;text-align:center;font-weight:900}.name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.value{font-weight:900;color:#ffb347}
+.filters{display:flex;gap:7px;overflow:auto;padding-bottom:7px}.filter{white-space:nowrap;border:1px solid #49372b;background:#241b17;color:#eee1d8;border-radius:999px;padding:8px 10px}.filter.active{background:#ff9a3c;color:#1b120c}
+#msg{text-align:center;color:#c2b1a4;padding:25px 10px;line-height:2}
+.skin-empty{color:#bba99a;text-align:center;padding:10px}.skin-name{font-weight:900;color:#ffb347}
 </style>
 </head>
 <body>
-<header>
-  <h1>🏆 لیدربرد روب‌پوینت</h1>
-  <p>بیشترین روب‌پوینت کسب‌شده</p>
-</header>
-<ol id="list"></ol>
-<div id="msg" class="msg">🦊 در حال بارگذاری...</div>
+<header><h1>🦊 روبی</h1><p>پروفایل روباه، اسکین فعال و لیدربرد</p></header>
+
+<section id="foxView" class="view active">
+  <div class="card">
+    <div class="fox">
+      <div id="foxImg" class="fox-img">🦊</div>
+      <div class="fox-main">
+        <div id="foxName" class="fox-name">در حال بارگذاری...</div>
+        <div id="userName" class="muted"></div>
+        <div class="chips">
+          <span id="levelChip" class="chip">سطح —</span>
+          <span id="genderChip" class="chip">جنسیت —</span>
+          <span id="skinChip" class="chip">اسکین —</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">📊 وضعیت روباه</div>
+    <div class="stats">
+      <div class="stat">💰 روب‌پوینت<b id="points">—</b></div>
+      <div class="stat">🏆 رتبه<b id="rank">—</b></div>
+      <div class="stat">🍖 شکم<b id="belly">—</b></div>
+      <div class="stat">⚔️ شکار<b id="hunt">—</b></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">🦊 دکمه‌های روباه</div>
+    <div class="buttons">
+      <button class="action" data-action="fox">🦊 روباه</button>
+      <button class="action" data-action="rubrub">🫰 روب روب</button>
+      <button class="action" data-action="hunt">⚔️ شکار</button>
+      <button class="action" data-action="game">🎮 بازی روبی</button>
+      <button class="action secondary" data-action="shop">🛍️ فروشگاه روبی</button>
+      <button class="action secondary" data-action="marriage">💕 ازدواج روبی</button>
+      <button class="action secondary" data-action="lesson">📚 روباهیو درس</button>
+      <button class="action secondary" data-action="support">🆘 پشتیبانی</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">✨ اسکین فعال</div>
+    <div id="skinBox" class="skin-empty">در حال بارگذاری...</div>
+  </div>
+</section>
+
+<section id="leaderView" class="view">
+  <div class="card">
+    <div class="section-title">🏆 لیدربرد روبی</div>
+    <div class="filters">
+      <button class="filter active" data-cat="points">💰 روب‌پوینت</button>
+      <button class="filter" data-cat="hunt">⚔️ شکار</button>
+      <button class="filter" data-cat="owl">🦉 جغد</button>
+      <button class="filter" data-cat="rescued">🦊 نجات</button>
+      <button class="filter" data-cat="referral">👑 رفرال</button>
+    </div>
+  </div>
+  <div class="card"><ol id="list"></ol><div id="msg">🦊 در حال بارگذاری...</div></div>
+</section>
+
+<nav class="tabs">
+  <button id="foxTab" class="tab active">🦊 روباه من</button>
+  <button id="leaderTab" class="tab">🏆 لیدربرد</button>
+</nav>
 
 <script>
-(function () {
-  var tg = window.Telegram && window.Telegram.WebApp;
-  if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
-  var initData = tg ? tg.initData : "";
-  var list = document.getElementById("list");
-  var msg = document.getElementById("msg");
+(function(){
+  const tg=window.Telegram&&window.Telegram.WebApp;
+  if(tg){try{tg.ready();tg.expand();tg.enableClosingConfirmation&&tg.enableClosingConfirmation()}catch(e){}}
+  const initData=tg?tg.initData:"";
+  const $=id=>document.getElementById(id);
+  const fa=n=>Number(n||0).toLocaleString("fa-IR");
 
-  function fa(n) { return Number(n || 0).toLocaleString("fa-IR"); }
-
-  function showMsg(text, withRetry) {
-    list.innerHTML = "";
-    msg.style.display = "block";
-    msg.textContent = text;
-    if (withRetry) {
-      var b = document.createElement("button");
-      b.textContent = "دوباره امتحان کن";
-      b.onclick = load;
-      msg.appendChild(document.createElement("br"));
-      msg.appendChild(b);
-    }
+  function api(path){
+    if(!initData) return Promise.reject(new Error("این صفحه باید داخل تلگرام باز شود."));
+    return fetch(path,{headers:{"X-Init-Data":initData}})
+      .then(async r=>{let b={};try{b=await r.json()}catch(e){};if(!r.ok)throw new Error(b.detail||"خطا");return b});
   }
+  function toast(text){
+    if(tg&&tg.showPopup) tg.showPopup({title:"روبی 🦊",message:text,buttons:[{type:"ok"}]});
+    else alert(text);
+  }
+  function haptic(){try{tg&&tg.HapticFeedback&&tg.HapticFeedback.impactOccurred("light")}catch(e){}}
 
-  function load() {
-    showMsg("🦊 در حال بارگذاری...");
-    if (!initData) {
-      showMsg("این صفحه فقط داخل تلگرام کار می‌کنه. از دکمه‌ی منوی بات بازش کن.");
-      return;
-    }
-    fetch("/api/leaderboard?category=points", { headers: { "X-Init-Data": initData } })
-      .then(function (res) {
-        return res.json().catch(function () { return {}; }).then(function (body) {
-          if (!res.ok) throw new Error((body.detail || "خطا") + " (کد " + res.status + ")");
-          return body;
-        });
-      })
-      .then(function (data) {
-        if (!data.entries || !data.entries.length) {
-          showMsg("هنوز کسی توی لیدربرد نیست.");
-          return;
-        }
-        msg.style.display = "none";
-        list.innerHTML = "";
-        data.entries.forEach(function (e) {
-          var li = document.createElement("li");
-          if (e.rank === 1) li.className = "top1";
-          else if (e.rank === 2) li.className = "top2";
-          else if (e.rank === 3) li.className = "top3";
-          var medal = e.rank === 1 ? "🥇" : e.rank === 2 ? "🥈" : e.rank === 3 ? "🥉" : fa(e.rank);
-          var r = document.createElement("span"); r.className = "rank"; r.textContent = medal;
-          var n = document.createElement("span"); n.className = "name"; n.textContent = e.name;
-          var v = document.createElement("span"); v.className = "value"; v.textContent = fa(e.value) + " 💰";
-          li.appendChild(r); li.appendChild(n); li.appendChild(v);
-          list.appendChild(li);
-        });
-      })
-      .catch(function (err) {
-        showMsg("نتونستم لیدربرد رو بگیرم: " + err.message, true);
+  function renderProfile(d){
+    const f=d.fox||d;
+    $("foxName").textContent=f.name||"مکار";
+    $("userName").textContent=d.display_name?"@"+d.display_name.replace(/^@/,""):"";
+    $("levelChip").textContent="سطح "+fa(f.level);
+    $("genderChip").textContent="جنسیت "+(f.gender||"ثبت نشده");
+    $("skinChip").textContent="اسکین "+((f.active_skin&&f.active_skin.name)||"پیش‌فرض");
+    $("points").textContent=fa(f.points);
+    $("rank").textContent=fa(d.points_rank);
+    $("belly").textContent=fa(f.belly)+" / "+fa(f.belly_capacity);
+    $("hunt").textContent=fa(d.hunt_count);
+
+    const img=f.active_skin_image||(f.active_skin&&f.active_skin.image);
+    $("foxImg").innerHTML="";
+    if(img){const im=new Image();im.alt="اسکین فعال روباه";im.src=img;im.onerror=()=>{$("foxImg").textContent="🦊"};$("foxImg").appendChild(im)}
+    else $("foxImg").textContent="🦊";
+
+    const skin=f.active_skin;
+    $("skinBox").innerHTML=skin
+      ? '<span class="skin-name">✨ '+escapeHtml(skin.name)+'</span>'+(skin.gender?' · '+escapeHtml(String(skin.gender)):'')
+      : "اسکین فعالی برای این کاربر ثبت نشده است.";
+  }
+  function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+
+  function loadProfile(){return api("/api/profile").then(renderProfile).catch(e=>toast(e.message))}
+  function loadLeader(cat="points"){
+    $("msg").textContent="🦊 در حال بارگذاری...";
+    $("list").innerHTML="";
+    return api("/api/leaderboard?category="+encodeURIComponent(cat)).then(data=>{
+      if(!data.entries||!data.entries.length){$("msg").textContent="هنوز کسی توی لیدربرد نیست.";return}
+      $("msg").style.display="none";
+      data.entries.forEach(e=>{
+        const li=document.createElement("li");
+        const r=document.createElement("span");r.className="rank";r.textContent=e.rank===1?"🥇":e.rank===2?"🥈":e.rank===3?"🥉":fa(e.rank);
+        const n=document.createElement("span");n.className="name";n.textContent=e.name;
+        const v=document.createElement("span");v.className="value";v.textContent=fa(e.value)+" "+data.emoji;
+        li.append(r,n,v);$("list").appendChild(li);
       });
+    }).catch(e=>{$("msg").textContent="خطا: "+e.message});
   }
 
-  load();
+  // If the Mini App was opened from a KeyboardButton, sendData can reach
+  // the bot. When opened from the BotFather Menu Button, Telegram does not
+  // guarantee sendData delivery; we therefore show a precise fallback.
+  function runAction(action){
+    haptic();
+    const labels={fox:"روباه",rubrub:"روب روب",hunt:"شکار",game:"بازی روبی",shop:"فروشگاه روبی",marriage:"ازدواج روبی",lesson:"روباهیو درس",support:"پشتیبانی"};
+    const label=labels[action]||action;
+    try{
+      if(tg&&typeof tg.sendData==="function"&&tg.initDataUnsafe){
+        tg.sendData(JSON.stringify({type:"ruby_fox_action",action}));
+        return;
+      }
+    }catch(e){}
+    toast("دکمه «"+label+"» در مینی‌اپ ثبت شد، اما اجرای واقعی آن باید توسط هندلر بات انجام شود. این نسخه هیچ روب‌پوینت یا داده‌ای را مستقیم تغییر نمی‌دهد.");
+  }
+
+  function show(view){
+    $("foxView").classList.toggle("active",view==="fox");
+    $("leaderView").classList.toggle("active",view==="leader");
+    $("foxTab").classList.toggle("active",view==="fox");
+    $("leaderTab").classList.toggle("active",view==="leader");
+    if(view==="leader")loadLeader();
+  }
+  $("foxTab").onclick=()=>show("fox");
+  $("leaderTab").onclick=()=>show("leader");
+  document.querySelectorAll("[data-action]").forEach(b=>b.onclick=()=>runAction(b.dataset.action));
+  document.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{
+    document.querySelectorAll("[data-cat]").forEach(x=>x.classList.remove("active"));b.classList.add("active");loadLeader(b.dataset.cat)
+  });
+
+  loadProfile();
 })();
 </script>
 </body>
