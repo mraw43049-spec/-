@@ -474,7 +474,15 @@ class ChatBody(BaseModel):
     text: str
 
 
+# پیش‌فرض: همه‌ی کاربرهای ثبت‌شده می‌تونن چت کنن. فلگ‌های is_banned / banned_until مربوط به بن بات
+# (مثلاً تخلف در فروشگاه گیفت) هستن و قبلاً چت رو هم بی‌دلیل می‌بستن. اگه خواستی بن‌شده‌ها چت نکنن،
+# توی Railway متغیر CHAT_BLOCK_BANNED=1 بذار.
+CHAT_BLOCK_BANNED = os.environ.get("CHAT_BLOCK_BANNED", "0").strip() == "1"
+
+
 def _chat_blocked(user) -> bool:
+    if not CHAT_BLOCK_BANNED:
+        return False
     now = datetime.now(timezone.utc)
     if int(user.is_banned or 0):
         return True
