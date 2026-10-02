@@ -5,8 +5,12 @@
 - لیدربرد روب‌پوینت
 - منطق برداشت و ارتقا از خود bot.py استفاده می‌کنه تا دقیقاً مثل بات رفتار کنه.
 """
+import hashlib
+import hmac
 import os
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -14,14 +18,15 @@ sys.path.insert(0, str(BASE_DIR))
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func
+import httpx
 
 from auth import extract_telegram_user, validate_init_data
 
 try:
-    from database import Referral, User, get_session
+    from database import ChatMessage, Referral, User, engine, get_session
 except ImportError as e:
     raise RuntimeError("نتونستم database.py رو پیدا کنم؛ main.py باید کنار bot.py باشه.") from e
 
@@ -31,6 +36,12 @@ if not BOT_TOKEN:
 
 app = FastAPI(title="Ruby Fox Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# جدول چت‌روم اگه هنوز ساخته نشده باشه (مثلاً مینی‌اپ جدا از بات بالا بیاد) همین‌جا ساخته می‌شه.
+try:
+    ChatMessage.__table__.create(bind=engine, checkfirst=True)
+except Exception as _e:  # noqa: BLE001
+    print(f"[miniapp] could not create chat table: {_e}")
 
 NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate"}
 
@@ -86,6 +97,72 @@ def get_skin_image(key: str, gender: str):
     if not p:
         raise HTTPException(status_code=404, detail="عکس پیدا نشد.")
     return FileResponse(p, headers={"Cache-Control": "public, max-age=3600"})
+
+
+# ---------------------------------------------------------------------------
+# عکس پروفایل تلگرام (برای لیدربرد و چت)
+# ---------------------------------------------------------------------------
+# تگ <img> نمی‌تونه هدر بفرسته، پس لینک عکس با امضای HMAC ساخته می‌شه (فقط بک‌اند می‌تونه لینک معتبر بسازه).
+_AVATAR_SECRET = hashlib.sha256(b"avatar:" + BOT_TOKEN.encode()).digest()
+_AVATAR_DIR = Path(os.environ.get("AVATAR_CACHE_DIR", "/tmp/ruby_avatars"))
+_AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+_AVATAR_TTL = 6 * 3600          # عکس‌ها هر ۶ ساعت یه بار از تلگرام دوباره گرفته می‌شن
+_AVATAR_MISS_TTL = 30 * 60      # کاربرِ بدون عکس: ۳۰ دقیقه بعد دوباره تلاش می‌کنیم
+
+
+def _avatar_sig(uid: int) -> str:
+    return hmac.new(_AVATAR_SECRET, str(int(uid)).encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def avatar_url(uid: int) -> str:
+    return f"/api/avatar/{int(uid)}?s={_avatar_sig(uid)}"
+
+
+def _fetch_avatar_from_telegram(uid: int):
+    """عکس پروفایل رو از Bot API می‌گیره؛ اگه نداشت/بسته بود None."""
+    base = f"https://api.telegram.org/bot{BOT_TOKEN}"
+    with httpx.Client(timeout=10) as c:
+        r = c.get(f"{base}/getUserProfilePhotos", params={"user_id": uid, "limit": 1}).json()
+        photos = (r.get("result") or {}).get("photos") or []
+        if not photos or not photos[0]:
+            return None
+        sizes = photos[0]
+        # کوچیک‌ترین سایزی که حداقل ~160px باشه تا سریع لود بشه
+        pick = next((p for p in sizes if (p.get("width") or 0) >= 160), sizes[-1])
+        f = c.get(f"{base}/getFile", params={"file_id": pick["file_id"]}).json()
+        path = (f.get("result") or {}).get("file_path")
+        if not path:
+            return None
+        img = c.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{path}")
+        if img.status_code != 200:
+            return None
+        return img.content
+
+
+@app.get("/api/avatar/{uid}")
+def get_avatar(uid: int, s: str = ""):
+    if not hmac.compare_digest(s or "", _avatar_sig(uid)):
+        raise HTTPException(status_code=403, detail="لینک نامعتبره.")
+    f = _AVATAR_DIR / f"{uid}.jpg"
+    miss = _AVATAR_DIR / f"{uid}.none"
+    now = time.time()
+    if f.exists() and now - f.stat().st_mtime < _AVATAR_TTL:
+        return FileResponse(f, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
+    if miss.exists() and now - miss.stat().st_mtime < _AVATAR_MISS_TTL:
+        raise HTTPException(status_code=404, detail="بدون عکس.")
+    try:
+        data = _fetch_avatar_from_telegram(uid)
+    except Exception:  # noqa: BLE001
+        data = None
+    if data:
+        f.write_bytes(data)
+        if miss.exists():
+            miss.unlink()
+        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
+    if f.exists():  # تلگرام جواب نداد ولی نسخه‌ی قدیمی داریم
+        return FileResponse(f, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=600"})
+    miss.write_text("1")
+    raise HTTPException(status_code=404, detail="بدون عکس.")
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +264,7 @@ def get_profile(tg_user: dict = Depends(current_telegram_user)):
         data = fox_state(session, user, botmod)
         data.update({
             "telegram_id": user.telegram_id,
+            "avatar": avatar_url(user.telegram_id),
             "display_name": display_name(user),
             "points_rank": rank,
             "hunt_count": int(user.hunt_count or 0),
@@ -239,7 +317,11 @@ def fox_collect(tg_user: dict = Depends(current_telegram_user)):
         user.fox_last_production_at = botmod.now_utc()
         user.fox_production_remainder = 0.0
         session.commit()
-        return {"message": f"💰 {amount:,} روب‌پوینت به موجودیت اضافه شد.", "amount": amount}
+        if amount <= 0:
+            return {"message": "📦 انبار روباه هنوز خالیه؛ کمی صبر کن تا تولید کنه.", "amount": 0,
+                    "balance": int(user.fox_points or 0)}
+        return {"message": f"💰 {amount:,} روب‌پوینت برداشت شد و به موجودیت اضافه شد.", "amount": amount,
+                "balance": int(user.fox_points or 0)}
     except HTTPException:
         session.rollback()
         raise
@@ -353,7 +435,7 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
             }
             entries = [
                 {"rank": i + 1, "name": display_name(users_by_id[uid]), "value": int(cnt),
-                 "me": uid == tg_user["id"]}
+                 "me": uid == tg_user["id"], "avatar": avatar_url(uid)}
                 for i, (uid, cnt) in enumerate(rows) if uid in users_by_id
             ]
             return {"category": "referral", "label": "رفرال", "emoji": "👑", "entries": entries}
@@ -371,9 +453,101 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
                 "name": display_name(u),
                 "value": int(getattr(u, field) or 0),
                 "me": u.telegram_id == tg_user["id"],
+                "avatar": avatar_url(u.telegram_id),
                 "skin": SKIN_INFO.get(skins[-1], "") if skins else "",
             })
         return {"category": category, "label": label, "emoji": emoji, "entries": entries}
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# چت‌روم عمومی
+# ---------------------------------------------------------------------------
+CHAT_MAX_LEN = 300
+CHAT_COOLDOWN_SECONDS = 2
+CHAT_PAGE = 60
+_last_chat_at: dict = {}
+
+
+class ChatBody(BaseModel):
+    text: str
+
+
+def _chat_blocked(user) -> bool:
+    now = datetime.now(timezone.utc)
+    if int(user.is_banned or 0):
+        return True
+    bu = user.banned_until
+    if bu is not None:
+        if bu.tzinfo is None:
+            bu = bu.replace(tzinfo=timezone.utc)
+        if bu > now:
+            return True
+    return False
+
+
+def _chat_rows(session, rows, me_id):
+    ids = {r.user_id for r in rows}
+    users = {u.telegram_id: u for u in session.query(User).filter(User.telegram_id.in_(ids or [0])).all()}
+    out = []
+    for r in rows:
+        u = users.get(r.user_id)
+        skins = active_skins(u) if u else []
+        out.append({
+            "id": r.id,
+            "user_id": r.user_id,
+            "name": display_name(u) if u else str(r.user_id),
+            "avatar": avatar_url(r.user_id),
+            "skin": SKIN_INFO.get(skins[-1], "").split(" ")[0] if skins else "",
+            "text": r.text,
+            "me": r.user_id == me_id,
+            "ts": int(r.created_at.timestamp()) if r.created_at else 0,
+        })
+    return out
+
+
+@app.get("/api/chat")
+def chat_list(after: int = 0, tg_user: dict = Depends(current_telegram_user)):
+    """after=0 → آخرین پیام‌ها؛ after=N → فقط پیام‌های جدیدتر از N."""
+    session = get_session()
+    try:
+        q = session.query(ChatMessage)
+        if after > 0:
+            rows = q.filter(ChatMessage.id > after).order_by(ChatMessage.id.asc()).limit(200).all()
+        else:
+            rows = q.order_by(ChatMessage.id.desc()).limit(CHAT_PAGE).all()[::-1]
+        return {"messages": _chat_rows(session, rows, tg_user["id"])}
+    finally:
+        session.close()
+
+
+@app.post("/api/chat")
+def chat_send(body: ChatBody, tg_user: dict = Depends(current_telegram_user)):
+    text = " ".join((body.text or "").split())
+    if not text:
+        raise HTTPException(status_code=400, detail="پیام خالیه.")
+    if len(text) > CHAT_MAX_LEN:
+        raise HTTPException(status_code=400, detail=f"پیام حداکثر {CHAT_MAX_LEN} کاراکتر می‌تونه باشه.")
+    now = time.time()
+    if now - _last_chat_at.get(tg_user["id"], 0) < CHAT_COOLDOWN_SECONDS:
+        raise HTTPException(status_code=429, detail="یکم آروم‌تر 😅 چند ثانیه صبر کن.")
+    session = get_session()
+    try:
+        user = session.get(User, tg_user["id"])
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        if _chat_blocked(user):
+            raise HTTPException(status_code=403, detail="🚫 اجازه‌ی چت کردن نداری.")
+        _last_chat_at[tg_user["id"]] = now
+        msg = ChatMessage(user_id=user.telegram_id, text=text)
+        session.add(msg)
+        session.commit()
+        # قدیمی‌ترها رو پاک می‌کنیم تا جدول بزرگ نشه (۲۰۰۰ پیام آخر نگه داشته می‌شه)
+        if msg.id % 100 == 0:
+            session.query(ChatMessage).filter(ChatMessage.id < msg.id - 2000).delete()
+            session.commit()
+        return {"message": _chat_rows(session, [msg], user.telegram_id)[0]}
     finally:
         session.close()
 

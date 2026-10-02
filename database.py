@@ -550,6 +550,15 @@ class Referral(Base):
     decided_by = Column(BigInteger, nullable=True)
 
 
+class ChatMessage(Base):
+    """پیام‌های چت‌روم عمومی مینی‌اپ."""
+    __tablename__ = 'miniapp_chat_messages'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False, index=True)
+    text = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
 def init_db():
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
