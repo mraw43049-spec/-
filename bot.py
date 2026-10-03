@@ -404,6 +404,7 @@ _M_SEP = '\u2064'
 _M_CLOSE = '\u2063'
 _MENTION_RE = re.compile('\u2063(-?\\d+)\u2064(.*?)\u2063', re.S)
 _MAX_ENTITIES = 100
+_RLM = '\u200f'   # Right-to-Left Mark
 
 def _u16len(s):
     return len(s.encode('utf-16-le')) // 2
@@ -431,10 +432,15 @@ def extract_mentions(text):
         seg = text[pos:m.start()]
         out.append(seg); off += _u16len(seg)
         name = m.group(2)
+        # نشانه‌ی نامرئی راست‌به‌چپ (RLM) قبل و بعد از اسم: وگرنه اگه اسم/یوزرنیم انگلیسی باشه و اول خط بیاد،
+        # تلگرام کل خط رو چپ‌به‌راست می‌چینه و تگ آبی هم چپ‌به‌راست دیده می‌شه.
+        out.append(_RLM); off += 1
         if name and len(ents) < _MAX_ENTITIES:
             ents.append(MessageEntity(type=MessageEntity.TEXT_MENTION, offset=off, length=_u16len(name),
                                       user=TgUser(id=int(m.group(1)), first_name=name[:64] or 'user', is_bot=False)))
-        out.append(name); off += _u16len(name); pos = m.end()
+        out.append(name); off += _u16len(name)
+        out.append(_RLM); off += 1
+        pos = m.end()
     out.append(text[pos:])
     clean = ''.join(out).replace(_M_OPEN, '').replace(_M_SEP, '')
     return clean, (ents or None)
@@ -5342,6 +5348,24 @@ def injured_fox_interval_seconds(city_level):
     return minutes * 60
 
 
+def _resume_delay(model, chat_id, interval):
+    """ثانیه‌ی باقی‌مانده تا رویداد بعدیِ یک گپ، از روی زمان آخرین رویداد ثبت‌شده در دیتابیس.
+    اگه رویدادی نبوده یا موعدش گذشته باشه، یه تأخیر کوتاه تصادفی (۵ تا ۱۲۰ ثانیه) برمی‌گردونه تا گپ‌ها هم‌زمان نشن."""
+    session = get_session()
+    try:
+        row = (session.query(model.created_at).filter(model.chat_id == chat_id)
+               .order_by(model.created_at.desc()).first())
+    except Exception:
+        row = None
+    finally:
+        session.close()
+    if row and row[0] is not None:
+        remaining = interval - (now_utc() - aware(row[0])).total_seconds()
+        if remaining > 0:
+            return int(remaining) + 1
+    return random.randint(5, min(interval, 120))
+
+
 def schedule_injured_fox_job(application, chat_id, city_level=1, first_delay=None):
     """جاب روباه زخمی مخصوص یک گپ را (دوباره) زمان‌بندی می‌کند؛ نسخهٔ قبلی همان گپ حذف می‌شود."""
     job_queue = application.job_queue if application else None
@@ -5373,7 +5397,9 @@ def schedule_all_injured_fox_jobs(application):
     finally:
         session.close()
     for chat_id, city_level in rows:
-        schedule_injured_fox_job(application, chat_id, city_level)
+        # تایمر از اول شروع نمی‌شه: از روی زمان آخرین روباهِ همین گپ ادامه می‌دیم (دیپلوی تایمر رو ریست نکنه).
+        delay = _resume_delay(InjuredFox, chat_id, injured_fox_interval_seconds(city_level))
+        schedule_injured_fox_job(application, chat_id, city_level, first_delay=delay)
 
 
 async def post_injured_fox_job(context):
@@ -5482,7 +5508,9 @@ def schedule_all_owl_jobs(application, first_delay=None):
     finally:
         session.close()
     for chat_id in chat_ids:
-        schedule_owl_job(application, chat_id, first_delay=first_delay)
+        # first_delay=None → از روی زمان آخرین جغدِ همین گپ ادامه می‌دیم؛ عدد ثابت فقط برای فعال‌سازی دستیه.
+        delay = first_delay if first_delay is not None else _resume_delay(RubyOwl, chat_id, OWL_INTERVAL_SECONDS)
+        schedule_owl_job(application, chat_id, first_delay=delay)
 
 
 def owl_text(equation):
@@ -13027,7 +13055,7 @@ def main():
     if app.job_queue:
         app.job_queue.run_repeating(settle_all_smuggling, interval=30, first=10, name="ruby-smuggling-settler")
         schedule_all_injured_fox_jobs(app)  # هر گپ جاب روباه زخمی مخصوص خودش را با فاصلهٔ متناسب با سطح شهرش می‌گیرد
-        schedule_all_owl_jobs(app, first_delay=5)  # همین که این آپدیت بالا میاد، اولین جغد تقریباً فوری توی هر گپ میاد
+        schedule_all_owl_jobs(app)  # تایمر جغد هر گپ از روی آخرین جغدش ادامه پیدا می‌کنه (دیپلوی ریستش نمی‌کنه)
         app.job_queue.run_repeating(update_market_prices_job, interval=FACTORY_MARKET_UPDATE_SECONDS, first=15, name="factory-market")
         app.job_queue.run_repeating(marriage_expire_job, interval=60, first=20, name="marriage-expire")
         app.job_queue.run_repeating(expire_attacks_job, interval=30, first=25, name="attack-owl-expire")

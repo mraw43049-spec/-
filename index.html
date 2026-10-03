@@ -9,7 +9,7 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#150b33 radial-gradient(900px 500px at 85% -5%,#6a3fd1aa,transparent 60%),radial-gradient(700px 500px at 0% 105%,#a53fd166,transparent 60%),linear-gradient(160deg,#1a0d40,#2b1259 55%,#1a0d40);background-attachment:fixed;color:#f6f1ff;font-family:Tahoma,Vazirmatn,system-ui,sans-serif;min-height:100vh;padding:14px 12px 86px}
+body{margin:0;background:#150b33 radial-gradient(900px 500px at 85% -5%,#6a3fd1aa,transparent 60%),radial-gradient(700px 500px at 0% 105%,#a53fd166,transparent 60%),linear-gradient(160deg,#1a0d40,#2b1259 55%,#1a0d40);background-attachment:fixed;color:#f6f1ff;font-family:Tahoma,Vazirmatn,system-ui,sans-serif;min-height:100vh;padding:14px 12px 130px}
 header{text-align:center;padding:6px 0 12px}h1{font-size:23px;margin:0;color:#ffc46b;text-shadow:0 0 18px #b57cff}
 .view{display:none}.view.active{display:block}
 .card{background:linear-gradient(160deg,#3a2575cc,#2a1a52cc);border:1px solid #6a4fb8;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 10px 30px #0006,inset 0 1px 0 #ffffff14;backdrop-filter:blur(6px)}
@@ -110,7 +110,7 @@ header{text-align:center;padding:6px 0 12px}h1{font-size:23px;margin:0;color:#ff
 .banner{border-radius:14px;padding:12px;margin-bottom:12px;font-size:13px;line-height:1.9;text-align:center;display:none}
 .banner.err{display:block;background:#3a1b1b;border:1px solid #7a3030}
 .banner.ok{display:block;background:#1d3322;border:1px solid #3c7a4a}
-.tabs{position:fixed;bottom:0;left:0;right:0;padding:9px 10px calc(9px + env(safe-area-inset-bottom));background:#150b33ee;display:grid;grid-template-columns:repeat(6,1fr);gap:5px;border-top:1px solid #4b3585}
+.tabs{position:fixed;bottom:0;left:0;right:0;padding:9px 10px calc(26px + env(safe-area-inset-bottom,0px) + var(--tg-content-safe-area-inset-bottom,0px));background:#150b33ee;display:grid;grid-template-columns:repeat(6,1fr);gap:5px;border-top:1px solid #4b3585}
 .tab{border:1px solid #5b43a0;background:#2f1f5e;color:#efe9ff;border-radius:13px;padding:6px 1px 5px;font-weight:800;font-family:inherit;font-size:10.5px;display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.3;min-width:0}
 .tab .ti{font-size:19px;line-height:1.1}
 .tab.active{background:#ff9a3c;color:#1b120c}
@@ -738,7 +738,15 @@ li.me{border-color:#ff9a3c;background:#40257a}
       return r;
     }).catch(function(e){ toast(e.message, false); loadEdu(); }).then(function(){ eduBusy = false; drawEdu(false); });
   }
-  function startEdu(topic){ eduCall("/api/edu/start", { topic: topic }); }
+  function startEdu(topic){
+    // بازخورد فوری: قبل از اینکه جواب سرور بیاد کاربر ببینه سؤال داره آماده می‌شه
+    var qb = $("eduQ"); qb.innerHTML = "";
+    var c = document.createElement("div"); c.className = "card q-card"; c.style.textAlign = "center";
+    c.textContent = "⏳ در حال آماده‌سازی سؤال...";
+    qb.appendChild(c);
+    document.querySelectorAll("#eduTopics .go").forEach(function(b){ b.disabled = true; });
+    eduCall("/api/edu/start", { topic: topic });
+  }
   function unlockEdu(topic, title){
     if (!confirm("باز کردن «" + title + "» با " + fa(edu.unlock_cost) + " روب‌پوینت؟")) return;
     eduCall("/api/edu/unlock", { topic: topic });

@@ -45,6 +45,30 @@ for _tbl in (ChatMessage, PendingAttack):
     except Exception as _e:  # noqa: BLE001
         print(f"[miniapp] could not create table {_tbl.__tablename__}: {_e}")
 
+
+def _warm_up():
+    """import سنگین education (که کتابخونه‌ی تلگرام رو می‌کشه) و bot رو قبل از اولین درخواست انجام می‌ده."""
+    try:
+        import education  # noqa: F401
+        for t in (education.EducationProgress, education.EduUserQuestion):
+            try:
+                t.__table__.create(bind=engine, checkfirst=True)
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[miniapp] warm-up education failed: {e}")
+    try:
+        import bot  # noqa: F401
+    except Exception as e:  # noqa: BLE001
+        print(f"[miniapp] warm-up bot failed: {e}")
+
+
+@app.on_event("startup")
+def _startup_warm():
+    import threading
+    threading.Thread(target=_warm_up, daemon=True).start()
+
+
 NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate"}
 
 # ---------------------------------------------------------------------------
@@ -706,10 +730,10 @@ def edu_start(body: EduStart, tg_user: dict = Depends(current_telegram_user)):
         seen = json.loads(p.answered or "{}")
         used = set(seen.get(topic, []))
         pool = edu.TOPICS[topic][1]
-        user_qs = {edu.USER_Q_OFFSET + r.id: r for r in session.query(edu.EduUserQuestion).filter(
+        user_q_ids = [edu.USER_Q_OFFSET + r[0] for r in session.query(edu.EduUserQuestion.id).filter(
             edu.EduUserQuestion.topic == topic, edu.EduUserQuestion.status == "approved",
-            edu.EduUserQuestion.author_id != p.user_id).all()}
-        all_ids = list(range(len(pool))) + list(user_qs.keys())
+            edu.EduUserQuestion.author_id != p.user_id).all()]
+        all_ids = list(range(len(pool))) + user_q_ids
         available = [i for i in all_ids if i not in used]
         if not available:
             seen[topic] = []

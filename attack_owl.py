@@ -62,7 +62,8 @@ def _name(u) -> str:
 
 
 def mention_html(u) -> str:
-    return f'<a href="tg://user?id={u.telegram_id}">{html.escape(_name(u))}</a>'
+    # RLM قبل و بعد از اسم تا خط، راست‌به‌چپ بمونه (حتی با اسم انگلیسی)
+    return f'\u200f<a href="tg://user?id={u.telegram_id}">{html.escape(_name(u))}</a>\u200f'
 
 
 # ---------------------------------------------------------------------------
