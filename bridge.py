@@ -6,8 +6,10 @@
    با دکمه‌ی «لغو جستجو»؛ به همه‌ی گپ‌های دیگه‌ی ربات پیام دعوت با دکمه‌ی «بله، در رو باز کن» میره.
 2) اولین گپی که دکمه رو بزنه به A وصل می‌شه. به هر دو گپ خبر میره: «۳۰ دقیقه فرصت گفت و گو دارید»
    با دکمه‌های «گزارش» (فقط کسایی که توی اون گفت و گو هستن) و «پایان گفت و گو» (فقط ادمین‌های همون گپ).
-3) تا وقتی وصلن، پیام هر طرف به صورت نقل‌قول (فقط اسم حساب، بدون لینک/آیدی/یوزرنیم) به طرف مقابل می‌ره؛
+3) تا وقتی وصلن فقط پیامی از تونل رد می‌شه که روی پیام «اونوریا» (یا پیام «وصل شدید») ریپلای شده باشه.
+   قالب: «👤 اسم از گپ فلان» و زیرش متن به صورت نقل‌قول. لینک و یوزرنیم هرگز رد نمی‌شه (به فرستنده اخطار داده می‌شه).
    زیر هر پیام رسیده دکمه‌ی «گزارش» هست و روی پیام فرستنده ربات 🕊 ری‌اکشن می‌زنه (یعنی پیامت رفت اونور).
+   گزارش‌ها برای پشتیبانی میره و پشتیبانی می‌تونه کاربر رو از «روباهیو وصل شو» محروم کنه (دیگه پیامش رد نمی‌شه).
 4) بعد از ۳۰ دقیقه یا با «پایان گفت و گو» هر دو گپ از هم جدا می‌شن.
 """
 import asyncio
@@ -16,13 +18,14 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters
 from telegram.error import BadRequest, Forbidden, RetryAfter
 from telegram.ext import CallbackQueryHandler, MessageHandler, filters
 
-from database import ChatBridge, ChatBridgeMessage, GroupChat, User, get_session
+from database import BridgeBan, ChatBridge, ChatBridgeMessage, GroupChat, User, get_session
 
 try:
     from config import ADMIN_IDS
@@ -41,6 +44,40 @@ _TRIGGER_RE = re.compile(r"^\s*روباهیو[\s\u200c]+وصل[\s\u200c]*شو[\s
 _CACHE = {}      # chat_id -> {"id", "partner", "ends"}  (فقط گفت و گوهای وصل)
 _LOCKS = {}      # bridge_id -> asyncio.Lock  (ترتیب پیام‌ها حفظ بشه)
 _last_purge = [0.0]
+_BANNED = set()          # user_id های محروم‌شده از «روباهیو وصل شو»
+_ban_notice = {}         # user_id -> آخرین زمانی که پیام «محروم هستی» دیده
+
+LINK_WARNING = "⚠️ لینک و یوزرنیم از تونل لونه‌ها رد نمی‌شن"
+BANNED_NOTICE = "🚫 شما از «روباهیو وصل شو» محروم شدید و پیام‌هاتون از تونل لونه‌ها رد نمی‌شه."
+
+_TLDS = ("com|net|org|info|biz|edu|gov|io|me|ly|co|xyz|app|link|site|online|top|club|shop|store|dev|ai|gl|gd|to|so|be|im|"
+         "sh|ws|vip|live|fun|pro|page|click|work|tv|cc|in|cn|tk|ml|ga|cf|gq|ru|de|uk|us|fr|it|es|nl|tr|ir|ae|pk|iq|sa|"
+         "af|az|am|tj|uz|kz|ua|pl|ca|au|jp|kr|br|mx|ar|za|ng|eg|id|my|sg|vn|th|ph|pw|me|st|su|eu|asia|cloud|space|tech|"
+         "website|digital|network|world|today|news|blog|bio|ink|one|zip|mov")
+_LINK_RE = re.compile(
+    r"(?:\b[a-z][a-z0-9+.\-]{1,15}://)"                        # هر scheme://
+    r"|(?:\bwww\s*\.)"
+    r"|(?:\b(?:t|telegram)\s*\.\s*(?:me|dog)\b)"
+    r"|(?:\btg\s*:)"
+    r"|(?:\bjoinchat\b)"
+    r"|(?:\b[a-z0-9][a-z0-9\-]{0,62}(?:\.[a-z0-9\-]{1,63})*\.(?:" + _TLDS + r")\b)",
+    re.I)
+_USER_RE = re.compile(r"@\s?[a-z0-9_]{3,}", re.I)
+_INVISIBLE = re.compile("[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]")
+
+
+def _norm(text) -> str:
+    t = unicodedata.normalize("NFKC", str(text or "")).replace("。", ".")
+    return _INVISIBLE.sub("", t)
+
+
+def contains_link(text, entities=()) -> bool:
+    """لینک، دامنه، یوزرنیم یا منشن (حتی لینکِ مخفی پشت متن) داخل پیام هست؟"""
+    for e in entities or ():
+        if getattr(e, "type", None) in ("url", "text_link", "mention", "text_mention"):
+            return True
+    n = _norm(text)
+    return bool(_LINK_RE.search(n) or _USER_RE.search(n))
 
 
 def now_utc():
@@ -92,6 +129,15 @@ WAIT_TEXT = ("🦊🚪 دارم شما رو به اولین گپی که در ر�
 # ---------------------------------------------------------------------------
 # ابزارها
 # ---------------------------------------------------------------------------
+def safe_title(title) -> str:
+    """اسم گپ برای نمایش توی تونل: لینک/یوزرنیم حذف می‌شه."""
+    t = _norm(title or "")
+    t = re.sub(r"(?:[a-z][a-z0-9+.\-]{1,15}://|www\.|t\.me/|telegram\.me/)\S+", "", t, flags=re.I)
+    t = re.sub(r"@\s?\w+", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t[:40] or "یک لونه"
+
+
 def clean_name(user) -> str:
     """فقط اسم حساب کاربر؛ هر چیزی شبیه لینک، @یوزرنیم یا شماره حذف می‌شه."""
     n = (getattr(user, "full_name", None) or user.first_name or "").replace("\u2063", "").replace("\u2064", "")
@@ -158,6 +204,33 @@ def _json(raw):
         return {}
 
 
+def _load_bans():
+    s = get_session()
+    try:
+        ids = {r[0] for r in s.query(BridgeBan.user_id).all()}
+    finally:
+        s.close()
+    _BANNED.clear()
+    _BANNED.update(ids)
+
+
+def _set_ban(uid: int, banned: bool, by: int):
+    s = get_session()
+    try:
+        row = s.get(BridgeBan, uid)
+        if banned and not row:
+            s.add(BridgeBan(user_id=uid, banned_by=by))
+        elif not banned and row:
+            s.delete(row)
+        s.commit()
+    finally:
+        s.close()
+    if banned:
+        _BANNED.add(uid)
+    else:
+        _BANNED.discard(uid)
+
+
 async def _edit(bot, chat_id, message_id, text, markup=None):
     try:
         await _safe(bot.edit_message_text, chat_id=int(chat_id), message_id=int(message_id), text=text,
@@ -196,6 +269,9 @@ async def handle_text(update, context) -> bool:
     if not chat or not user:
         return False
     reply = {"reply_to_message_id": msg.message_id}
+    if user.id in _BANNED:
+        await msg.reply_text(BANNED_NOTICE, **reply)
+        return True
     if chat.type not in ("group", "supergroup"):
         await msg.reply_text("🦊 این دستور فقط داخل گروه کار می‌کنه.", **reply)
         return True
@@ -203,7 +279,7 @@ async def handle_text(update, context) -> bool:
     try:
         cur = _active_for_chat(s, chat.id)
         if cur and cur.status == "connected":
-            other = cur.partner_title if cur.chat_id == chat.id else cur.chat_title
+            other = safe_title(cur.partner_title if cur.chat_id == chat.id else cur.chat_title)
             await msg.reply_text(f"🔗 این گپ همین الان به «{other}» وصله.", **reply)
             return True
         if cur and cur.status == "searching":
@@ -319,6 +395,8 @@ async def button(update, context):
         await _report_bridge(q, context, rid)
     elif action == "rm":
         await _report_message(q, context, rid)
+    elif action in ("ban", "unban", "dismiss"):
+        await _support_decision(q, context, action, rid)
     else:
         await q.answer()
 
@@ -350,6 +428,9 @@ async def _cancel(q, context, bid):
 async def _accept(q, context, bid):
     chat = q.message.chat
     uid = q.from_user.id
+    if uid in _BANNED:
+        await q.answer("🚫 شما از «روباهیو وصل شو» محروم هستید.", show_alert=True)
+        return
     own_cancel = []
     s = get_session()
     try:
@@ -405,9 +486,10 @@ async def _accept(q, context, bid):
     def text_for(other):
         return (f"✅ شما به گپ «{other}» وصل شدید!\n\n"
                 f"⏳ {BRIDGE_TALK_SECONDS // 60} دقیقه فرصت گفت و گو دارید.\n"
-                "پیام‌ها به صورت نقل‌قول برای گپ مقابل فرستاده می‌شه و فقط اسم نمایش داده می‌شه.")
+                "برای فرستادن پیام، روی پیام اونوریا (یا همین پیام) ریپلای کن؛ پیامت به شکل نقل‌قول با اسمت می‌ره.\n"
+                "⚠️ لینک و یوزرنیم از تونل لونه‌ها رد نمی‌شن.")
     msgs = {}
-    for cid, other in ((a_chat, b_title), (b_chat, a_title)):
+    for cid, other in ((a_chat, safe_title(b_title)), (b_chat, safe_title(a_title))):
         try:
             m = await _safe(bot.send_message, chat_id=cid, text=text_for(other), reply_markup=connected_kb(bid))
             msgs[str(cid)] = m.message_id
@@ -472,17 +554,66 @@ async def _end_button(q, context, bid):
 
 
 # ---------------------------------------------------------------------------
+# تصمیم پشتیبانی روی گزارش‌ها
+# ---------------------------------------------------------------------------
+async def _support_decision(q, context, action, uid):
+    if q.from_user.id not in ADMIN_IDS:
+        await q.answer("این دکمه فقط برای پشتیبانیه.", show_alert=True)
+        return
+    if action == "dismiss":
+        await q.answer("گزارش رد شد.")
+        try:
+            await q.edit_message_reply_markup(reply_markup=None)
+        except Exception:  # noqa: BLE001
+            pass
+        return
+    _set_ban(uid, action == "ban", q.from_user.id)
+    await q.answer("🚫 کاربر از «روباهیو وصل شو» محروم شد." if action == "ban" else "✅ محرومیت برداشته شد.", show_alert=True)
+    # دکمه‌ی همین کاربر بین «محروم کردن» و «رفع محرومیت» جابه‌جا می‌شه
+    try:
+        old = q.message.reply_markup.inline_keyboard if q.message.reply_markup else []
+        rows = []
+        for row in old:
+            new_row = []
+            for btn in row:
+                cd = btn.callback_data or ""
+                if cd in (f"brg:ban:{uid}", f"brg:unban:{uid}"):
+                    name = btn.text.split(" ", 2)[-1] if " " in btn.text else str(uid)
+                    if action == "ban":
+                        btn = InlineKeyboardButton("✅ رفع محرومیت " + name, callback_data=f"brg:unban:{uid}")
+                    else:
+                        btn = InlineKeyboardButton("🚫 محروم کردن " + name, callback_data=f"brg:ban:{uid}")
+                new_row.append(btn)
+            rows.append(new_row)
+        await q.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(rows))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# ---------------------------------------------------------------------------
 # گزارش به پشتیبانی
 # ---------------------------------------------------------------------------
-async def _to_support(bot, text) -> bool:
+async def _to_support(bot, text, markup=None) -> bool:
     ok = False
     for aid in list(ADMIN_IDS):
         try:
-            await _safe(bot.send_message, chat_id=aid, text=text[:4000], parse_mode="HTML", disable_web_page_preview=True)
+            await _safe(bot.send_message, chat_id=aid, text=text[:4000], parse_mode="HTML",
+                        disable_web_page_preview=True, reply_markup=markup)
             ok = True
         except Exception as e:  # noqa: BLE001
             logger.info("bridge report to admin %s failed: %s", aid, e)
     return ok
+
+
+def support_kb(users):
+    """دکمه‌های تصمیم پشتیبانی: محروم کردن هر کاربرِ دخیل یا رد گزارش."""
+    rows = []
+    for uid, name in users:
+        label = ("✅ رفع محرومیت " if uid in _BANNED else "🚫 محروم کردن ") + (name or str(uid))[:22]
+        cb = f"brg:{'unban' if uid in _BANNED else 'ban'}:{uid}"
+        rows.append([InlineKeyboardButton(label, callback_data=cb)])
+    rows.append([InlineKeyboardButton("✖️ رد گزارش", callback_data="brg:dismiss:0")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _user_line(s, uid, fallback_name=""):
@@ -524,9 +655,15 @@ async def _report_bridge(q, context, bid):
             lines.append(f"• [{src}] {_user_line(s, r.sender_id, r.sender_name)}: {snippet}")
         if not rows:
             lines.append("(پیامی رد و بدل نشده بود)")
+        seen, suspects = set(), []
+        for r in rows:
+            if r.sender_id not in seen and len(suspects) < 6:
+                seen.add(r.sender_id)
+                suspects.append((r.sender_id, r.sender_name))
     finally:
         s.close()
-    sent = await _to_support(context.bot, "\n".join(lines))
+    lines.append("\n👇 تصمیم با پشتیبانیه: کاربر خاطی رو از «روباهیو وصل شو» محروم کن یا گزارش رو رد کن.")
+    sent = await _to_support(context.bot, "\n".join(lines), support_kb(suspects))
     await q.answer("🚨 گزارشت برای پشتیبانی ارسال شد." if sent else "ارسال گزارش با مشکل روبه‌رو شد؛ بعداً دوباره امتحان کن.", show_alert=True)
 
 
@@ -555,10 +692,13 @@ async def _report_message(q, context, mid):
             f"🙋 گزارش‌دهنده: {_user_line(s, uid, q.from_user.full_name)}",
             f"📝 نوع پیام: {esc(row.kind)}",
             f"💬 متن: {esc((row.text or '')[:600]) or '—'}",
+            "",
+            "👇 تصمیم با پشتیبانیه: محروم کن یا گزارش رو رد کن.",
         ])
+        sender = (row.sender_id, row.sender_name)
     finally:
         s.close()
-    sent = await _to_support(context.bot, text)
+    sent = await _to_support(context.bot, text, support_kb([sender]))
     await q.answer("🚨 کاربر برای پشتیبانی گزارش شد." if sent else "ارسال گزارش با مشکل روبه‌رو شد.", show_alert=True)
 
 
@@ -581,6 +721,8 @@ async def relay(update, context):
     info = _CACHE.get(chat.id)
     if not info or info["ends"] <= time.time():
         return
+    if not msg.reply_to_message:          # فقط ریپلای‌ها از تونل رد می‌شن
+        return
     if msg.text and (msg.text.startswith("/") or _TRIGGER_RE.match(msg.text)):
         return
     kind = _kind(msg)
@@ -598,27 +740,54 @@ async def _relay_task(bot, lock, info, chat, user, msg, kind):
             logger.exception("bridge relay failed")
 
 
+async def _notice(bot, chat_id, msg, text):
+    """پیام قابل‌مشاهده توی همون گپ (ریپلای روی پیام فرستنده)."""
+    try:
+        await _safe(bot.send_message, chat_id=chat_id, text=text,
+                    reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _relay_one(bot, info, chat, user, msg, kind):
     dst = info["partner"]
-    name = clean_name(user)
+    rid = msg.reply_to_message.message_id
     raw_text = (msg.text or msg.caption or "")
     s = get_session()
     try:
-        # اگه روی یک پیام ردوبدل‌شده ریپلای زده، توی گپ مقابل هم ریپلای بشه
+        # آیا روی پیامِ «اونوریا» (کپیِ رسیده از گپ مقابل) یا پیام «وصل شدید» ریپلای شده؟
+        hit = (s.query(ChatBridgeMessage).filter(ChatBridgeMessage.bridge_id == info["id"],
+                                                 ChatBridgeMessage.dst_chat_id == chat.id,
+                                                 ChatBridgeMessage.dst_message_id == rid).first())
         reply_to = None
-        if msg.reply_to_message:
-            rid = msg.reply_to_message.message_id
-            hit = (s.query(ChatBridgeMessage).filter(ChatBridgeMessage.bridge_id == info["id"],
-                                                     ChatBridgeMessage.dst_chat_id == chat.id,
-                                                     ChatBridgeMessage.dst_message_id == rid).first())
-            if hit:
-                reply_to = hit.src_message_id          # پیام اصلیِ اون طرف
-            else:
-                hit = (s.query(ChatBridgeMessage).filter(ChatBridgeMessage.bridge_id == info["id"],
-                                                         ChatBridgeMessage.src_chat_id == chat.id,
-                                                         ChatBridgeMessage.src_message_id == rid).first())
-                if hit and hit.dst_message_id:
-                    reply_to = hit.dst_message_id      # کپیِ اون پیام توی گپ مقابل
+        if hit:
+            reply_to = hit.src_message_id          # پیام اصلی اون طرف
+        else:
+            br = s.get(ChatBridge, info["id"])
+            cm = _json(br.connect_msgs) if br else {}
+            if str(rid) != str(cm.get(str(chat.id))):
+                return                              # ریپلای روی چیزی نیست که به اونور مربوط باشه
+            if cm.get(str(dst)):
+                reply_to = int(cm[str(dst)])
+    finally:
+        s.close()
+
+    # محروم‌شده‌ها پیامشون رد نمی‌شه (و یه پیام قابل‌مشاهده می‌گیرن)
+    if user.id in _BANNED:
+        if time.time() - _ban_notice.get(user.id, 0) > 600:
+            _ban_notice[user.id] = time.time()
+            await _notice(bot, chat.id, msg, BANNED_NOTICE)
+        return
+    # لینک و یوزرنیم به هیچ وجه از تونل رد نمی‌شه
+    ents = tuple(msg.entities or ()) + tuple(msg.caption_entities or ())
+    if contains_link(raw_text, ents):
+        await _notice(bot, chat.id, msg, LINK_WARNING)
+        return
+
+    name = clean_name(user)
+    head = f"👤 <b>{esc(name)}</b> از گپ «{esc(safe_title(chat.title))}»"
+    s = get_session()
+    try:
         row = ChatBridgeMessage(bridge_id=info["id"], src_chat_id=chat.id, src_message_id=msg.message_id,
                                 dst_chat_id=dst, sender_id=user.id, sender_name=(user.full_name or "")[:80],
                                 kind=kind, text=raw_text[:500])
@@ -634,20 +803,20 @@ async def _relay_one(bot, info, chat, user, msg, kind):
     sent_id = None
     try:
         if kind == "text":
-            body = f"👤 <b>{esc(name)}</b>\n<blockquote>{esc(raw_text[:3500])}</blockquote>"
+            body = f"{head}\n<blockquote>{esc(raw_text[:3500])}</blockquote>"
             m = await _safe(bot.send_message, chat_id=dst, text=body, parse_mode="HTML",
                             reply_markup=kb, reply_parameters=rp)
             sent_id = m.message_id
         elif kind in ("sticker", "video_note"):
             label = "🎭 استیکر" if kind == "sticker" else "⭕ ویدیو پیام"
-            head = await _safe(bot.send_message, chat_id=dst, text=f"👤 <b>{esc(name)}</b>\n<blockquote>{label}</blockquote>",
-                               parse_mode="HTML", reply_parameters=rp)
+            h = await _safe(bot.send_message, chat_id=dst, text=f"{head}\n<blockquote>{label}</blockquote>",
+                            parse_mode="HTML", reply_parameters=rp)
             m = await _safe(bot.copy_message, chat_id=dst, from_chat_id=chat.id, message_id=msg.message_id,
                             reply_markup=kb,
-                            reply_parameters=ReplyParameters(message_id=head.message_id, allow_sending_without_reply=True))
+                            reply_parameters=ReplyParameters(message_id=h.message_id, allow_sending_without_reply=True))
             sent_id = m.message_id
         else:
-            cap = f"👤 <b>{esc(name)}</b>"
+            cap = head
             if msg.caption:
                 cap += f"\n<blockquote>{esc(msg.caption[:800])}</blockquote>"
             m = await _safe(bot.copy_message, chat_id=dst, from_chat_id=chat.id, message_id=msg.message_id,
@@ -697,6 +866,10 @@ async def tick(context):
     for bid in talking:
         await _finish(bot, bid, 0, f"⏳ مهلت {BRIDGE_TALK_SECONDS // 60} دقیقه‌ای گفت و گو تموم شد و اتصال دو گپ قطع شد.")
     _load_cache()
+    try:
+        _load_bans()
+    except Exception:  # noqa: BLE001
+        pass
     if time.time() - _last_purge[0] > 3600:
         _last_purge[0] = time.time()
         s = get_session()
@@ -712,7 +885,7 @@ async def tick(context):
 
 def register(app):
     """هندلرها و جاب‌ها رو به اپلیکیشن اضافه می‌کنه (از bot.py صدا زده می‌شه)."""
-    app.add_handler(CallbackQueryHandler(button, pattern=r"^brg:(ok|cancel|end|rep|rm):\d+$"))
+    app.add_handler(CallbackQueryHandler(button, pattern=r"^brg:(ok|cancel|end|rep|rm|ban|unban|dismiss):\d+$"))
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & ~filters.COMMAND & (
             filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL
@@ -720,6 +893,7 @@ def register(app):
         relay), group=7)
     try:
         _load_cache()
+        _load_bans()
     except Exception:  # noqa: BLE001
         logger.exception("bridge cache load failed")
     if app.job_queue:

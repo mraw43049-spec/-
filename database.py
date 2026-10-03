@@ -615,6 +615,14 @@ class ChatBridgeMessage(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
 
+class BridgeBan(Base):
+    """کاربرانی که پشتیبانی از «روباهیو وصل شو» محروم کرده."""
+    __tablename__ = 'bridge_bans'
+    user_id = Column(BigInteger, primary_key=True)
+    banned_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 def init_db():
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
