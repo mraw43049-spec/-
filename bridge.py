@@ -15,7 +15,9 @@
 import asyncio
 import html
 import json
+import json as _json_mod
 import logging
+import os
 import re
 import time
 import unicodedata
@@ -94,6 +96,73 @@ def esc(t) -> str:
     return html.escape(str(t or ""), quote=False)
 
 
+
+# ---------------------------------------------------------------------------
+# عکس بنر (روباه انیمیشنی که به دنیاهای دیگه وصل می‌شه) برای پیام جستجو و دعوت‌نامه
+# ---------------------------------------------------------------------------
+_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+BANNER_PATH = next((os.path.join(_ASSETS, n) for n in ("fox_portal.jpg", "fox_portal.jpeg", "fox_portal.png")
+                    if os.path.exists(os.path.join(_ASSETS, n))), os.path.join(_ASSETS, "fox_portal.jpg"))
+_IMG = {"bytes": None, "file_id": None}
+
+
+def _banner_source():
+    if _IMG["file_id"]:
+        return _IMG["file_id"]
+    if _IMG["bytes"] is None:
+        try:
+            with open(BANNER_PATH, "rb") as f:
+                _IMG["bytes"] = f.read()
+        except Exception:  # noqa: BLE001
+            _IMG["bytes"] = b""
+    return _IMG["bytes"] or None
+
+
+async def _send_banner(bot, chat_id, caption, markup=None, reply_to=None):
+    """عکس + متن به‌عنوان کپشن. اگه عکس نبود/نرفت، همون متن ساده فرستاده می‌شه."""
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    src = _banner_source()
+    if src:
+        try:
+            m = await _safe(bot.send_photo, chat_id=chat_id, photo=src, caption=caption,
+                            reply_markup=markup, reply_parameters=rp)
+            if m.photo and not _IMG["file_id"]:
+                _IMG["file_id"] = m.photo[-1].file_id
+            return m
+        except Exception as e:  # noqa: BLE001
+            if _IMG["file_id"]:
+                _IMG["file_id"] = None      # شاید file_id معتبر نبود؛ دفعه‌ی بعد دوباره آپلود می‌شه
+            logger.info("bridge banner photo failed (%s); falling back to text", e)
+    return await _safe(bot.send_message, chat_id=chat_id, text=caption, reply_markup=markup, reply_parameters=rp)
+
+
+# ---------------------------------------------------------------------------
+# اخطار «فقط برای خودت» (لینک/محرومیت)
+# ---------------------------------------------------------------------------
+# تلگرام برای ربات‌ها پیامِ «قابل مشاهده فقط برای شما» رو با پارامتر مخصوص می‌ده. اسم دقیق اون پارامتر
+# رو اینجا حدس نمی‌زنیم؛ اگه از مستندات تلگرام پیداش کردی، توی Railway متغیر محیطی زیر رو ست کن (JSON):
+#   BRIDGE_PRIVATE_NOTICE_KWARGS={"اسم_پارامتر": "{user_id}"}
+# مقدار "{user_id}" با آیدی کاربرِ خاطی جایگزین می‌شه و با api_kwargs به sendMessage اضافه می‌شه.
+# اگه ست نشده باشه، اخطار به‌صورت ریپلای میاد و بعد از چند ثانیه خودش پاک می‌شه.
+NOTICE_SECONDS = 8
+_PRIVATE_KW = {}
+try:
+    _PRIVATE_KW = _json_mod.loads(os.environ.get("BRIDGE_PRIVATE_NOTICE_KWARGS", "") or "{}")
+    if not isinstance(_PRIVATE_KW, dict):
+        _PRIVATE_KW = {}
+except Exception:  # noqa: BLE001
+    _PRIVATE_KW = {}
+_bg_tasks = set()
+
+
+async def _delete_later(bot, chat_id, message_id, delay):
+    await asyncio.sleep(delay)
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # ---------------------------------------------------------------------------
 # کیبوردها
 # ---------------------------------------------------------------------------
@@ -138,14 +207,19 @@ def safe_title(title) -> str:
     return t[:40] or "یک لونه"
 
 
-def clean_name(user) -> str:
-    """فقط اسم حساب کاربر؛ هر چیزی شبیه لینک، @یوزرنیم یا شماره حذف می‌شه."""
-    n = (getattr(user, "full_name", None) or user.first_name or "").replace("\u2063", "").replace("\u2064", "")
+def clean_text_name(n) -> str:
+    """اسم خام → فقط اسم؛ هر چیزی شبیه لینک، @یوزرنیم یا شماره حذف می‌شه."""
+    n = str(n or "").replace("\u2063", "").replace("\u2064", "")
     n = re.sub(r"(?:https?://|www\.|t\.me/)\S+", "", n, flags=re.I)
     n = re.sub(r"@\w+", "", n)
     n = re.sub(r"\+?\d[\d\s\-()]{6,}\d", "", n)
     n = re.sub(r"\s+", " ", n).strip()
     return n[:40] or "کاربر"
+
+
+def clean_name(user) -> str:
+    """فقط اسم حساب کاربر (بدون لینک/یوزرنیم/شماره)."""
+    return clean_text_name(getattr(user, "full_name", None) or user.first_name or "")
 
 
 async def _safe(fn, *a, **kw):
@@ -231,12 +305,23 @@ def _set_ban(uid: int, banned: bool, by: int):
         _BANNED.discard(uid)
 
 
-async def _edit(bot, chat_id, message_id, text, markup=None):
-    try:
-        await _safe(bot.edit_message_text, chat_id=int(chat_id), message_id=int(message_id), text=text,
-                    reply_markup=markup)
-    except Exception:  # noqa: BLE001
-        pass
+async def _edit(bot, chat_id, message_id, text, markup=None, photo=True):
+    """ویرایش پیام. پیام‌های جستجو/دعوت عکس‌دارن (کپشن)، پیام‌های دیگه متنی‌ان؛ هر دو حالت امتحان می‌شه."""
+    chat_id, message_id = int(chat_id), int(message_id)
+    order = ("caption", "text") if photo else ("text", "caption")
+    for kind in order:
+        try:
+            if kind == "caption":
+                await _safe(bot.edit_message_caption, chat_id=chat_id, message_id=message_id, caption=text, reply_markup=markup)
+            else:
+                await _safe(bot.edit_message_text, chat_id=chat_id, message_id=message_id, text=text, reply_markup=markup)
+            return
+        except BadRequest as e:
+            if "not modified" in str(e).lower():
+                return
+            continue
+        except Exception:  # noqa: BLE001
+            return
 
 
 async def _clear_search_messages(bot, req_id, text, skip_chat=None):
@@ -300,7 +385,7 @@ async def handle_text(update, context) -> bool:
         bid = req.id
     finally:
         s.close()
-    wait = await msg.reply_text(WAIT_TEXT, reply_markup=wait_kb(bid), **reply)
+    wait = await _send_banner(context.bot, chat.id, WAIT_TEXT, wait_kb(bid), reply_to=msg.message_id)
     s = get_session()
     try:
         s.query(ChatBridge).filter(ChatBridge.id == bid).update({"wait_message_id": wait.message_id})
@@ -346,7 +431,7 @@ async def _broadcast(bot, bid):
         if i % 5 == 0 and _status_of(bid) != "searching":
             break
         try:
-            m = await _safe(bot.send_message, chat_id=cid, text=INVITE_TEXT, reply_markup=invite_kb(bid))
+            m = await _send_banner(bot, cid, INVITE_TEXT, invite_kb(bid))
             sent[str(cid)] = m.message_id
         except (Forbidden, BadRequest):
             pass
@@ -503,8 +588,39 @@ async def _accept(q, context, bid):
         s.close()
 
 
+def _bridge_stats(bid):
+    """(تعداد پیام‌های ردوبدل‌شده، اسم پرپیام‌ترین فرد یا None). فقط اسم، بدون آیدی/یوزرنیم."""
+    s = get_session()
+    try:
+        rows = (s.query(ChatBridgeMessage.sender_id, ChatBridgeMessage.sender_name, ChatBridgeMessage.id)
+                .filter(ChatBridgeMessage.bridge_id == bid, ChatBridgeMessage.dst_message_id.isnot(None))
+                .order_by(ChatBridgeMessage.id).limit(20000).all())
+    finally:
+        s.close()
+    if not rows:
+        return 0, None
+    counts, first, name = {}, {}, {}
+    for sid, sname, mid in rows:
+        counts[sid] = counts.get(sid, 0) + 1
+        first.setdefault(sid, mid)
+        name[sid] = sname          # آخرین اسمی که استفاده کرده
+    top = sorted(counts, key=lambda k: (-counts[k], first[k]))[0]
+    return len(rows), clean_text_name(name[top])
+
+
+def _final_caption(bid, reason):
+    total, top = _bridge_stats(bid)
+    lines = [reason, ""]
+    if total == 0:
+        lines.append("💬 هیچ پیامی رد و بدل نشد.")
+    else:
+        lines.append(f"💬 تعداد پیام‌های رد و بدل‌شده: {total:,}")
+        lines.append(f"🏆 بیشترین پیام رو داده: {top}")
+    return "\n".join(lines)
+
+
 async def _finish(bot, bid, by, text):
-    """گفت و گو رو تموم می‌کنه (اتمیک؛ فقط یک بار)."""
+    """گفت و گو رو تموم می‌کنه (اتمیک؛ فقط یک بار) و عکس پایان + آمار رو برای هر دو گپ می‌فرسته."""
     s = get_session()
     try:
         n = (s.query(ChatBridge).filter(ChatBridge.id == bid, ChatBridge.status == "connected")
@@ -518,9 +634,10 @@ async def _finish(bot, bid, by, text):
     finally:
         s.close()
     _load_cache()
+    caption = _final_caption(bid, text)
     for cid in chats:
         try:
-            await _safe(bot.send_message, chat_id=cid, text=text)
+            await _send_banner(bot, cid, caption)
         except Exception as e:  # noqa: BLE001
             logger.info("bridge end msg to %s failed: %s", cid, e)
         mid = cmsgs.get(str(cid))
@@ -740,11 +857,21 @@ async def _relay_task(bot, lock, info, chat, user, msg, kind):
             logger.exception("bridge relay failed")
 
 
-async def _notice(bot, chat_id, msg, text):
-    """پیام قابل‌مشاهده توی همون گپ (ریپلای روی پیام فرستنده)."""
+async def _notice(bot, chat_id, msg, text, user_id=None):
+    """اخطار برای فرستنده؛ ترجیحاً فقط برای خودش دیده بشه (BRIDGE_PRIVATE_NOTICE_KWARGS)، وگرنه ریپلای موقت."""
+    rp = ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+    if _PRIVATE_KW and user_id is not None:
+        extra = {k: (str(v).replace("{user_id}", str(user_id)) if isinstance(v, str) else v) for k, v in _PRIVATE_KW.items()}
+        try:
+            await _safe(bot.send_message, chat_id=chat_id, text=text, reply_parameters=rp, api_kwargs=extra)
+            return
+        except Exception as e:  # noqa: BLE001
+            logger.info("bridge private notice failed (%s); falling back", e)
     try:
-        await _safe(bot.send_message, chat_id=chat_id, text=text,
-                    reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+        m = await _safe(bot.send_message, chat_id=chat_id, text=text, reply_parameters=rp)
+        t = asyncio.create_task(_delete_later(bot, chat_id, m.message_id, NOTICE_SECONDS))
+        _bg_tasks.add(t)
+        t.add_done_callback(_bg_tasks.discard)
     except Exception:  # noqa: BLE001
         pass
 
@@ -776,12 +903,12 @@ async def _relay_one(bot, info, chat, user, msg, kind):
     if user.id in _BANNED:
         if time.time() - _ban_notice.get(user.id, 0) > 600:
             _ban_notice[user.id] = time.time()
-            await _notice(bot, chat.id, msg, BANNED_NOTICE)
+            await _notice(bot, chat.id, msg, BANNED_NOTICE, user.id)
         return
     # لینک و یوزرنیم به هیچ وجه از تونل رد نمی‌شه
     ents = tuple(msg.entities or ()) + tuple(msg.caption_entities or ())
     if contains_link(raw_text, ents):
-        await _notice(bot, chat.id, msg, LINK_WARNING)
+        await _notice(bot, chat.id, msg, LINK_WARNING, user.id)
         return
 
     name = clean_name(user)
