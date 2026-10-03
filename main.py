@@ -10,7 +10,7 @@ import hmac
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -23,10 +23,11 @@ from pydantic import BaseModel
 from sqlalchemy import func
 import httpx
 
+import attack_owl
 from auth import extract_telegram_user, validate_init_data
 
 try:
-    from database import ChatMessage, Referral, User, engine, get_session
+    from database import ChatMessage, PendingAttack, Referral, User, engine, get_session
 except ImportError as e:
     raise RuntimeError("نتونستم database.py رو پیدا کنم؛ main.py باید کنار bot.py باشه.") from e
 
@@ -38,10 +39,11 @@ app = FastAPI(title="Ruby Fox Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # جدول چت‌روم اگه هنوز ساخته نشده باشه (مثلاً مینی‌اپ جدا از بات بالا بیاد) همین‌جا ساخته می‌شه.
-try:
-    ChatMessage.__table__.create(bind=engine, checkfirst=True)
-except Exception as _e:  # noqa: BLE001
-    print(f"[miniapp] could not create chat table: {_e}")
+for _tbl in (ChatMessage, PendingAttack):
+    try:
+        _tbl.__table__.create(bind=engine, checkfirst=True)
+    except Exception as _e:  # noqa: BLE001
+        print(f"[miniapp] could not create table {_tbl.__tablename__}: {_e}")
 
 NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate"}
 
@@ -235,6 +237,50 @@ def fox_state(session, user, botmod=None):
 # ---------------------------------------------------------------------------
 # پروفایل
 # ---------------------------------------------------------------------------
+def _attacks_payload(session, user_id: int):
+    """حمله‌های منتظر تصمیمِ این کاربر (برای کارت مینی‌اپ)."""
+    try:
+        attack_owl.resolve_expired()   # منقضی‌ها همین‌جا هم اجرا می‌شن
+    except Exception:  # noqa: BLE001
+        pass
+    out = []
+    for att in attack_owl.pending_for_target(session, user_id):
+        attacker = session.get(User, att.attacker_id)
+        out.append({
+            "id": att.id,
+            "attacker": display_name(attacker) if attacker else str(att.attacker_id),
+            "amount": int(att.amount or 0),
+            "left": attack_owl.left_seconds(att),
+        })
+    return out
+
+
+@app.get("/api/attacks")
+def attacks_list(tg_user: dict = Depends(current_telegram_user)):
+    session = get_session()
+    try:
+        user = session.get(User, tg_user["id"])
+        return {"attacks": _attacks_payload(session, tg_user["id"]), "owls": int(user.owl_catch_count or 0) if user else 0}
+    finally:
+        session.close()
+
+
+@app.post("/api/attacks/{att_id}/{action}")
+def attacks_decide(att_id: int, action: str, tg_user: dict = Depends(current_telegram_user)):
+    if action not in ("protect", "allow"):
+        raise HTTPException(status_code=400, detail="عملیات نامعتبره.")
+    res = attack_owl.resolve(att_id, action, by_user_id=tg_user["id"])
+    if not res.get("ok"):
+        raise HTTPException(status_code=409, detail=res.get("error", "خطا"))
+    if res["status"] == "protected":
+        msg = "🦉 یکی از جغدهات خرج شد و حمله خنثی شد!"
+    elif res["status"] == "timeout":
+        msg = "⏰ مهلت تموم شده بود؛ حمله اجرا شد."
+    else:
+        msg = "⚔️ حمله انجام شد."
+    return {"message": msg, "status": res["status"]}
+
+
 @app.get("/api/profile")
 def get_profile(tg_user: dict = Depends(current_telegram_user)):
     # اگه به هر دلیلی منطق بات لود نشد، پروفایل ساده هنوز نشون داده می‌شه (دکمه‌ها خطا می‌دن)
@@ -272,6 +318,7 @@ def get_profile(tg_user: dict = Depends(current_telegram_user)):
             "fox_rescued_count": int(user.fox_rescued_count or 0),
             "owl_catch_count": int(user.owl_catch_count or 0),
             "referral_count": int(referral_count),
+            "attacks": _attacks_payload(session, user.telegram_id),
         })
         return data
     finally:
@@ -459,6 +506,330 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
         return {"category": category, "label": label, "emoji": emoji, "entries": entries}
     finally:
         session.close()
+
+
+# ---------------------------------------------------------------------------
+# گردونه‌ی روزانه (همون قوانین بات: ۲۴ ساعت یک‌بار، همون جایزه‌ها)
+# ---------------------------------------------------------------------------
+def _wheel_left(botmod, user) -> int:
+    last = user.wheel_last_spin_at
+    if last is None:
+        return 0
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return max(0, int(botmod.WHEEL_COOLDOWN - (datetime.now(timezone.utc) - last).total_seconds()))
+
+
+@app.get("/api/wheel")
+def wheel_state(tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = session.get(User, tg_user["id"])
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        left = _wheel_left(botmod, user)
+        return {
+            "labels": list(botmod.WHEEL_LABELS),
+            "rewards": list(botmod.WHEEL_REWARDS),
+            "left": left,
+            "can_spin": left == 0,
+            "last_reward": user.wheel_last_reward,
+            "balance": int(user.fox_points or 0),
+        }
+    finally:
+        session.close()
+
+
+@app.post("/api/wheel/spin")
+def wheel_spin(tg_user: dict = Depends(current_telegram_user)):
+    import random
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = (session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first())
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        try:
+            botmod.sync_fox_sickness(user)
+        except Exception:  # noqa: BLE001
+            pass
+        if user.fox_sick_since:
+            session.commit()
+            raise HTTPException(status_code=403, detail="🤒 روباهت مریضه؛ اول از توی بات درمانش کن.")
+        left = _wheel_left(botmod, user)
+        if left > 0:
+            raise HTTPException(status_code=429, detail=f"🐾 هنوز زوده! {left // 3600} ساعت و {(left % 3600) // 60} دقیقه‌ی دیگه.")
+        idx = random.randrange(len(botmod.WHEEL_REWARDS))     # معادل random.choice بات؛ اندیس برای انیمیشن لازمه
+        reward = int(botmod.WHEEL_REWARDS[idx])
+        user.wheel_last_spin_at = datetime.now(timezone.utc)
+        user.wheel_last_reward = reward
+        if reward > 0:
+            user.fox_points = int(user.fox_points or 0) + reward
+        session.commit()
+        return {
+            "index": idx, "reward": reward, "label": botmod.WHEEL_LABELS[idx],
+            "balance": int(user.fox_points or 0), "left": int(botmod.WHEEL_COOLDOWN),
+            "message": "پوچ 😢" if reward == 0 else f"🎉 +{reward:,} روب‌پوینت برنده شدی!",
+        }
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# روباهیو درس (همون منطق education.py؛ پیشرفت بین بات و مینی‌اپ مشترکه)
+# ---------------------------------------------------------------------------
+EDU_UNLOCK_COST = 30000
+EDU_COOLDOWN = 1500          # ۲۵ دقیقه
+EDU_QUESTION_SECONDS = 15
+EDU_GRACE = 2                # چند ثانیه‌ی تحمل برای تأخیر شبکه (فقط مینی‌اپ)
+
+
+def _edu():
+    import education
+    return education
+
+
+def _edu_progress(session, uid, lock=False):
+    edu = _edu()
+    q = session.query(edu.EducationProgress).filter(edu.EducationProgress.user_id == uid)
+    if lock:
+        q = q.with_for_update()
+    p = q.first()
+    if not p:
+        p = edu.EducationProgress(user_id=uid)
+        session.add(p)
+        session.flush()
+    return p
+
+
+def _edu_question(session, p):
+    """سؤال فعال رو (با ترتیب گزینه‌های ثابت برای هر سؤال) برمی‌گردونه: (متن، [متن گزینه‌ها], اندیس درست در ترتیب نمایش، طراح)."""
+    import random
+    edu = _edu()
+    topic, qid = p.active_topic, int(p.active_question)
+    designer = ""
+    if qid >= edu.USER_Q_OFFSET:
+        r = session.get(edu.EduUserQuestion, qid - edu.USER_Q_OFFSET)
+        if not r or r.status != "approved" or r.topic != topic:
+            return None
+        question = r.question
+        opts = [(0, r.correct_opt), (1, r.wrong1), (2, r.wrong2)]
+        au = session.get(User, r.author_id)
+        designer = display_name(au) if au else ""
+        correct_orig = 0
+    else:
+        question, texts, correct_orig = edu.TOPICS[topic][1][qid]
+        opts = list(enumerate(texts))
+    seed = f"{p.user_id}:{qid}:{int(edu._aware(p.active_expires).timestamp()) if p.active_expires else 0}"
+    random.Random(seed).shuffle(opts)       # ترتیب ثابتِ هر نوبت (با رفرش عوض نمی‌شه)
+    correct_pos = [o[0] for o in opts].index(correct_orig)
+    return question, [o[1] for o in opts], correct_pos, designer
+
+
+def _edu_state(session, user, p):
+    edu = _edu()
+    now = edu._now()
+    unlocked = set((p.unlocked or "general").split(","))
+    cert = int(p.certificates or 0)
+    cooldown = 0
+    if p.last_play_at:
+        cooldown = max(0, EDU_COOLDOWN - int((now - edu._aware(p.last_play_at)).total_seconds()))
+    active = None
+    if p.active_topic and p.active_question is not None and p.active_expires and now <= edu._aware(p.active_expires) + timedelta(seconds=EDU_GRACE):
+        qd = _edu_question(session, p)
+        if qd:
+            active = {
+                "topic": p.active_topic, "topic_title": edu.TOPICS[p.active_topic][0],
+                "question": qd[0], "options": qd[1], "designer": qd[3],
+                "left": max(0, int((edu._aware(p.active_expires) - now).total_seconds())),
+            }
+    return {
+        "topics": [{"key": k, "title": v[0], "unlocked": k in unlocked} for k, v in edu.TOPICS.items()],
+        "unlock_cost": EDU_UNLOCK_COST,
+        "correct_answers": int(p.correct_answers or 0),
+        "units": int(p.correct or 0),
+        "certificates": cert,
+        "max_certificates": 15,
+        "title": edu._name(cert),
+        "to_next": max(0, edu._threshold(cert) - int(p.correct_answers or 0)) if cert < 15 else 0,
+        "pending_certificate": bool(p.pending_certificate) and cert < 15,
+        "next_title": edu._name(cert + 1) if cert < 15 else "",
+        "tuition": edu._tuition(cert) if cert < 15 else 0,
+        "reward": edu._reward(cert) if cert < 15 else 0,
+        "cooldown": cooldown,
+        "active": active,
+        "balance": int(user.fox_points or 0),
+    }
+
+
+@app.get("/api/edu")
+def edu_state(tg_user: dict = Depends(current_telegram_user)):
+    session = get_session()
+    try:
+        user = session.get(User, tg_user["id"])
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        p = _edu_progress(session, user.telegram_id)
+        session.commit()
+        return _edu_state(session, user, p)
+    finally:
+        session.close()
+
+
+class EduStart(BaseModel):
+    topic: str
+
+
+class EduAnswer(BaseModel):
+    pos: int
+
+
+@app.post("/api/edu/start")
+def edu_start(body: EduStart, tg_user: dict = Depends(current_telegram_user)):
+    import json, random
+    edu = _edu()
+    topic = body.topic
+    if topic not in edu.TOPICS:
+        raise HTTPException(status_code=400, detail="موضوع نامعتبره.")
+    session = get_session()
+    try:
+        user = session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first()
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        p = _edu_progress(session, user.telegram_id, lock=True)
+        if topic not in set((p.unlocked or "general").split(",")):
+            raise HTTPException(status_code=403, detail="این موضوع قفله؛ اول بازش کن.")
+        now = edu._now()
+        if p.last_play_at and (now - edu._aware(p.last_play_at)).total_seconds() < EDU_COOLDOWN:
+            raise HTTPException(status_code=429, detail="هر ۲۵ دقیقه یک سؤال مجاز است.")
+        seen = json.loads(p.answered or "{}")
+        used = set(seen.get(topic, []))
+        pool = edu.TOPICS[topic][1]
+        user_qs = {edu.USER_Q_OFFSET + r.id: r for r in session.query(edu.EduUserQuestion).filter(
+            edu.EduUserQuestion.topic == topic, edu.EduUserQuestion.status == "approved",
+            edu.EduUserQuestion.author_id != p.user_id).all()}
+        all_ids = list(range(len(pool))) + list(user_qs.keys())
+        available = [i for i in all_ids if i not in used]
+        if not available:
+            seen[topic] = []
+            p.answered = json.dumps(seen)
+            available = all_ids
+        p.active_topic = topic
+        p.active_question = random.choice(available)
+        p.active_expires = now + timedelta(seconds=EDU_QUESTION_SECONDS)
+        p.last_play_at = now
+        session.commit()
+        return _edu_state(session, user, p)
+    finally:
+        session.close()
+
+
+@app.post("/api/edu/answer")
+def edu_answer(body: EduAnswer, tg_user: dict = Depends(current_telegram_user)):
+    import json
+    edu = _edu()
+    session = get_session()
+    try:
+        user = session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first()
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        p = _edu_progress(session, user.telegram_id, lock=True)
+        if (not p.active_topic or p.active_question is None or not p.active_expires
+                or edu._now() > edu._aware(p.active_expires) + timedelta(seconds=EDU_GRACE)):
+            p.active_topic = None
+            p.active_question = None
+            p.active_expires = None
+            session.commit()
+            return {"result": "timeout", "message": "⏰ زمان سؤال تموم شد؛ این دور پایان یافت.", "state": _edu_state(session, user, p)}
+        qd = _edu_question(session, p)
+        topic, qid = p.active_topic, int(p.active_question)
+        seen = json.loads(p.answered or "{}")
+        seen.setdefault(topic, []).append(qid)
+        p.answered = json.dumps(seen)
+        p.active_topic = None
+        p.active_question = None
+        p.active_expires = None
+        if qd is None:
+            session.commit()
+            return {"result": "gone", "message": "این سؤال دیگه در دسترس نیست؛ دوباره تلاش کن.", "state": _edu_state(session, user, p)}
+        if body.pos != qd[2]:
+            session.commit()
+            return {"result": "wrong", "correct_text": qd[1][qd[2]],
+                    "message": "❌ پاسخ اشتباه بود؛ بازی تمام شد. ۲۵ دقیقه بعد دوباره تلاش کن.",
+                    "state": _edu_state(session, user, p)}
+        p.correct_answers = int(p.correct_answers or 0) + 1
+        p.correct = int(p.correct or 0) + 2
+        msg = "✅ درست! +۲ واحد"
+        if int(p.certificates or 0) < 15 and p.correct_answers >= edu._threshold(p.certificates):
+            p.pending_certificate = 1
+            msg += f"\n🎓 به حد نصاب مدرک {edu._name(p.certificates + 1)} رسیدی!"
+        session.commit()
+        return {"result": "correct", "message": msg, "state": _edu_state(session, user, p)}
+    finally:
+        session.close()
+
+
+@app.post("/api/edu/unlock")
+def edu_unlock(body: EduStart, tg_user: dict = Depends(current_telegram_user)):
+    edu = _edu()
+    if body.topic not in edu.TOPICS:
+        raise HTTPException(status_code=400, detail="موضوع نامعتبره.")
+    session = get_session()
+    try:
+        user = session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first()
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        p = _edu_progress(session, user.telegram_id, lock=True)
+        unlocked = set((p.unlocked or "general").split(","))
+        if body.topic in unlocked:
+            raise HTTPException(status_code=409, detail="این موضوع از قبل بازه.")
+        if int(user.fox_points or 0) < EDU_UNLOCK_COST:
+            raise HTTPException(status_code=402, detail="روب‌پوینت کافی نیست.")
+        unlocked.add(body.topic)
+        p.unlocked = ",".join(sorted(unlocked))
+        user.fox_points = int(user.fox_points) - EDU_UNLOCK_COST
+        session.commit()
+        return {"message": "موضوع با موفقیت خریداری شد ✅", "state": _edu_state(session, user, p)}
+    finally:
+        session.close()
+
+
+@app.post("/api/edu/certificate")
+def edu_certificate(tg_user: dict = Depends(current_telegram_user)):
+    edu = _edu()
+    session = get_session()
+    try:
+        user = session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first()
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        p = _edu_progress(session, user.telegram_id, lock=True)
+        if not p.pending_certificate or int(p.certificates or 0) >= 15:
+            raise HTTPException(status_code=409, detail="مدرک در انتظار تأیید وجود نداره.")
+        cost, reward = edu._tuition(p.certificates), edu._reward(p.certificates)
+        if int(user.fox_points or 0) < cost:
+            raise HTTPException(status_code=402, detail=f"روب‌پوینت کافی نیست؛ شهریه {cost:,} است.")
+        user.fox_points = int(user.fox_points) - cost + reward
+        p.certificates = int(p.certificates) + 1
+        p.pending_certificate = 0
+        session.commit()
+        return {"message": f"🎉 مدرک {edu._name(p.certificates)} دریافت شد! شهریه {cost:,} | جایزه {reward:,} | خالص {reward - cost:+,}",
+                "state": _edu_state(session, user, p)}
+    finally:
+        session.close()
+
+
+_BOT_USERNAME = {"v": None}
+
+
+@app.get("/api/botinfo")
+def bot_info(tg_user: dict = Depends(current_telegram_user)):
+    """یوزرنیم بات برای دکمه‌ی «طرح سؤال» که کاربر رو به پیوی بات می‌بره."""
+    if not _BOT_USERNAME["v"]:
+        res = attack_owl.tg_call("getMe")
+        if res and res.get("username"):
+            _BOT_USERNAME["v"] = res["username"]
+    return {"username": _BOT_USERNAME["v"]}
 
 
 # ---------------------------------------------------------------------------

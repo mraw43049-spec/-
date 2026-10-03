@@ -559,6 +559,22 @@ class ChatMessage(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
 
+class PendingAttack(Base):
+    """حمله‌ای که منتظر تصمیم هدفِ دارای جغد است (۳۰ دقیقه فرصت)."""
+    __tablename__ = 'pending_attacks'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    attacker_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False, index=True)
+    target_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False, index=True)
+    amount = Column(Integer, nullable=False, default=0)  # مبلغِ ۲٪ که لحظه‌ی حمله محاسبه شده
+    chat_id = Column(BigInteger, nullable=True)
+    reply_message_id = Column(BigInteger, nullable=True)  # پیام «حمله» مهاجم
+    decision_message_id = Column(BigInteger, nullable=True)  # پیام دکمه‌دار داخل گروه
+    status = Column(String, nullable=False, default='pending', index=True)  # pending / resolving / protected / executed / timeout
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+
 def init_db():
     Base.metadata.create_all(engine)
     with engine.begin() as conn:

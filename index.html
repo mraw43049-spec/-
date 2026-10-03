@@ -58,6 +58,35 @@ header{text-align:center;padding:6px 0 12px}h1{font-size:23px;margin:0;color:#ff
 .cname{font-size:11px;color:#ffb347;font-weight:800;margin-bottom:2px}
 .ctext{font-size:14px;line-height:1.8;white-space:pre-wrap}
 .ctime{font-size:10px;color:#9d8fcb;margin-top:2px}
+.atk{border-color:#ff6b6b!important;background:linear-gradient(160deg,#4a1d4acc,#2a1a52cc)!important}
+.atk h3{margin:0 0 6px;font-size:16px;color:#ffb3b3}
+.atk .timer{font-weight:900;color:#ffd27a;font-size:15px}
+.atk-btns{display:grid;gap:8px;margin-top:10px}
+.atk-btns button{padding:12px;border-radius:14px;border:1px solid #6a4fb8;background:#2f1f5e;color:#fff;font-weight:800;font-family:inherit;font-size:14px}
+.atk-btns .yes{background:linear-gradient(135deg,#2f7d4a,#1f5c36);border-color:#4cc27a}
+.atk-btns .no{background:linear-gradient(135deg,#8a2f3a,#5f1f28);border-color:#e0707e}
+.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.stat{background:#1f1342;border:1px solid #4b3585;border-radius:14px;padding:10px 4px;text-align:center}
+.stat b{display:block;font-size:18px;color:#ffc46b}.stat span{font-size:11px;color:#cdc0f0}
+.q-card{border-color:#ffc46b!important}
+.q-text{font-size:17px;font-weight:800;line-height:2;margin:6px 0 10px}
+.q-bar{height:8px;border-radius:99px;background:#1f1342;overflow:hidden;margin-bottom:12px}
+.q-bar i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#ffc46b,#ff7a59);transition:width 1s linear}
+.opt{display:block;width:100%;text-align:right;margin-top:8px;padding:13px;border-radius:14px;border:1px solid #6a4fb8;background:#2f1f5e;color:#fff;font-weight:800;font-size:15px;font-family:inherit}
+.opt:disabled{opacity:.55}
+.topic{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;padding:12px;border-radius:14px;border:1px solid #4b3585;background:#1f1342}
+.topic .go{padding:9px 14px;border-radius:12px;border:0;font-weight:900;font-family:inherit;background:linear-gradient(135deg,#8b5cf6,#c04cf0);color:#fff}
+.topic .go:disabled{opacity:.45}
+.topic .lock{background:linear-gradient(135deg,#c28a1d,#8a5a0f)}
+.wheel-wrap{position:relative;width:min(300px,82vw);aspect-ratio:1;margin:8px auto 14px}
+.wheel{position:absolute;inset:0;border-radius:50%;border:6px solid #ffc46b;box-shadow:0 0 0 4px #4b3585,0 0 40px #a53fd1aa;transition:transform 5s cubic-bezier(.12,.67,.1,1)}
+.wheel .lbl{position:absolute;left:50%;top:50%;width:0;height:0}
+.wheel .lbl span{position:absolute;left:0;top:0;transform:translate(-50%,-50%);font-weight:900;font-size:13px;color:#fff;text-shadow:0 1px 3px #000a;white-space:nowrap}
+.wheel-hub{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;border-radius:50%;background:radial-gradient(#ffe29a,#ffb347);border:3px solid #fff3;display:flex;align-items:center;justify-content:center;font-size:24px;z-index:3;box-shadow:0 4px 14px #0008}
+.wheel-pin{position:absolute;top:-14px;left:50%;margin-left:-14px;z-index:4;font-size:30px;filter:drop-shadow(0 2px 4px #000a)}
+.spin-btn{width:100%;padding:15px;border-radius:16px;border:0;font-size:17px;font-weight:900;font-family:inherit;color:#fff;background:linear-gradient(135deg,#ff9a3c,#e0407e)}
+.spin-btn:disabled{opacity:.5}
+.wheel-res{text-align:center;font-size:18px;font-weight:900;color:#ffd27a;min-height:30px;margin-top:10px}
 .chat-form{display:flex;gap:8px;margin-top:10px}
 .chat-form input{flex:1;min-width:0;padding:12px;border-radius:14px;border:1px solid #6a4fb8;background:#12092a;color:#fff;font-size:15px;font-family:inherit}
 .chat-form .action{padding:0 18px}
@@ -81,8 +110,9 @@ header{text-align:center;padding:6px 0 12px}h1{font-size:23px;margin:0;color:#ff
 .banner{border-radius:14px;padding:12px;margin-bottom:12px;font-size:13px;line-height:1.9;text-align:center;display:none}
 .banner.err{display:block;background:#3a1b1b;border:1px solid #7a3030}
 .banner.ok{display:block;background:#1d3322;border:1px solid #3c7a4a}
-.tabs{position:fixed;bottom:0;left:0;right:0;padding:9px 10px calc(9px + env(safe-area-inset-bottom));background:#150b33ee;display:grid;grid-template-columns:1fr 1fr 1fr 1.15fr;gap:6px;border-top:1px solid #4b3585}
-.tab{border:1px solid #5b43a0;background:#2f1f5e;color:#efe9ff;border-radius:14px;padding:11px 4px;font-weight:800;font-family:inherit;font-size:13px}
+.tabs{position:fixed;bottom:0;left:0;right:0;padding:9px 10px calc(9px + env(safe-area-inset-bottom));background:#150b33ee;display:grid;grid-template-columns:repeat(6,1fr);gap:5px;border-top:1px solid #4b3585}
+.tab{border:1px solid #5b43a0;background:#2f1f5e;color:#efe9ff;border-radius:13px;padding:6px 1px 5px;font-weight:800;font-family:inherit;font-size:10.5px;display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.3;min-width:0}
+.tab .ti{font-size:19px;line-height:1.1}
 .tab.active{background:#ff9a3c;color:#1b120c}
 ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 li{display:flex;align-items:center;gap:10px;background:#1f1342;border:1px solid #4b3585;border-radius:14px;padding:11px}
@@ -108,6 +138,7 @@ li.me{border-color:#ff9a3c;background:#40257a}
 
 <section id="foxView" class="view active">
   <div id="banner" class="banner"></div>
+  <div id="atkBox"></div>
 
   <div class="card hero">
     <div id="foxImg" class="fox-img">🦊</div>
@@ -159,6 +190,41 @@ li.me{border-color:#ff9a3c;background:#40257a}
   <div class="card"><ol id="list"></ol><div id="msg">🦊 در حال بارگذاری...</div></div>
 </section>
 
+<section id="eduView" class="view">
+  <div class="card">
+    <div class="section-title">🎓 روباهیو درس</div>
+    <div id="eduTitle" class="muted" style="text-align:center">در حال بارگذاری...</div>
+    <div class="stat-row">
+      <div class="stat"><b id="eduCorrect">۰</b><span>پاسخ درست</span></div>
+      <div class="stat"><b id="eduUnits">۰</b><span>واحد</span></div>
+      <div class="stat"><b id="eduCerts">۰/۱۵</b><span>مدرک</span></div>
+    </div>
+    <div id="eduNext" class="muted" style="text-align:center;margin-top:8px"></div>
+  </div>
+  <div id="eduCert"></div>
+  <div id="eduQ"></div>
+  <div class="card">
+    <div class="section-title">📚 موضوع‌ها</div>
+    <div id="eduCooldown" class="muted" style="text-align:center;margin-bottom:4px"></div>
+    <div id="eduTopics"></div>
+    <button id="eduDesign" class="opt" style="text-align:center;margin-top:12px;display:none">✍️ طرح سوال (۵۰۰ روب‌پوینت جایزه‌ی هر سوال تأییدشده)</button>
+  </div>
+</section>
+
+<section id="wheelView" class="view">
+  <div class="card" style="text-align:center">
+    <div class="section-title">🎡 گردونه‌ی روزانه</div>
+    <div class="wheel-wrap">
+      <div class="wheel-pin">🔻</div>
+      <div id="wheel" class="wheel"></div>
+      <div class="wheel-hub">🦊</div>
+    </div>
+    <button id="spinBtn" class="spin-btn">🎡 بچرخون!</button>
+    <div id="wheelRes" class="wheel-res"></div>
+    <div id="wheelInfo" class="muted"></div>
+  </div>
+</section>
+
 <section id="chatView" class="view">
   <div class="card">
     <div class="section-title">💬 چت‌روم همه‌ی بازیکن‌ها</div>
@@ -171,10 +237,12 @@ li.me{border-color:#ff9a3c;background:#40257a}
 </section>
 
 <nav class="tabs">
-  <button id="foxTab" class="tab active">🦊 روباه من</button>
-  <button id="leaderTab" class="tab">🏆 لیدربرد</button>
-  <button id="chatTab" class="tab">💬 چت</button>
-  <button id="btnRefresh" class="tab refresh-tab"><span id="rfIcon">🔄</span> تازه‌سازی</button>
+  <button id="foxTab" class="tab active"><span class="ti">🦊</span>روباه</button>
+  <button id="eduTab" class="tab"><span class="ti">🎓</span>درس</button>
+  <button id="wheelTab" class="tab"><span class="ti">🎡</span>گردونه</button>
+  <button id="leaderTab" class="tab"><span class="ti">🏆</span>لیدربرد</button>
+  <button id="chatTab" class="tab"><span class="ti">💬</span>چت</button>
+  <button id="btnRefresh" class="tab refresh-tab"><span class="ti" id="rfIcon">🔄</span>تازه‌سازی</button>
 </nav>
 
 <div id="renameModal" class="modal"><div class="sheet">
@@ -254,8 +322,60 @@ li.me{border-color:#ff9a3c;background:#40257a}
 
   function genderLabel(g){ return g === "male" ? "مرد 👦" : g === "female" ? "زن 👧" : "نامشخص"; }
 
+  // ---------- حمله‌ی در انتظار تصمیم (جغد) ----------
+  var atkList = [], atkTick = null, atkAt = 0;
+  function renderAttacks(list){
+    atkList = (list || []).map(function(a){ return { id: a.id, attacker: a.attacker, amount: a.amount, left: a.left }; });
+    atkAt = Date.now();
+    drawAttacks();
+    clearInterval(atkTick);
+    if (atkList.length) atkTick = setInterval(drawAttacks, 1000);
+  }
+  function leftOf(a){ return Math.max(0, a.left - Math.floor((Date.now() - atkAt)/1000)); }
+  function fmtLeft(sec){ var m = Math.floor(sec/60), s = sec%60; return fa(m) + ":" + fa(String(s).padStart(2,"0")); }
+  function drawAttacks(){
+    var box = $("atkBox");
+    // اگه کاربر الان داره دکمه می‌زنه، DOM رو بازسازی نکن؛ فقط تایمر رو بروز کن
+    if (box.firstChild && box.querySelectorAll(".atk").length === atkList.length && atkList.length) {
+      atkList.forEach(function(a){ var t = box.querySelector('[data-t="'+a.id+'"]'); if (t) t.textContent = fmtLeft(leftOf(a)); });
+      return;
+    }
+    box.innerHTML = "";
+    atkList.forEach(function(a){
+      var c = document.createElement("div"); c.className = "card atk";
+      var h = document.createElement("h3"); h.textContent = "⚔️ " + a.attacker + " بهت حمله کرد!";
+      var p = document.createElement("div"); p.className = "muted";
+      p.textContent = "۲٪ دارایی‌ت (" + fa(a.amount) + " روب‌پوینت) در خطره. با یکی از جغدهات می‌تونی جلوشو بگیری.";
+      var t = document.createElement("div"); t.style.marginTop = "6px";
+      t.appendChild(document.createTextNode("⏳ زمان تصمیم‌گیری: "));
+      var tt = document.createElement("span"); tt.className = "timer"; tt.dataset.t = a.id; tt.textContent = fmtLeft(leftOf(a));
+      t.appendChild(tt);
+      var bs = document.createElement("div"); bs.className = "atk-btns";
+      function btn(txt, cls, fn){ var b = document.createElement("button"); b.textContent = txt; if (cls) b.className = cls; b.onclick = fn; bs.appendChild(b); }
+      btn("🦉 بله، از من محافظت کن", "yes", function(){ decideAttack(a.id, "protect"); });
+      btn("⚔️ نه، بذار حمله بشه", "no", function(){ decideAttack(a.id, "allow"); });
+      btn("🔄 بروزرسانی", "", function(){
+        loadProfile(true).then(function(){
+          var cur = atkList.filter(function(x){ return x.id === a.id; })[0];
+          toast(cur ? "⏳ زمان باقی‌مانده: " + fmtLeft(leftOf(cur)) : "این حمله تموم شده.", true);
+        });
+      });
+      c.appendChild(h); c.appendChild(p); c.appendChild(t); c.appendChild(bs);
+      box.appendChild(c);
+    });
+  }
+  var deciding = false;
+  function decideAttack(id, action){
+    if (deciding) return; deciding = true;
+    api("/api/attacks/" + id + "/" + action, "POST").then(function(r){
+      toast(r.message || "انجام شد.", true);
+      return loadProfile(true);
+    }).catch(function(e){ toast(e.message, false); return loadProfile(true); }).then(function(){ deciding = false; });
+  }
+
   function render(d){
     current = d;
+    renderAttacks(d.attacks);
     $("foxName").textContent = "🦊 " + (d.fox_name || "مکار");
     $("userName").textContent = d.display_name ? "@" + String(d.display_name).replace(/^@/, "") : "";
     $("levelChip").textContent = "سطح " + fa(d.fox_level) + " / " + fa(d.max_level);
@@ -474,20 +594,191 @@ li.me{border-color:#ff9a3c;background:#40257a}
   lb.addEventListener("pointercancel", endPtr);
   lb.addEventListener("wheel", function(e){ e.preventDefault(); Z.s *= e.deltaY < 0 ? 1.15 : 0.87; clampZ(); applyZ(); }, { passive: false });
 
+  // ---------- گردونه ----------
+  var wheelData = null, wheelRot = 0, wheelBusy = false, wheelTick = null, wheelLeftAt = 0;
+  var WHEEL_COLORS = ["#7c3aed","#c026d3","#2563eb","#db2777","#374151","#9333ea","#d97706","#16a34a"];
+  function buildWheel(labels){
+    var w = $("wheel"), n = labels.length, seg = 360 / n, stops = [];
+    for (var i = 0; i < n; i++) stops.push(WHEEL_COLORS[i % WHEEL_COLORS.length] + " " + (i*seg) + "deg " + ((i+1)*seg) + "deg");
+    w.style.background = "conic-gradient(" + stops.join(",") + ")";
+    w.innerHTML = "";
+    labels.forEach(function(t, i){
+      var short = String(t).replace(/\s*روب\s*پوینت/, "").trim();
+      var holder = document.createElement("div"); holder.className = "lbl";
+      holder.style.transform = "rotate(" + (i*seg + seg/2) + "deg)";
+      var sp = document.createElement("span");
+      sp.style.transform = "translate(-50%,-50%) translateY(-" + 98 + "px)";
+      sp.textContent = /^\d+$/.test(short) ? fa(short) : short;
+      holder.appendChild(sp); w.appendChild(holder);
+    });
+  }
+  function wheelLeftNow(){ return Math.max(0, (wheelData ? wheelData.left : 0) - Math.floor((Date.now() - wheelLeftAt)/1000)); }
+  function fmtHMS(sec){
+    var h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+    return fa(String(h).padStart(2,"0")) + ":" + fa(String(m).padStart(2,"0")) + ":" + fa(String(s).padStart(2,"0"));
+  }
+  function drawWheelInfo(){
+    if (!wheelData) return;
+    var left = wheelLeftNow(), b = $("spinBtn");
+    if (wheelBusy) return;
+    if (left > 0) { b.disabled = true; $("wheelInfo").textContent = "⏱ گردونه‌ی بعدی: " + fmtHMS(left); }
+    else { b.disabled = false; $("wheelInfo").textContent = "💰 موجودی: " + fa(wheelData.balance) + " روب‌پوینت"; }
+  }
+  function loadWheel(){
+    return api("/api/wheel").then(function(d){
+      var first = !wheelData;
+      wheelData = d; wheelLeftAt = Date.now();
+      if (first) buildWheel(d.labels);
+      if (d.last_reward !== null && d.last_reward !== undefined && !$("wheelRes").textContent)
+        $("wheelRes").textContent = "آخرین جایزه: " + (d.last_reward === 0 ? "پوچ 😢" : fa(d.last_reward) + " روب‌پوینت");
+      drawWheelInfo(); stamp();
+    }).catch(function(e){ $("wheelInfo").textContent = "خطا: " + e.message; });
+  }
+  $("spinBtn").onclick = function(){
+    if (wheelBusy || !wheelData) return;
+    wheelBusy = true; $("spinBtn").disabled = true; $("wheelRes").textContent = "🎡 ...";
+    api("/api/wheel/spin", "POST").then(function(r){
+      var n = wheelData.labels.length, seg = 360 / n;
+      var target = 360 * 6 + (360 - (r.index * seg + seg/2));
+      wheelRot = wheelRot - (wheelRot % 360) + target;
+      $("wheel").style.transform = "rotate(" + wheelRot + "deg)";
+      setTimeout(function(){
+        wheelBusy = false;
+        wheelData.left = r.left; wheelData.balance = r.balance; wheelLeftAt = Date.now();
+        $("wheelRes").textContent = r.message;
+        toast(r.message, r.reward > 0);
+        drawWheelInfo();
+      }, 5200);
+    }).catch(function(e){
+      wheelBusy = false; $("wheelRes").textContent = ""; toast(e.message, false); loadWheel();
+    });
+  };
+
+  // ---------- روباهیو درس ----------
+  var edu = null, eduAt = 0, eduTick = null, eduBusy = false, botUser = null;
+  function eduLeft(sec){ return Math.max(0, sec - Math.floor((Date.now() - eduAt)/1000)); }
+  function fmtMS(sec){ var m = Math.floor(sec/60), s = sec%60; return fa(m) + ":" + fa(String(s).padStart(2,"0")); }
+  function setEdu(st){ edu = st; eduAt = Date.now(); drawEdu(true); }
+  function loadEdu(){
+    return api("/api/edu").then(function(st){ setEdu(st); stamp(); })
+      .catch(function(e){ $("eduTitle").textContent = "خطا: " + e.message; });
+  }
+  function drawEdu(full){
+    if (!edu) return;
+    if (full) {
+      $("eduTitle").textContent = "🏅 " + edu.title;
+      $("eduCorrect").textContent = fa(edu.correct_answers);
+      $("eduUnits").textContent = fa(edu.units);
+      $("eduCerts").textContent = fa(edu.certificates) + "/" + fa(edu.max_certificates);
+      $("eduNext").textContent = edu.certificates < edu.max_certificates ? "📈 تا مدرک بعدی: " + fa(edu.to_next) + " پاسخ درست" : "🏆 همه‌ی مدارک رو گرفتی!";
+      // مدرک در انتظار
+      var cb = $("eduCert"); cb.innerHTML = "";
+      if (edu.pending_certificate) {
+        var c = document.createElement("div"); c.className = "card";
+        c.innerHTML = "<div class='section-title'>🎓 مدرک " + "</div>";
+        var t = document.createElement("div"); t.className = "muted";
+        t.textContent = "به حد نصاب مدرک «" + edu.next_title + "» رسیدی! شهریه: " + fa(edu.tuition) + " | جایزه: " + fa(edu.reward) + " روب‌پوینت";
+        var b = document.createElement("button"); b.className = "opt"; b.style.textAlign = "center";
+        b.textContent = "✅ پرداخت شهریه و دریافت مدرک";
+        b.onclick = function(){ eduCall("/api/edu/certificate"); };
+        c.appendChild(t); c.appendChild(b); cb.appendChild(c);
+      }
+      // سؤال فعال
+      var qb = $("eduQ"); qb.innerHTML = "";
+      if (edu.active) {
+        var qc = document.createElement("div"); qc.className = "card q-card";
+        var h = document.createElement("div"); h.className = "section-title"; h.textContent = edu.active.topic_title;
+        var qt = document.createElement("div"); qt.className = "q-text"; qt.textContent = "❓ " + edu.active.question;
+        qc.appendChild(h); qc.appendChild(qt);
+        if (edu.active.designer) { var d = document.createElement("div"); d.className = "muted"; d.textContent = "✍️ طراح: " + edu.active.designer; qc.appendChild(d); }
+        var bar = document.createElement("div"); bar.className = "q-bar"; var bi = document.createElement("i"); bi.id = "qBarI"; bar.appendChild(bi);
+        var tl = document.createElement("div"); tl.className = "muted"; tl.id = "qLeft"; tl.style.textAlign = "center"; tl.style.marginBottom = "4px";
+        qc.appendChild(bar); qc.appendChild(tl);
+        edu.active.options.forEach(function(txt, pos){
+          var o = document.createElement("button"); o.className = "opt"; o.textContent = (pos+1) + ") " + txt;
+          o.onclick = function(){ answerEdu(pos); }; qc.appendChild(o);
+        });
+        qb.appendChild(qc);
+      }
+      // موضوع‌ها
+      var tb = $("eduTopics"); tb.innerHTML = "";
+      edu.topics.forEach(function(t){
+        var row = document.createElement("div"); row.className = "topic";
+        var nm = document.createElement("span"); nm.textContent = t.title; nm.style.fontWeight = "800";
+        var bt = document.createElement("button"); bt.className = "go"; bt.dataset.topic = t.key;
+        if (t.unlocked) { bt.textContent = "▶️ شروع"; bt.onclick = function(){ startEdu(t.key); }; }
+        else { bt.className = "go lock"; bt.textContent = "🔒 باز کردن (" + fa(edu.unlock_cost) + ")"; bt.onclick = function(){ unlockEdu(t.key, t.title); }; }
+        row.appendChild(nm); row.appendChild(bt); tb.appendChild(row);
+      });
+      $("eduDesign").style.display = edu.certificates < edu.max_certificates ? "" : "none";
+    }
+    // بخش‌های زنده (هر ثانیه)
+    var cd = Math.max(0, edu.cooldown - Math.floor((Date.now() - eduAt)/1000));
+    var activeLeft = edu.active ? eduLeft(edu.active.left) : 0;
+    var playing = edu.active && activeLeft > 0;
+    $("eduCooldown").textContent = playing ? "" : (cd > 0 ? "⏳ سؤال بعدی تا " + fmtMS(cd) + " دیگه" : "موضوع رو انتخاب کن و شروع کن:");
+    document.querySelectorAll("#eduTopics .go").forEach(function(b){ b.disabled = (cd > 0 || playing || eduBusy) && !b.classList.contains("lock"); });
+    if (edu.active) {
+      var li = $("qLeft"), bi2 = $("qBarI");
+      if (li) li.textContent = "⏱ " + fa(activeLeft) + " ثانیه";
+      if (bi2) bi2.style.width = Math.round(activeLeft / 15 * 100) + "%";
+      if (activeLeft <= 0) {
+        document.querySelectorAll("#eduQ .opt").forEach(function(b){ b.disabled = true; });
+        if (li) li.textContent = "⏰ زمان تموم شد";
+        if (!eduBusy && !edu._timedOut) { edu._timedOut = true; setTimeout(function(){ if (view === "edu") loadEdu(); }, 2500); }
+      }
+    }
+  }
+  function eduCall(path, body){
+    if (eduBusy) return Promise.resolve();
+    eduBusy = true;
+    return api(path, "POST", body).then(function(r){
+      if (r.message) toast(r.message, r.result ? r.result === "correct" : true);
+      setEdu(r.state || edu);
+      return r;
+    }).catch(function(e){ toast(e.message, false); loadEdu(); }).then(function(){ eduBusy = false; drawEdu(false); });
+  }
+  function startEdu(topic){ eduCall("/api/edu/start", { topic: topic }); }
+  function unlockEdu(topic, title){
+    if (!confirm("باز کردن «" + title + "» با " + fa(edu.unlock_cost) + " روب‌پوینت؟")) return;
+    eduCall("/api/edu/unlock", { topic: topic });
+  }
+  function answerEdu(pos){
+    document.querySelectorAll("#eduQ .opt").forEach(function(b){ b.disabled = true; });
+    eduCall("/api/edu/answer", { pos: pos }).then(function(r){
+      if (r && r.result === "wrong" && r.correct_text) {
+        var qb = $("eduQ"), c = document.createElement("div"); c.className = "card";
+        c.textContent = "✅ جواب درست: " + r.correct_text; qb.appendChild(c);
+      }
+    });
+  }
+  $("eduDesign").onclick = function(){
+    function open(u){ var url = "https://t.me/" + u + "?start=design_question"; if (tg && tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url, "_blank"); }
+    if (botUser) return open(botUser);
+    api("/api/botinfo").then(function(r){ if (r.username) { botUser = r.username; open(botUser); } else toast("نتونستم یوزرنیم بات رو پیدا کنم.", false); })
+      .catch(function(e){ toast(e.message, false); });
+  };
+
   // ---------- ناوبری + تازه‌سازی ----------
   var view = "fox";
   function show(v){
     view = v;
-    ["fox","leader","chat"].forEach(function(n){
+    ["fox","edu","wheel","leader","chat"].forEach(function(n){
       $(n + "View").classList.toggle("active", v === n);
       $(n + "Tab").classList.toggle("active", v === n);
     });
     clearInterval(chatTimer); chatTimer = null;
-    if (v === "leader") loadLeader();
+    clearInterval(eduTick); eduTick = null;
+    clearInterval(wheelTick); wheelTick = null;
+    if (v === "edu") { loadEdu(); eduTick = setInterval(function(){ drawEdu(false); }, 1000); }
+    else if (v === "wheel") { loadWheel(); wheelTick = setInterval(drawWheelInfo, 1000); }
+    else if (v === "leader") loadLeader();
     else if (v === "chat") { loadChat(); chatTimer = setInterval(loadChat, 3000); }
     else loadProfile();
   }
   $("foxTab").onclick = function(){ show("fox"); };
+  $("eduTab").onclick = function(){ show("edu"); };
+  $("wheelTab").onclick = function(){ show("wheel"); };
   $("leaderTab").onclick = function(){ show("leader"); };
   $("chatTab").onclick = function(){ show("chat"); };
 
@@ -498,6 +789,8 @@ li.me{border-color:#ff9a3c;background:#40257a}
     try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred("light"); } catch(e){}
     var p;
     if (view === "leader") p = loadLeader();
+    else if (view === "edu") p = loadEdu();
+    else if (view === "wheel") p = loadWheel();
     else if (view === "chat") p = loadChat();
     else p = loadProfile();
     Promise.resolve(p).then(function(){ toast("🔄 اطلاعات بروز شد", true); }).then(function(){
@@ -508,7 +801,7 @@ li.me{border-color:#ff9a3c;background:#40257a}
 
   // بروزرسانی خودکار بی‌صدا: هر ۲۰ ثانیه + وقتی دوباره برمی‌گردی داخل مینی‌اپ
   setInterval(function(){
-    if (document.hidden || busy || view === "chat") return;
+    if (document.hidden || busy || view === "chat" || view === "edu" || view === "wheel") return;
     if (view === "fox") loadProfile(true); else loadLeader();
   }, 20000);
   document.addEventListener("visibilitychange", function(){

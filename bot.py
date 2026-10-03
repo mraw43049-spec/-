@@ -25,6 +25,7 @@ from database import (
     FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, RubyOwl, get_session, init_db
 )
 import ai_service as ai
+import attack_owl
 import fox_brain as brain
 import fox_spell as spell
 import education as education_module
@@ -265,7 +266,7 @@ BANK_CARD_TRANSFER_COOLDOWN = 5 * 60
 BANK_CARD_TRANSFER_FEE_RATE = 0.05
 TRANSFER_MAX = 500_000
 ATTACK_COOLDOWN_SECONDS = 45 * 60
-ATTACK_STEAL_RATE = 0.002  # 0.2 درصد
+ATTACK_STEAL_RATE = 0.02  # ۲ درصد
 WHEEL_COOLDOWN = 24 * 60 * 60
 WHEEL_REWARDS = [100, 250, 350, 450, 0, 500, 750, 1000]
 WHEEL_LABELS = ['100 روب پوینت', '250 روب پوینت', '350 روب پوینت', '450 روب پوینت', 'پوچ', '500 روب پوینت', '750 روب پوینت', '1000 روب پوینت']
@@ -7267,8 +7268,20 @@ async def attack_command(update, context):
             shielded = True
         else:
             shielded = False
+            # هدف جغد داره → ۳۰ دقیقه فرصت داره تصمیم بگیره (محافظت / اجازه‌ی حمله)
+            if int(target.owl_catch_count or 0) >= 1 and int(target.fox_points or 0) > 0:
+                attacker.last_attack_at = now_utc()
+                pending = attack_owl.create_pending(session, attacker, target, msg.chat_id, msg.message_id)
+                session.commit()
+                pending_id = pending.id
+                owl_pending = True
+            else:
+                owl_pending = False
     finally:
         session.close()
+    if not shielded and owl_pending:
+        await asyncio.to_thread(attack_owl.send_decision_message, pending_id)
+        return
     if shielded:
         await _attack_reply(
             msg,
@@ -7306,6 +7319,39 @@ async def attack_command(update, context):
             f"❌ موجودی طرف مقابل خیلی کم بود و چیزی گرفته نشد."
         )
     await _attack_reply(msg, text)
+
+
+async def attack_owl_button(update, context):
+    """دکمه‌های تصمیم‌گیری هدفِ حمله: محافظت با جغد / اجازه‌ی حمله / بروزرسانی."""
+    q = update.callback_query
+    try:
+        _, action, raw_id = q.data.split(":")
+        att_id = int(raw_id)
+    except Exception:
+        await q.answer()
+        return
+    if action == "refresh":
+        session = get_session()
+        try:
+            att = session.get(attack_owl.PendingAttack, att_id)
+            if not att or att.status != "pending":
+                await q.answer("این حمله تموم شده.", show_alert=True)
+                return
+            left = attack_owl.left_seconds(att)
+        finally:
+            session.close()
+        await q.answer(f"⏳ زمان باقی‌مانده: {attack_owl.fmt_left(left)}", show_alert=True)
+        await asyncio.to_thread(attack_owl.refresh_decision_message, att_id)
+        return
+    result = await asyncio.to_thread(attack_owl.resolve, att_id, action, q.from_user.id)
+    if not result.get("ok"):
+        await q.answer(result.get("error", "خطا"), show_alert=True)
+        return
+    await q.answer("🦉 جغدت ازت محافظت کرد!" if result["status"] == "protected" else "⚔️ حمله انجام شد.", show_alert=True)
+
+
+async def expire_attacks_job(context):
+    await asyncio.to_thread(attack_owl.resolve_expired)
 
 
 # ---------- انتقال روب‌پوینت ----------
@@ -12920,6 +12966,7 @@ def main():
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:item:[a-z_]+:\d+$"))
     app.add_handler(CallbackQueryHandler(emoji_action, pattern=r"^remoji:(buyyes|buyno|select|transfer|sell|sellyes|transferyes|transferno):[a-z_0-9]+:\d+$|^remoji:upgrade:\d+$"))
     app.add_handler(CallbackQueryHandler(marriage_callback, pattern=r"^marriage:(?:start|gift|cancel|proposalconfirm|accept|acceptyes|reject|action|actionyes|noop|transfer|transferyes|babyview|babyhome|babymilk|babyname|babyupgrade|babyupgradeyes|babycollect|collectyes|back|continue|continueyes|abort|abortyes|divorce|divorceyes|cheatdivorce|cheatignore):[^:]+(?::[^:]+)?$"))
+    app.add_handler(CallbackQueryHandler(attack_owl_button, pattern=r"^atk:(protect|allow|refresh):\d+$"))
     app.add_handler(CallbackQueryHandler(education_topic, pattern=r"^edutopic:(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_unlock, pattern=r"^eduunlock:(yes|no):(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_certificate, pattern=r"^educert:(yes|no)$"))
@@ -12983,6 +13030,7 @@ def main():
         schedule_all_owl_jobs(app, first_delay=5)  # همین که این آپدیت بالا میاد، اولین جغد تقریباً فوری توی هر گپ میاد
         app.job_queue.run_repeating(update_market_prices_job, interval=FACTORY_MARKET_UPDATE_SECONDS, first=15, name="factory-market")
         app.job_queue.run_repeating(marriage_expire_job, interval=60, first=20, name="marriage-expire")
+        app.job_queue.run_repeating(expire_attacks_job, interval=30, first=25, name="attack-owl-expire")
         if ADMIN_IDS:
             app.job_queue.run_repeating(daily_backup_job, interval=BACKUP_INTERVAL_SECONDS, first=60, name="daily-backup")
     db_kind = "PostgreSQL (پایدار ✅)" if DATABASE_URL.startswith("postgres") else "SQLite محلی (⚠️ روی Railway بدون Volume با هر دیپلوی پاک می‌شود)"
