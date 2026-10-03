@@ -1,0 +1,726 @@
+# -*- coding: utf-8 -*-
+"""
+وصل شدن دو گپ به هم: «روباهیو وصل شو»
+
+1) کاربر تو گپ A می‌نویسه «روباهیو وصل شو» → پیام «دارم شما رو به اولین گپی که در رو باز کنه وصل می‌کنم»
+   با دکمه‌ی «لغو جستجو»؛ به همه‌ی گپ‌های دیگه‌ی ربات پیام دعوت با دکمه‌ی «بله، در رو باز کن» میره.
+2) اولین گپی که دکمه رو بزنه به A وصل می‌شه. به هر دو گپ خبر میره: «۳۰ دقیقه فرصت گفت و گو دارید»
+   با دکمه‌های «گزارش» (فقط کسایی که توی اون گفت و گو هستن) و «پایان گفت و گو» (فقط ادمین‌های همون گپ).
+3) تا وقتی وصلن، پیام هر طرف به صورت نقل‌قول (فقط اسم حساب، بدون لینک/آیدی/یوزرنیم) به طرف مقابل می‌ره؛
+   زیر هر پیام رسیده دکمه‌ی «گزارش» هست و روی پیام فرستنده ربات 🕊 ری‌اکشن می‌زنه (یعنی پیامت رفت اونور).
+4) بعد از ۳۰ دقیقه یا با «پایان گفت و گو» هر دو گپ از هم جدا می‌شن.
+"""
+import asyncio
+import html
+import json
+import logging
+import re
+import time
+from datetime import datetime, timedelta, timezone
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters
+from telegram.error import BadRequest, Forbidden, RetryAfter
+from telegram.ext import CallbackQueryHandler, MessageHandler, filters
+
+from database import ChatBridge, ChatBridgeMessage, GroupChat, User, get_session
+
+try:
+    from config import ADMIN_IDS
+except Exception:  # noqa: BLE001
+    ADMIN_IDS = []
+
+logger = logging.getLogger(__name__)
+
+BRIDGE_TALK_SECONDS = 30 * 60        # مدت گفت و گو بعد از وصل شدن
+BRIDGE_SEARCH_TTL = 60 * 60          # اگه تا یک ساعت هیچ گپی در رو باز نکرد جستجو تموم می‌شه
+BRIDGE_REQUEST_COOLDOWN = 3 * 60     # فاصله‌ی دو درخواست پشت‌سرهم از یک گپ (ضد اسپم)
+RETENTION_SECONDS = 7 * 24 * 3600    # لاگ پیام‌ها (برای گزارش) یک هفته نگه داشته می‌شه
+REACTION = "🕊"
+
+_TRIGGER_RE = re.compile(r"^\s*روباهیو[\s\u200c]+وصل[\s\u200c]*شو[\s\.\!؟\?]*$")
+_CACHE = {}      # chat_id -> {"id", "partner", "ends"}  (فقط گفت و گوهای وصل)
+_LOCKS = {}      # bridge_id -> asyncio.Lock  (ترتیب پیام‌ها حفظ بشه)
+_last_purge = [0.0]
+
+
+def now_utc():
+    return datetime.now(timezone.utc)
+
+
+def aware(dt):
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def esc(t) -> str:
+    return html.escape(str(t or ""), quote=False)
+
+
+# ---------------------------------------------------------------------------
+# کیبوردها
+# ---------------------------------------------------------------------------
+def wait_kb(bid):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("لغو جستجو", callback_data=f"brg:cancel:{bid}")]])
+
+
+def invite_kb(bid):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("بله، در رو باز کن 🚪", callback_data=f"brg:ok:{bid}")]])
+
+
+def connected_kb(bid):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🚨 گزارش", callback_data=f"brg:rep:{bid}"),
+        InlineKeyboardButton("🔚 پایان گفت و گو", callback_data=f"brg:end:{bid}"),
+    ]])
+
+
+def report_only_kb(bid):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🚨 گزارش", callback_data=f"brg:rep:{bid}")]])
+
+
+def msg_kb(mid):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🚨 گزارش", callback_data=f"brg:rm:{mid}")]])
+
+
+INVITE_TEXT = ("یک لونه روباه 🦊🏠 می‌خواهد با شما گفت و گو کند.\n\n"
+               "آیا مایل هستید آن‌ها را بپذیرید؟")
+WAIT_TEXT = ("🦊🚪 دارم شما رو به اولین گپی که در رو باز کنه وصل می‌کنم.\n\n"
+             "منتظر بمانید ⏳")
+
+
+# ---------------------------------------------------------------------------
+# ابزارها
+# ---------------------------------------------------------------------------
+def clean_name(user) -> str:
+    """فقط اسم حساب کاربر؛ هر چیزی شبیه لینک، @یوزرنیم یا شماره حذف می‌شه."""
+    n = (getattr(user, "full_name", None) or user.first_name or "").replace("\u2063", "").replace("\u2064", "")
+    n = re.sub(r"(?:https?://|www\.|t\.me/)\S+", "", n, flags=re.I)
+    n = re.sub(r"@\w+", "", n)
+    n = re.sub(r"\+?\d[\d\s\-()]{6,}\d", "", n)
+    n = re.sub(r"\s+", " ", n).strip()
+    return n[:40] or "کاربر"
+
+
+async def _safe(fn, *a, **kw):
+    """یک بار تلاش مجدد برای RetryAfter؛ بقیه‌ی خطاها به بالا می‌رن."""
+    try:
+        return await fn(*a, **kw)
+    except RetryAfter as e:
+        await asyncio.sleep(min(float(e.retry_after), 5.0))
+        return await fn(*a, **kw)
+
+
+async def _is_chat_admin(bot, chat_id, user_id) -> bool:
+    try:
+        m = await bot.get_chat_member(chat_id, user_id)
+        return m.status in ("administrator", "creator")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _is_chat_member(bot, chat_id, user_id) -> bool:
+    try:
+        m = await bot.get_chat_member(chat_id, user_id)
+        return m.status not in ("left", "kicked")
+    except Exception:  # noqa: BLE001
+        return True    # نتونستیم چک کنیم؛ خود دکمه توی همون گپ زده شده
+
+
+def _active_for_chat(session, chat_id):
+    return (session.query(ChatBridge)
+            .filter(ChatBridge.status.in_(("searching", "connected")))
+            .filter((ChatBridge.chat_id == chat_id) | (ChatBridge.partner_chat_id == chat_id))
+            .order_by(ChatBridge.id.desc()).first())
+
+
+def _load_cache(session=None):
+    own = session is None
+    session = session or get_session()
+    try:
+        rows = session.query(ChatBridge).filter(ChatBridge.status == "connected").all()
+        cache = {}
+        for r in rows:
+            ends = aware(r.ends_at).timestamp() if r.ends_at else 0
+            cache[r.chat_id] = {"id": r.id, "partner": r.partner_chat_id, "ends": ends}
+            cache[r.partner_chat_id] = {"id": r.id, "partner": r.chat_id, "ends": ends}
+        _CACHE.clear()
+        _CACHE.update(cache)
+    finally:
+        if own:
+            session.close()
+
+
+def _json(raw):
+    try:
+        return json.loads(raw or "{}")
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+async def _edit(bot, chat_id, message_id, text, markup=None):
+    try:
+        await _safe(bot.edit_message_text, chat_id=int(chat_id), message_id=int(message_id), text=text,
+                    reply_markup=markup)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _clear_search_messages(bot, req_id, text, skip_chat=None):
+    """پیام «منتظر بمانید» و همه‌ی دعوت‌های یک جستجو رو بی‌دکمه می‌کنه."""
+    s = get_session()
+    try:
+        req = s.get(ChatBridge, req_id)
+        if not req:
+            return
+        wait_id, chat_id, bc = req.wait_message_id, req.chat_id, _json(req.broadcast)
+    finally:
+        s.close()
+    if wait_id:
+        await _edit(bot, chat_id, wait_id, text)
+    for cid, mid in bc.items():
+        if skip_chat is not None and int(cid) == int(skip_chat):
+            continue
+        await _edit(bot, cid, mid, "ℹ️ این درخواست دیگه فعال نیست.")
+        await asyncio.sleep(0.05)
+
+
+# ---------------------------------------------------------------------------
+# ۱) شروع جستجو
+# ---------------------------------------------------------------------------
+async def handle_text(update, context) -> bool:
+    msg = update.message
+    if not msg or not msg.text or not _TRIGGER_RE.match(msg.text):
+        return False
+    chat, user = update.effective_chat, update.effective_user
+    if not chat or not user:
+        return False
+    reply = {"reply_to_message_id": msg.message_id}
+    if chat.type not in ("group", "supergroup"):
+        await msg.reply_text("🦊 این دستور فقط داخل گروه کار می‌کنه.", **reply)
+        return True
+    s = get_session()
+    try:
+        cur = _active_for_chat(s, chat.id)
+        if cur and cur.status == "connected":
+            other = cur.partner_title if cur.chat_id == chat.id else cur.chat_title
+            await msg.reply_text(f"🔗 این گپ همین الان به «{other}» وصله.", **reply)
+            return True
+        if cur and cur.status == "searching":
+            await msg.reply_text("🔎 جستجو هنوز ادامه داره؛ اگه نمی‌خوای، دکمه‌ی «لغو جستجو» رو بزن.", **reply)
+            return True
+        last = (s.query(ChatBridge).filter(ChatBridge.chat_id == chat.id)
+                .order_by(ChatBridge.id.desc()).first())
+        if last and last.created_at:
+            gone = (now_utc() - aware(last.created_at)).total_seconds()
+            if gone < BRIDGE_REQUEST_COOLDOWN:
+                left = int(BRIDGE_REQUEST_COOLDOWN - gone)
+                await msg.reply_text(f"⏳ {left // 60} دقیقه و {left % 60} ثانیه‌ی دیگه می‌تونی دوباره درخواست بدی.", **reply)
+                return True
+        req = ChatBridge(chat_id=chat.id, chat_title=chat.title or "گپ", requester_id=user.id,
+                         status="searching", expires_at=now_utc() + timedelta(seconds=BRIDGE_SEARCH_TTL))
+        s.add(req)
+        s.commit()
+        bid = req.id
+    finally:
+        s.close()
+    wait = await msg.reply_text(WAIT_TEXT, reply_markup=wait_kb(bid), **reply)
+    s = get_session()
+    try:
+        s.query(ChatBridge).filter(ChatBridge.id == bid).update({"wait_message_id": wait.message_id})
+        s.commit()
+    finally:
+        s.close()
+    context.application.create_task(_broadcast(context.bot, bid), update=update)
+    return True
+
+
+def _status_of(bid):
+    s = get_session()
+    try:
+        r = s.get(ChatBridge, bid)
+        return r.status if r else None
+    finally:
+        s.close()
+
+
+def _save_broadcast(bid, sent):
+    s = get_session()
+    try:
+        s.query(ChatBridge).filter(ChatBridge.id == bid).update({"broadcast": json.dumps(sent)})
+        s.commit()
+    finally:
+        s.close()
+
+
+async def _broadcast(bot, bid):
+    """دعوت‌نامه رو برای همه‌ی گپ‌های دیگه‌ی ربات می‌فرسته (به ترتیب و آروم تا فلود نشه)."""
+    s = get_session()
+    try:
+        req = s.get(ChatBridge, bid)
+        if not req:
+            return
+        busy = set(_CACHE.keys())
+        targets = [c.chat_id for c in s.query(GroupChat).filter(GroupChat.active == 1).all()
+                   if c.chat_id != req.chat_id and c.chat_id not in busy]
+    finally:
+        s.close()
+    sent = {}
+    for i, cid in enumerate(targets):
+        if i % 5 == 0 and _status_of(bid) != "searching":
+            break
+        try:
+            m = await _safe(bot.send_message, chat_id=cid, text=INVITE_TEXT, reply_markup=invite_kb(bid))
+            sent[str(cid)] = m.message_id
+        except (Forbidden, BadRequest):
+            pass
+        except Exception as e:  # noqa: BLE001
+            logger.info("bridge invite to %s failed: %s", cid, e)
+        if sent and len(sent) % 5 == 0:
+            _save_broadcast(bid, sent)
+        await asyncio.sleep(0.07)
+    _save_broadcast(bid, sent)
+    # اگه وسط ارسال لغو شد یا یه گپ قبول کرد، دعوت‌هایی که تازه رفتن رو هم جمع کن
+    s = get_session()
+    try:
+        r = s.get(ChatBridge, bid)
+        st, partner = (r.status, r.partner_chat_id) if r else (None, None)
+    finally:
+        s.close()
+    if st and st != "searching":
+        for cid, mid in sent.items():
+            if st == "connected" and partner is not None and int(cid) == int(partner):
+                continue
+            await _edit(bot, cid, mid, "ℹ️ این درخواست دیگه فعال نیست.")
+            await asyncio.sleep(0.05)
+
+
+# ---------------------------------------------------------------------------
+# ۲) دکمه‌ها
+# ---------------------------------------------------------------------------
+async def button(update, context):
+    q = update.callback_query
+    try:
+        _, action, raw = q.data.split(":")
+        rid = int(raw)
+    except Exception:  # noqa: BLE001
+        await q.answer()
+        return
+    if not q.message:
+        await q.answer()
+        return
+    if action == "ok":
+        await _accept(q, context, rid)
+    elif action == "cancel":
+        await _cancel(q, context, rid)
+    elif action == "end":
+        await _end_button(q, context, rid)
+    elif action == "rep":
+        await _report_bridge(q, context, rid)
+    elif action == "rm":
+        await _report_message(q, context, rid)
+    else:
+        await q.answer()
+
+
+async def _cancel(q, context, bid):
+    s = get_session()
+    try:
+        req = s.get(ChatBridge, bid)
+        if not req or req.status != "searching":
+            await q.answer("این جستجو تموم شده.", show_alert=True)
+            return
+        uid = q.from_user.id
+        ok = uid == req.requester_id or uid in ADMIN_IDS or await _is_chat_admin(context.bot, req.chat_id, uid)
+        if not ok:
+            await q.answer("فقط کسی که درخواست داده یا ادمین‌های گپ می‌تونن جستجو رو لغو کنن.", show_alert=True)
+            return
+        n = (s.query(ChatBridge).filter(ChatBridge.id == bid, ChatBridge.status == "searching")
+             .update({"status": "cancelled", "ended_at": now_utc(), "ended_by": uid}, synchronize_session=False))
+        s.commit()
+    finally:
+        s.close()
+    if n != 1:
+        await q.answer("این جستجو تموم شده.", show_alert=True)
+        return
+    await q.answer("جستجو لغو شد.")
+    await _clear_search_messages(context.bot, bid, "🚫 جستجو لغو شد.")
+
+
+async def _accept(q, context, bid):
+    chat = q.message.chat
+    uid = q.from_user.id
+    own_cancel = []
+    s = get_session()
+    try:
+        req = s.get(ChatBridge, bid)
+        if not req or req.status != "searching" or (req.expires_at and aware(req.expires_at) <= now_utc()):
+            await q.answer("این درخواست دیگه فعال نیست.", show_alert=True)
+            await _edit(context.bot, chat.id, q.message.message_id, "ℹ️ این درخواست دیگه فعال نیست.")
+            return
+        if chat.id == req.chat_id:
+            await q.answer("این درخواست مال خود همین گپه 🙂", show_alert=True)
+            return
+        cur = _active_for_chat(s, chat.id)
+        if cur and cur.status == "connected":
+            await q.answer("این گپ همین الان داره با یه گپ دیگه گفت و گو می‌کنه.", show_alert=True)
+            return
+        # اگه خود این گپ هم داشت دنبال گپ می‌گشت، جستجوی خودش لغو می‌شه
+        for o in s.query(ChatBridge).filter(ChatBridge.chat_id == chat.id, ChatBridge.status == "searching").all():
+            if (s.query(ChatBridge).filter(ChatBridge.id == o.id, ChatBridge.status == "searching")
+                    .update({"status": "cancelled", "ended_at": now_utc(), "ended_by": uid}, synchronize_session=False)):
+                own_cancel.append(o.id)
+        ends = now_utc() + timedelta(seconds=BRIDGE_TALK_SECONDS)
+        n = (s.query(ChatBridge).filter(ChatBridge.id == bid, ChatBridge.status == "searching")
+             .update({"status": "connected", "partner_chat_id": chat.id, "partner_title": chat.title or "گپ",
+                      "partner_user_id": uid, "connected_at": now_utc(), "ends_at": ends}, synchronize_session=False))
+        s.commit()
+        if n != 1:
+            await q.answer("یه گپ دیگه زودتر در رو باز کرد 😅", show_alert=True)
+            return
+        s.expire_all()
+        req = s.get(ChatBridge, bid)
+        a_chat, a_title, b_chat, b_title = req.chat_id, req.chat_title, chat.id, (chat.title or "گپ")
+        wait_id = req.wait_message_id
+        bc = _json(req.broadcast)
+    finally:
+        s.close()
+
+    _load_cache()
+    await q.answer("🚪 در باز شد!")
+    bot = context.bot
+    # جستجوهای قبلیِ خودِ گپ B
+    for oid in own_cancel:
+        await _clear_search_messages(bot, oid, "🚫 جستجو لغو شد (به یک گپ دیگه وصل شدی).")
+    # پیام‌های دعوت و انتظار
+    if wait_id:
+        await _edit(bot, a_chat, wait_id, "✅ یک گپ در رو باز کرد!")
+    await _edit(bot, b_chat, q.message.message_id, "✅ در رو باز کردی!")
+    for cid, mid in bc.items():
+        if int(cid) == int(b_chat):
+            continue
+        await _edit(bot, cid, mid, "ℹ️ این درخواست توسط گپ دیگه‌ای پذیرفته شد.")
+        await asyncio.sleep(0.05)
+
+    def text_for(other):
+        return (f"✅ شما به گپ «{other}» وصل شدید!\n\n"
+                f"⏳ {BRIDGE_TALK_SECONDS // 60} دقیقه فرصت گفت و گو دارید.\n"
+                "پیام‌ها به صورت نقل‌قول برای گپ مقابل فرستاده می‌شه و فقط اسم نمایش داده می‌شه.")
+    msgs = {}
+    for cid, other in ((a_chat, b_title), (b_chat, a_title)):
+        try:
+            m = await _safe(bot.send_message, chat_id=cid, text=text_for(other), reply_markup=connected_kb(bid))
+            msgs[str(cid)] = m.message_id
+        except Exception as e:  # noqa: BLE001
+            logger.warning("bridge connect msg to %s failed: %s", cid, e)
+    s = get_session()
+    try:
+        s.query(ChatBridge).filter(ChatBridge.id == bid).update({"connect_msgs": json.dumps(msgs)})
+        s.commit()
+    finally:
+        s.close()
+
+
+async def _finish(bot, bid, by, text):
+    """گفت و گو رو تموم می‌کنه (اتمیک؛ فقط یک بار)."""
+    s = get_session()
+    try:
+        n = (s.query(ChatBridge).filter(ChatBridge.id == bid, ChatBridge.status == "connected")
+             .update({"status": "ended", "ended_at": now_utc(), "ended_by": by}, synchronize_session=False))
+        s.commit()
+        if n != 1:
+            return False
+        req = s.get(ChatBridge, bid)
+        chats = [req.chat_id, req.partner_chat_id]
+        cmsgs = _json(req.connect_msgs)
+    finally:
+        s.close()
+    _load_cache()
+    for cid in chats:
+        try:
+            await _safe(bot.send_message, chat_id=cid, text=text)
+        except Exception as e:  # noqa: BLE001
+            logger.info("bridge end msg to %s failed: %s", cid, e)
+        mid = cmsgs.get(str(cid))
+        if mid:    # دکمه‌ی پایان برداشته می‌شه؛ «گزارش» می‌مونه
+            try:
+                await _safe(bot.edit_message_reply_markup, chat_id=cid, message_id=int(mid), reply_markup=report_only_kb(bid))
+            except Exception:  # noqa: BLE001
+                pass
+    return True
+
+
+async def _end_button(q, context, bid):
+    chat = q.message.chat
+    s = get_session()
+    try:
+        req = s.get(ChatBridge, bid)
+        if not req or chat.id not in (req.chat_id, req.partner_chat_id):
+            await q.answer("این دکمه مال این گفت و گو نیست.", show_alert=True)
+            return
+        if req.status != "connected":
+            await q.answer("این گفت و گو قبلاً تموم شده.", show_alert=True)
+            return
+    finally:
+        s.close()
+    if not await _is_chat_admin(context.bot, chat.id, q.from_user.id):
+        await q.answer("فقط ادمین‌های این گپ می‌تونن گفت و گو رو تموم کنن.", show_alert=True)
+        return
+    done = await _finish(context.bot, bid, q.from_user.id,
+                         "🔌 گفت و گو توسط یکی از ادمین‌ها پایان یافت و اتصال دو گپ قطع شد.")
+    await q.answer("گفت و گو پایان یافت." if done else "این گفت و گو قبلاً تموم شده.", show_alert=not done)
+
+
+# ---------------------------------------------------------------------------
+# گزارش به پشتیبانی
+# ---------------------------------------------------------------------------
+async def _to_support(bot, text) -> bool:
+    ok = False
+    for aid in list(ADMIN_IDS):
+        try:
+            await _safe(bot.send_message, chat_id=aid, text=text[:4000], parse_mode="HTML", disable_web_page_preview=True)
+            ok = True
+        except Exception as e:  # noqa: BLE001
+            logger.info("bridge report to admin %s failed: %s", aid, e)
+    return ok
+
+
+def _user_line(s, uid, fallback_name=""):
+    u = s.get(User, uid)
+    uname = f" @{u.username}" if u and u.username else ""
+    return f'<a href="tg://user?id={uid}">{esc(fallback_name or (u.first_name if u else "") or uid)}</a>{esc(uname)} (<code>{uid}</code>)'
+
+
+async def _report_bridge(q, context, bid):
+    chat, uid = q.message.chat, q.from_user.id
+    s = get_session()
+    try:
+        req = s.get(ChatBridge, bid)
+        if not req or req.status in ("searching", "cancelled", "expired") or chat.id not in (req.chat_id, req.partner_chat_id):
+            await q.answer("این گزارش مربوط به این گفت و گو نیست.", show_alert=True)
+            return
+        if not await _is_chat_member(context.bot, chat.id, uid):
+            await q.answer("فقط اعضای این گفت و گو می‌تونن گزارش بدن.", show_alert=True)
+            return
+        reporters = set(filter(None, (req.reporters or "").split(",")))
+        if str(uid) in reporters:
+            await q.answer("قبلاً گزارش دادی؛ پشتیبانی بررسی می‌کنه.", show_alert=True)
+            return
+        reporters.add(str(uid))
+        req.reporters = ",".join(sorted(reporters))
+        s.commit()
+        rows = (s.query(ChatBridgeMessage).filter(ChatBridgeMessage.bridge_id == bid)
+                .order_by(ChatBridgeMessage.id.desc()).limit(15).all())[::-1]
+        titles = {req.chat_id: req.chat_title, req.partner_chat_id: req.partner_title}
+        lines = [f"🚨 <b>گزارش گفت و گوی دو گپ</b> (#{bid})",
+                 f"🏠 گپ اول: {esc(req.chat_title)} (<code>{req.chat_id}</code>)",
+                 f"🏠 گپ دوم: {esc(req.partner_title)} (<code>{req.partner_chat_id}</code>)",
+                 f"📍 گزارش از گپ: {esc(titles.get(chat.id))}",
+                 f"👤 گزارش‌دهنده: {_user_line(s, uid, q.from_user.full_name)}",
+                 "", "📜 آخرین پیام‌ها:"]
+        for r in rows:
+            src = esc(titles.get(r.src_chat_id))
+            snippet = esc((r.text or f"[{r.kind}]")[:200])
+            lines.append(f"• [{src}] {_user_line(s, r.sender_id, r.sender_name)}: {snippet}")
+        if not rows:
+            lines.append("(پیامی رد و بدل نشده بود)")
+    finally:
+        s.close()
+    sent = await _to_support(context.bot, "\n".join(lines))
+    await q.answer("🚨 گزارشت برای پشتیبانی ارسال شد." if sent else "ارسال گزارش با مشکل روبه‌رو شد؛ بعداً دوباره امتحان کن.", show_alert=True)
+
+
+async def _report_message(q, context, mid):
+    chat, uid = q.message.chat, q.from_user.id
+    s = get_session()
+    try:
+        row = s.get(ChatBridgeMessage, mid)
+        if not row or row.dst_chat_id != chat.id:
+            await q.answer("این پیام دیگه قابل گزارش نیست.", show_alert=True)
+            return
+        reporters = set(filter(None, (row.reporters or "").split(",")))
+        if str(uid) in reporters:
+            await q.answer("این پیام رو قبلاً گزارش دادی.", show_alert=True)
+            return
+        reporters.add(str(uid))
+        row.reporters = ",".join(sorted(reporters))
+        s.commit()
+        br = s.get(ChatBridge, row.bridge_id)
+        titles = {br.chat_id: br.chat_title, br.partner_chat_id: br.partner_title} if br else {}
+        text = "\n".join([
+            f"🚨 <b>گزارش کاربر از گفت و گوی دو گپ</b> (#{row.bridge_id})",
+            f"👤 کاربر گزارش‌شده: {_user_line(s, row.sender_id, row.sender_name)}",
+            f"🏠 از گپ: {esc(titles.get(row.src_chat_id))} (<code>{row.src_chat_id}</code>)",
+            f"📍 گزارش در گپ: {esc(titles.get(row.dst_chat_id))} (<code>{row.dst_chat_id}</code>)",
+            f"🙋 گزارش‌دهنده: {_user_line(s, uid, q.from_user.full_name)}",
+            f"📝 نوع پیام: {esc(row.kind)}",
+            f"💬 متن: {esc((row.text or '')[:600]) or '—'}",
+        ])
+    finally:
+        s.close()
+    sent = await _to_support(context.bot, text)
+    await q.answer("🚨 کاربر برای پشتیبانی گزارش شد." if sent else "ارسال گزارش با مشکل روبه‌رو شد.", show_alert=True)
+
+
+# ---------------------------------------------------------------------------
+# ۳) رد و بدل کردن پیام‌ها
+# ---------------------------------------------------------------------------
+def _kind(msg):
+    if msg.text:
+        return "text"
+    for k in ("photo", "video", "animation", "voice", "audio", "document", "sticker", "video_note"):
+        if getattr(msg, k, None):
+            return k
+    return None
+
+
+async def relay(update, context):
+    msg, chat, user = update.effective_message, update.effective_chat, update.effective_user
+    if not msg or not chat or not user or user.is_bot or chat.type not in ("group", "supergroup"):
+        return
+    info = _CACHE.get(chat.id)
+    if not info or info["ends"] <= time.time():
+        return
+    if msg.text and (msg.text.startswith("/") or _TRIGGER_RE.match(msg.text)):
+        return
+    kind = _kind(msg)
+    if not kind:
+        return
+    lock = _LOCKS.setdefault(info["id"], asyncio.Lock())
+    context.application.create_task(_relay_task(context.bot, lock, dict(info), chat, user, msg, kind), update=update)
+
+
+async def _relay_task(bot, lock, info, chat, user, msg, kind):
+    async with lock:
+        try:
+            await _relay_one(bot, info, chat, user, msg, kind)
+        except Exception:  # noqa: BLE001
+            logger.exception("bridge relay failed")
+
+
+async def _relay_one(bot, info, chat, user, msg, kind):
+    dst = info["partner"]
+    name = clean_name(user)
+    raw_text = (msg.text or msg.caption or "")
+    s = get_session()
+    try:
+        # اگه روی یک پیام ردوبدل‌شده ریپلای زده، توی گپ مقابل هم ریپلای بشه
+        reply_to = None
+        if msg.reply_to_message:
+            rid = msg.reply_to_message.message_id
+            hit = (s.query(ChatBridgeMessage).filter(ChatBridgeMessage.bridge_id == info["id"],
+                                                     ChatBridgeMessage.dst_chat_id == chat.id,
+                                                     ChatBridgeMessage.dst_message_id == rid).first())
+            if hit:
+                reply_to = hit.src_message_id          # پیام اصلیِ اون طرف
+            else:
+                hit = (s.query(ChatBridgeMessage).filter(ChatBridgeMessage.bridge_id == info["id"],
+                                                         ChatBridgeMessage.src_chat_id == chat.id,
+                                                         ChatBridgeMessage.src_message_id == rid).first())
+                if hit and hit.dst_message_id:
+                    reply_to = hit.dst_message_id      # کپیِ اون پیام توی گپ مقابل
+        row = ChatBridgeMessage(bridge_id=info["id"], src_chat_id=chat.id, src_message_id=msg.message_id,
+                                dst_chat_id=dst, sender_id=user.id, sender_name=(user.full_name or "")[:80],
+                                kind=kind, text=raw_text[:500])
+        s.add(row)
+        s.flush()
+        row_id = row.id
+        s.commit()
+    finally:
+        s.close()
+
+    rp = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    kb = msg_kb(row_id)
+    sent_id = None
+    try:
+        if kind == "text":
+            body = f"👤 <b>{esc(name)}</b>\n<blockquote>{esc(raw_text[:3500])}</blockquote>"
+            m = await _safe(bot.send_message, chat_id=dst, text=body, parse_mode="HTML",
+                            reply_markup=kb, reply_parameters=rp)
+            sent_id = m.message_id
+        elif kind in ("sticker", "video_note"):
+            label = "🎭 استیکر" if kind == "sticker" else "⭕ ویدیو پیام"
+            head = await _safe(bot.send_message, chat_id=dst, text=f"👤 <b>{esc(name)}</b>\n<blockquote>{label}</blockquote>",
+                               parse_mode="HTML", reply_parameters=rp)
+            m = await _safe(bot.copy_message, chat_id=dst, from_chat_id=chat.id, message_id=msg.message_id,
+                            reply_markup=kb,
+                            reply_parameters=ReplyParameters(message_id=head.message_id, allow_sending_without_reply=True))
+            sent_id = m.message_id
+        else:
+            cap = f"👤 <b>{esc(name)}</b>"
+            if msg.caption:
+                cap += f"\n<blockquote>{esc(msg.caption[:800])}</blockquote>"
+            m = await _safe(bot.copy_message, chat_id=dst, from_chat_id=chat.id, message_id=msg.message_id,
+                            caption=cap, parse_mode="HTML", reply_markup=kb, reply_parameters=rp)
+            sent_id = m.message_id
+    except Exception as e:  # noqa: BLE001
+        logger.info("bridge relay to %s failed: %s", dst, e)
+
+    s = get_session()
+    try:
+        if sent_id:
+            s.query(ChatBridgeMessage).filter(ChatBridgeMessage.id == row_id).update({"dst_message_id": sent_id})
+        else:
+            s.query(ChatBridgeMessage).filter(ChatBridgeMessage.id == row_id).delete()
+        s.commit()
+    finally:
+        s.close()
+    if sent_id:
+        try:    # 🕊 یعنی پیامت رفت اونور
+            await _safe(bot.set_message_reaction, chat.id, msg.message_id, reaction=REACTION)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+# ---------------------------------------------------------------------------
+# ۴) پایان خودکار
+# ---------------------------------------------------------------------------
+async def tick(context):
+    bot = context.bot
+    s = get_session()
+    try:
+        now = now_utc()
+        searching = [r.id for r in s.query(ChatBridge.id).filter(ChatBridge.status == "searching", ChatBridge.expires_at <= now).all()]
+        talking = [r.id for r in s.query(ChatBridge.id).filter(ChatBridge.status == "connected", ChatBridge.ends_at <= now).all()]
+    finally:
+        s.close()
+    for bid in searching:
+        s = get_session()
+        try:
+            n = (s.query(ChatBridge).filter(ChatBridge.id == bid, ChatBridge.status == "searching")
+                 .update({"status": "expired", "ended_at": now_utc()}, synchronize_session=False))
+            s.commit()
+        finally:
+            s.close()
+        if n == 1:
+            await _clear_search_messages(bot, bid, "⌛ هیچ گپی در رو باز نکرد؛ جستجو تموم شد.")
+    for bid in talking:
+        await _finish(bot, bid, 0, f"⏳ مهلت {BRIDGE_TALK_SECONDS // 60} دقیقه‌ای گفت و گو تموم شد و اتصال دو گپ قطع شد.")
+    _load_cache()
+    if time.time() - _last_purge[0] > 3600:
+        _last_purge[0] = time.time()
+        s = get_session()
+        try:
+            cut = now_utc() - timedelta(seconds=RETENTION_SECONDS)
+            s.query(ChatBridgeMessage).filter(ChatBridgeMessage.created_at < cut).delete(synchronize_session=False)
+            s.commit()
+        except Exception:  # noqa: BLE001
+            s.rollback()
+        finally:
+            s.close()
+
+
+def register(app):
+    """هندلرها و جاب‌ها رو به اپلیکیشن اضافه می‌کنه (از bot.py صدا زده می‌شه)."""
+    app.add_handler(CallbackQueryHandler(button, pattern=r"^brg:(ok|cancel|end|rep|rm):\d+$"))
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & ~filters.COMMAND & (
+            filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL
+            | filters.AUDIO | filters.VOICE | filters.Sticker.ALL | filters.VIDEO_NOTE),
+        relay), group=7)
+    try:
+        _load_cache()
+    except Exception:  # noqa: BLE001
+        logger.exception("bridge cache load failed")
+    if app.job_queue:
+        app.job_queue.run_repeating(tick, interval=20, first=15, name="bridge-tick")

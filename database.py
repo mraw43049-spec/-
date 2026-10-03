@@ -575,6 +575,46 @@ class PendingAttack(Base):
     decided_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class ChatBridge(Base):
+    """اتصال موقت دو گپ (روباهیو وصل شو)."""
+    __tablename__ = 'chat_bridges'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False, index=True)        # گپی که درخواست داده
+    chat_title = Column(String, nullable=True)
+    requester_id = Column(BigInteger, nullable=True)
+    status = Column(String, nullable=False, default='searching', index=True)  # searching / connected / ended / cancelled / expired
+    wait_message_id = Column(BigInteger, nullable=True)             # پیام «منتظر بمانید» + لغو جستجو
+    broadcast = Column(String, nullable=False, default='{}')        # {chat_id: message_id} پیام‌های دعوت
+    partner_chat_id = Column(BigInteger, nullable=True, index=True)  # گپی که در رو باز کرد
+    partner_title = Column(String, nullable=True)
+    partner_user_id = Column(BigInteger, nullable=True)
+    connect_msgs = Column(String, nullable=False, default='{}')     # {chat_id: message_id} پیام‌های «وصل شدید»
+    reporters = Column(String, nullable=False, default='')          # گزارش‌دهنده‌های کل گفت و گو
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=True)     # پایان مهلت جستجو
+    connected_at = Column(DateTime(timezone=True), nullable=True)
+    ends_at = Column(DateTime(timezone=True), nullable=True)        # پایان ۳۰ دقیقه گفت و گو
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    ended_by = Column(BigInteger, nullable=True)
+
+
+class ChatBridgeMessage(Base):
+    """هر پیامی که بین دو گپ رد و بدل شده (برای دکمه‌ی گزارش و پاسخ‌های ریپلای)."""
+    __tablename__ = 'chat_bridge_messages'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bridge_id = Column(Integer, nullable=False, index=True)
+    src_chat_id = Column(BigInteger, nullable=False)
+    src_message_id = Column(BigInteger, nullable=False)
+    dst_chat_id = Column(BigInteger, nullable=False)
+    dst_message_id = Column(BigInteger, nullable=True)
+    sender_id = Column(BigInteger, nullable=False)
+    sender_name = Column(String, nullable=True)
+    kind = Column(String, nullable=True)
+    text = Column(String, nullable=True)
+    reporters = Column(String, nullable=False, default='')
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
 def init_db():
     Base.metadata.create_all(engine)
     with engine.begin() as conn:

@@ -26,6 +26,7 @@ from database import (
 )
 import ai_service as ai
 import attack_owl
+import bridge
 import fox_brain as brain
 import fox_spell as spell
 import education as education_module
@@ -12744,6 +12745,7 @@ async def text_router(update, context):
     if await emoji_transfer_text(update, context): return
     if not update.message or not update.message.text: return
     if await handle_owl_catch_text(update, context): return
+    if await bridge.handle_text(update, context): return
     if await feature_toggle_command(update, context): return
     if await handle_jail_memory_text(update, context): return
     if await handle_friend_text(update, context): return
@@ -13049,6 +13051,7 @@ def main():
         & filters.ChatType.PRIVATE & filters.User(user_id=list(ADMIN_IDS)) & filters.CaptionRegex(r"^\s*(?:یاد\s*بگیر|آهنگ\s+حال)"),
         fox_teach_media_caption), group=4)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,ai_moderation_handler),group=5)
+    bridge.register(app)  # روباهیو وصل شو: وصل کردن موقت دو گپ
     # کانال آهنگ: ثبت کانال وقتی ادمین ربات، ربات رو ادمین کانال می‌کنه + آهنگ‌های کانال با هشتگ حال
     app.add_handler(ChatMemberHandler(mood_channel_member, ChatMemberHandler.MY_CHAT_MEMBER), group=-3)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POSTS & (filters.AUDIO | filters.Document.ALL), mood_channel_post), group=6)
