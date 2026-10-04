@@ -5,10 +5,12 @@
 - لیدربرد روب‌پوینت
 - منطق برداشت و ارتقا از خود bot.py استفاده می‌کنه تا دقیقاً مثل بات رفتار کنه.
 """
+import asyncio
 import hashlib
 import hmac
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +20,7 @@ sys.path.insert(0, str(BASE_DIR))
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -37,6 +40,7 @@ if not BOT_TOKEN:
 
 app = FastAPI(title="Ruby Fox Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(GZipMiddleware, minimum_size=800)   # صفحه و جواب‌های JSON فشرده می‌شن → لود سریع‌تر
 
 # جدول چت‌روم اگه هنوز ساخته نشده باشه (مثلاً مینی‌اپ جدا از بات بالا بیاد) همین‌جا ساخته می‌شه.
 for _tbl in (ChatMessage, PendingAttack):
@@ -69,7 +73,7 @@ def _startup_warm():
     threading.Thread(target=_warm_up, daemon=True).start()
 
 
-NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate"}
+NO_CACHE = {"Cache-Control": "no-cache"}   # هر بار چک می‌کنه؛ اگه عوض نشده باشه ۳۰۴ می‌گیره (بدون دانلود دوباره)
 
 # ---------------------------------------------------------------------------
 # اسکین‌ها (همون کلیدهای bot.py)
@@ -144,29 +148,41 @@ def avatar_url(uid: int) -> str:
     return f"/api/avatar/{int(uid)}?s={_avatar_sig(uid)}"
 
 
-def _fetch_avatar_from_telegram(uid: int):
+_avatar_sem = asyncio.Semaphore(4)       # حداکثر ۴ دانلود هم‌زمان از تلگرام
+_avatar_inflight: dict = {}              # جلوگیری از دانلود تکراریِ یک عکس
+_avatar_client = {"c": None}
+
+
+def _aclient():
+    if _avatar_client["c"] is None:
+        _avatar_client["c"] = httpx.AsyncClient(timeout=10)
+    return _avatar_client["c"]
+
+
+async def _fetch_avatar_from_telegram(uid: int):
     """عکس پروفایل رو از Bot API می‌گیره؛ اگه نداشت/بسته بود None."""
     base = f"https://api.telegram.org/bot{BOT_TOKEN}"
-    with httpx.Client(timeout=10) as c:
-        r = c.get(f"{base}/getUserProfilePhotos", params={"user_id": uid, "limit": 1}).json()
+    async with _avatar_sem:
+        c = _aclient()
+        r = (await c.get(f"{base}/getUserProfilePhotos", params={"user_id": uid, "limit": 1})).json()
         photos = (r.get("result") or {}).get("photos") or []
         if not photos or not photos[0]:
             return None
         sizes = photos[0]
         # کوچیک‌ترین سایزی که حداقل ~160px باشه تا سریع لود بشه
         pick = next((p for p in sizes if (p.get("width") or 0) >= 160), sizes[-1])
-        f = c.get(f"{base}/getFile", params={"file_id": pick["file_id"]}).json()
+        f = (await c.get(f"{base}/getFile", params={"file_id": pick["file_id"]})).json()
         path = (f.get("result") or {}).get("file_path")
         if not path:
             return None
-        img = c.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{path}")
+        img = await c.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{path}")
         if img.status_code != 200:
             return None
         return img.content
 
 
 @app.get("/api/avatar/{uid}")
-def get_avatar(uid: int, s: str = ""):
+async def get_avatar(uid: int, s: str = ""):
     if not hmac.compare_digest(s or "", _avatar_sig(uid)):
         raise HTTPException(status_code=403, detail="لینک نامعتبره.")
     f = _AVATAR_DIR / f"{uid}.jpg"
@@ -176,8 +192,13 @@ def get_avatar(uid: int, s: str = ""):
         return FileResponse(f, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
     if miss.exists() and now - miss.stat().st_mtime < _AVATAR_MISS_TTL:
         raise HTTPException(status_code=404, detail="بدون عکس.")
+    task = _avatar_inflight.get(uid)
+    if task is None:
+        task = asyncio.ensure_future(_fetch_avatar_from_telegram(uid))
+        _avatar_inflight[uid] = task
+        task.add_done_callback(lambda _t, u=uid: _avatar_inflight.pop(u, None))
     try:
-        data = _fetch_avatar_from_telegram(uid)
+        data = await asyncio.shield(task)
     except Exception:  # noqa: BLE001
         data = None
     if data:
@@ -194,14 +215,136 @@ def get_avatar(uid: int, s: str = ""):
 # ---------------------------------------------------------------------------
 # احراز هویت
 # ---------------------------------------------------------------------------
-def current_telegram_user(x_init_data: str = Header(..., alias="X-Init-Data")):
-    parsed = validate_init_data(x_init_data, BOT_TOKEN)
+def _auth_user(init_data: str):
+    parsed = validate_init_data(init_data, BOT_TOKEN)
     if not parsed:
         raise HTTPException(status_code=401, detail="initData نامعتبر یا منقضی‌شده است.")
     tg_user = extract_telegram_user(parsed)
     if not tg_user or "id" not in tg_user:
         raise HTTPException(status_code=401, detail="اطلاعات کاربر در initData پیدا نشد.")
     return tg_user
+
+
+# ---------------------------------------------------------------------------
+# عضویت اجباری (دقیقاً همون کانال‌های بات: REQUIRED_CHANNEL و REQUIRED_CHANNEL_2)
+# ---------------------------------------------------------------------------
+def _load_required_channels():
+    try:
+        from config import REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL, REQUIRED_CHANNEL_2, REQUIRED_CHANNEL_2_URL
+        raw = [(REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL, "📢 عضویت در کانال اصلی"),
+               (REQUIRED_CHANNEL_2, REQUIRED_CHANNEL_2_URL, "🎁 عضویت در کانال هدایا")]
+    except Exception:  # noqa: BLE001  (اگه config.py کنار این فایل نبود از متغیرهای محیطی می‌خونیم)
+        raw = [(os.environ.get("REQUIRED_CHANNEL", ""), os.environ.get("REQUIRED_CHANNEL_URL", ""), "📢 عضویت در کانال اصلی"),
+               (os.environ.get("REQUIRED_CHANNEL_2", ""), os.environ.get("REQUIRED_CHANNEL_2_URL", ""), "🎁 عضویت در کانال هدایا")]
+    out = []
+    for ch, url, label in raw:
+        ch = str(ch or "").strip()
+        if not ch:
+            continue
+        url = str(url or "").strip()
+        if not url and ch.startswith("@"):
+            url = "https://t.me/" + ch[1:]
+        out.append({"chat": ch, "url": url, "label": label})
+    return out
+
+
+def _load_admin_ids():
+    try:
+        from config import ADMIN_IDS
+        return {int(x) for x in ADMIN_IDS}
+    except Exception:  # noqa: BLE001
+        return {int(x) for x in os.environ.get("ADMIN_IDS", "").replace(" ", "").split(",") if x.lstrip("-").isdigit()}
+
+
+REQUIRED_CHANNELS = _load_required_channels()
+ADMIN_ID_SET = _load_admin_ids()
+if not REQUIRED_CHANNELS:
+    print("[miniapp] WARNING: هیچ کانال اجباری‌ای پیدا نشد (REQUIRED_CHANNEL خالیه)؛ عضویت چک نمی‌شه!")
+
+_TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+_tg_http = httpx.Client(timeout=8, limits=httpx.Limits(max_connections=30, max_keepalive_connections=10))
+_MEMBER_OK_TTL = 90          # عضو بود: ۹۰ ثانیه دوباره چک نمی‌کنیم (سریع و بدون فشار روی تلگرام)
+_MEMBER_NO_TTL = 5           # عضو نبود: ۵ ثانیه (که بعد از عضویت زود وارد بشه)
+_MEMBER_GRACE = 1800         # اگه تلگرام جواب نداد و تا ۳۰ دقیقه پیش عضو بود، ردش نمی‌کنیم
+_member_cache: dict = {}     # uid -> (زمان چک, عضو؟)
+_member_locks = [threading.Lock() for _ in range(64)]
+
+
+def _is_member_of(channel: str, uid: int):
+    """True/False؛ اگه تلگرام خطا داد None."""
+    try:
+        r = _tg_http.get(f"{_TG_API}/getChatMember", params={"chat_id": channel, "user_id": uid}).json()
+    except Exception as e:  # noqa: BLE001
+        print(f"[miniapp] membership check failed for {channel}: {e}")
+        return None
+    if not r.get("ok"):
+        print(f"[miniapp] getChatMember({channel}) -> {r.get('description')}")
+        # «user not found / participant invalid» یعنی عضو نیست؛ بقیه‌ی خطاها (مثلاً بات ادمین نیست) خطای واقعی‌ان
+        desc = str(r.get("description") or "").lower()
+        if "user not found" in desc or "participant_id_invalid" in desc:
+            return False
+        return None
+    m = r.get("result") or {}
+    return m.get("status") in ("member", "administrator", "creator") or bool(m.get("is_member"))
+
+
+def membership_ok(uid: int, force: bool = False) -> bool:
+    uid = int(uid)
+    if uid in ADMIN_ID_SET or not REQUIRED_CHANNELS:
+        return True
+    now = time.time()
+    hit = _member_cache.get(uid)
+    if hit and not force and now - hit[0] < (_MEMBER_OK_TTL if hit[1] else _MEMBER_NO_TTL):
+        return hit[1]
+    with _member_locks[uid % 64]:       # چند درخواست هم‌زمانِ یک کاربر فقط یک بار از تلگرام می‌پرسن
+        hit = _member_cache.get(uid)
+        if hit and not force and time.time() - hit[0] < (_MEMBER_OK_TTL if hit[1] else _MEMBER_NO_TTL):
+            return hit[1]
+        ok, errored = True, False
+        for ch in REQUIRED_CHANNELS:
+            res = _is_member_of(ch["chat"], uid)
+            if res is None:
+                errored = True
+                continue
+            if res is False:
+                ok = False
+                break
+        if ok and errored:
+            # تلگرام جواب نداد: فقط اگه تازه عضو بوده بذار بمونه، وگرنه رد
+            ok = bool(hit and hit[1] and time.time() - hit[0] < _MEMBER_GRACE)
+            if ok:
+                return True          # کش رو دست نمی‌زنیم تا دفعه‌ی بعد دوباره چک بشه
+        if len(_member_cache) > 20000:
+            _member_cache.clear()
+        _member_cache[uid] = (time.time(), ok)
+        return ok
+
+
+def _not_member_detail():
+    return {
+        "code": "not_member",
+        "message": "برای استفاده از مینی‌اپ اول باید عضو کانال‌های ربات بشی.",
+        "channels": [{"label": c["label"], "url": c["url"]} for c in REQUIRED_CHANNELS],
+    }
+
+
+def current_telegram_user_raw(x_init_data: str = Header(..., alias="X-Init-Data")):
+    """فقط هویت (بدون چک عضویت) — برای خود endpoint بررسی عضویت."""
+    return _auth_user(x_init_data)
+
+
+def current_telegram_user(x_init_data: str = Header(..., alias="X-Init-Data")):
+    """هویت + عضویت اجباری؛ همه‌ی endpointهای مینی‌اپ از این استفاده می‌کنن."""
+    tg_user = _auth_user(x_init_data)
+    if not membership_ok(tg_user["id"]):
+        raise HTTPException(status_code=403, detail=_not_member_detail())
+    return tg_user
+
+
+@app.get("/api/membership")
+def api_membership(tg_user: dict = Depends(current_telegram_user_raw)):
+    ok = membership_ok(tg_user["id"], force=True)
+    return {"ok": ok, "channels": [{"label": c["label"], "url": c["url"]} for c in REQUIRED_CHANNELS]}
 
 
 def display_name(u: User) -> str:
@@ -261,12 +404,17 @@ def fox_state(session, user, botmod=None):
 # ---------------------------------------------------------------------------
 # پروفایل
 # ---------------------------------------------------------------------------
+_last_resolve = {"t": 0.0}
+
+
 def _attacks_payload(session, user_id: int):
     """حمله‌های منتظر تصمیمِ این کاربر (برای کارت مینی‌اپ)."""
-    try:
-        attack_owl.resolve_expired()   # منقضی‌ها همین‌جا هم اجرا می‌شن
-    except Exception:  # noqa: BLE001
-        pass
+    if time.time() - _last_resolve["t"] >= 10:      # هر ۱۰ ثانیه یک بار کافیه (بات هم جاب خودش رو داره)
+        _last_resolve["t"] = time.time()
+        try:
+            attack_owl.resolve_expired()   # منقضی‌ها همین‌جا هم اجرا می‌شن
+        except Exception:  # noqa: BLE001
+            pass
     out = []
     for att in attack_owl.pending_for_target(session, user_id):
         attacker = session.get(User, att.attacker_id)
