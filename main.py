@@ -305,6 +305,39 @@ def attacks_decide(att_id: int, action: str, tg_user: dict = Depends(current_tel
     return {"message": msg, "status": res["status"]}
 
 
+def _level_requirement_fallback(level):
+    """کپی دقیق جدول سطح کاربر بات (برای وقتی که بات لود نشده)."""
+    level = max(1, int(level))
+    req = {1: 0, 2: 5, 3: 15, 4: 40, 5: 70, 6: 115, 7: 175, 8: 250, 9: 350, 10: 500, 11: 700, 12: 950,
+           13: 1250, 14: 1650, 15: 2150, 16: 2600, 17: 3600, 18: 4600, 19: 5800, 20: 7250}
+    if level <= 20:
+        return req[level]
+    value, step = req[20], 900
+    for _ in range(21, level + 1):
+        value += step
+        step += 250
+    return value
+
+
+def user_level_info(user, botmod=None):
+    """پیشرفت سطح کاربر؛ دقیقاً با فرمول «پروفایل روبی» بات: روب‌روب‌ها منهای حد نصاب سطح فعلی."""
+    req = getattr(botmod, "user_level_requirement", None) or _level_requirement_fallback
+    lvl = max(1, int(user.level or 1))
+    claims = int(user.fox_claim_count or 0)
+    cur_req, next_req = req(lvl), req(lvl + 1)
+    needed = max(0, next_req - cur_req)
+    done = max(0, claims - cur_req)
+    if needed == 0 or done >= needed:
+        done_c, percent = needed, 100
+    else:
+        done_c, percent = done, int(done * 100 / needed)
+    return {
+        "level": lvl, "next_level": lvl + 1, "claims": claims,
+        "done": done_c, "needed": needed, "remaining": max(0, needed - done),
+        "percent": percent, "total_needed": next_req,
+    }
+
+
 @app.get("/api/profile")
 def get_profile(tg_user: dict = Depends(current_telegram_user)):
     # اگه به هر دلیلی منطق بات لود نشد، پروفایل ساده هنوز نشون داده می‌شه (دکمه‌ها خطا می‌دن)
@@ -342,6 +375,8 @@ def get_profile(tg_user: dict = Depends(current_telegram_user)):
             "fox_rescued_count": int(user.fox_rescued_count or 0),
             "owl_catch_count": int(user.owl_catch_count or 0),
             "referral_count": int(referral_count),
+            "total_earned": int(user.fox_total_earned or 0),
+            "user_level": user_level_info(user, botmod),
             "attacks": _attacks_payload(session, user.telegram_id),
         })
         return data
