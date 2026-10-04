@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters
 from telegram.error import BadRequest, Forbidden, RetryAfter
-from telegram.ext import CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from database import BridgeBan, ChatBridge, ChatBridgeMessage, GroupChat, User, get_session
 
@@ -101,20 +101,33 @@ def esc(t) -> str:
 # عکس بنر (روباه انیمیشنی که به دنیاهای دیگه وصل می‌شه) برای پیام جستجو و دعوت‌نامه
 # ---------------------------------------------------------------------------
 _ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
-BANNER_PATH = next((os.path.join(_ASSETS, n) for n in ("fox_portal.jpg", "fox_portal.jpeg", "fox_portal.png")
-                    if os.path.exists(os.path.join(_ASSETS, n))), os.path.join(_ASSETS, "fox_portal.jpg"))
-_IMG = {"bytes": None, "file_id": None}
+_CANDIDATES = [os.path.join(_ASSETS, n) for n in ("fox_portal.jpg", "fox_portal.jpeg", "fox_portal.png")]
+_CANDIDATES += [os.path.join(os.path.dirname(os.path.abspath(__file__)), n)
+                for n in ("fox_portal.jpg", "fox_portal.jpeg", "fox_portal.png")]
+BANNER_PATH = next((c for c in _CANDIDATES if os.path.exists(c)), None)
+_IMG = {"bytes": None, "file_id": None, "origin": ""}
 
 
 def _banner_source():
+    """file_id کش‌شده → فایل assets (اگه هست) → نسخه‌ی داخل کد (bridge_banner.py)."""
     if _IMG["file_id"]:
         return _IMG["file_id"]
     if _IMG["bytes"] is None:
-        try:
-            with open(BANNER_PATH, "rb") as f:
-                _IMG["bytes"] = f.read()
-        except Exception:  # noqa: BLE001
-            _IMG["bytes"] = b""
+        data, origin = b"", ""
+        if BANNER_PATH:
+            try:
+                with open(BANNER_PATH, "rb") as f:
+                    data, origin = f.read(), f"فایل {BANNER_PATH}"
+            except Exception as e:  # noqa: BLE001
+                logger.warning("bridge banner file unreadable: %r", e)
+        if not data:
+            try:
+                from bridge_banner import BANNER_JPEG
+                data, origin = BANNER_JPEG, "نسخه‌ی داخل کد (bridge_banner.py)"
+            except Exception as e:  # noqa: BLE001
+                logger.warning("bridge banner embedded copy unavailable: %r", e)
+        _IMG["bytes"], _IMG["origin"] = data, origin
+        logger.warning("bridge banner source: %s (%d bytes)", origin or "هیچ‌کدوم پیدا نشد!", len(data))
     return _IMG["bytes"] or None
 
 
@@ -132,7 +145,7 @@ async def _send_banner(bot, chat_id, caption, markup=None, reply_to=None):
         except Exception as e:  # noqa: BLE001
             if _IMG["file_id"]:
                 _IMG["file_id"] = None      # شاید file_id معتبر نبود؛ دفعه‌ی بعد دوباره آپلود می‌شه
-            logger.info("bridge banner photo failed (%s); falling back to text", e)
+            logger.warning("bridge banner photo failed (%s: %s); falling back to text", type(e).__name__, e)
     return await _safe(bot.send_message, chat_id=chat_id, text=caption, reply_markup=markup, reply_parameters=rp)
 
 
@@ -1010,8 +1023,27 @@ async def tick(context):
             s.close()
 
 
+async def banner_test(update, context):
+    """/bannertest (فقط ادمین‌های ربات): عکس بنر رو می‌فرسته و اگه نشد دلیل دقیق رو می‌گه."""
+    user, msg, chat = update.effective_user, update.effective_message, update.effective_chat
+    if not user or user.id not in ADMIN_IDS or not msg:
+        return
+    src = _banner_source()
+    if not src:
+        await msg.reply_text("❌ هیچ نسخه‌ای از عکس بنر پیدا نشد (نه assets/fox_portal.jpg، نه bridge_banner.py).")
+        return
+    origin = _IMG["origin"] or "file_id کش‌شده"
+    try:
+        m = await context.bot.send_photo(chat_id=chat.id, photo=src, caption=f"✅ تست بنر موفق بود.\nمنبع: {origin}")
+        if m.photo and not _IMG["file_id"]:
+            _IMG["file_id"] = m.photo[-1].file_id
+    except Exception as e:  # noqa: BLE001
+        await msg.reply_text(f"❌ ارسال عکس خطا داد:\n{type(e).__name__}: {e}\n\nمنبع عکس: {origin}")
+
+
 def register(app):
     """هندلرها و جاب‌ها رو به اپلیکیشن اضافه می‌کنه (از bot.py صدا زده می‌شه)."""
+    app.add_handler(CommandHandler("bannertest", banner_test))
     app.add_handler(CallbackQueryHandler(button, pattern=r"^brg:(ok|cancel|end|rep|rm|ban|unban|dismiss):\d+$"))
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & ~filters.COMMAND & (
@@ -1023,5 +1055,6 @@ def register(app):
         _load_bans()
     except Exception:  # noqa: BLE001
         logger.exception("bridge cache load failed")
+    _banner_source()      # همون ابتدا توی لاگ می‌نویسه عکس از کجا برداشته شد
     if app.job_queue:
         app.job_queue.run_repeating(tick, interval=20, first=15, name="bridge-tick")
