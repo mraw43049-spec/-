@@ -1679,6 +1679,12 @@ def ruby_cooldown_remaining(user, game_key=None):
 def max_entry_for_game(key):
     return CASINO_MAX_ENTRY if key.startswith('cz_') else RUBY_MAX_ENTRY
 
+# حداقل ورودی بمب بالاتره: با جایزه‌ی ثابت +۵٬۰۰۰ خانه‌ی ۴، ورودی کم برای کاربر سود تضمینی می‌شد.
+BOMB_MIN_ENTRY = 5000
+
+def min_entry_for_game(key):
+    return BOMB_MIN_ENTRY if key == 'cz_bomb' else CASINO_MIN_ENTRY
+
 def profile_buttons(ids, names_by_id=None):
     names_by_id = names_by_id or {}
     rows=[]
@@ -2211,7 +2217,7 @@ async def casino_setup_callback(update,context):
         try:
             await q.message.edit_text(
                 f"{icon} {name}\n\n💰 مبلغ ورودی هر نفر رو بفرست (روب‌پوینت).\n"
-                f"حداقل: {CASINO_MIN_ENTRY:,} روب‌پوینت\nسقف مجاز: {max_entry_for_game(key):,} روب‌پوینت.\n"
+                f"حداقل: {min_entry_for_game(key):,} روب‌پوینت\nسقف مجاز: {max_entry_for_game(key):,} روب‌پوینت.\n"
                 "مثال: 50k / 50کا / 50م / 200000\n\n"
                 "👇 جواب این پیام رو (یا فقط عدد رو) در همین چت بفرست.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت",callback_data=f"csetup:cancelamount:{key}:{owner_id}")]])
@@ -2257,8 +2263,8 @@ async def handle_casino_entry_text(update,context):
         if amount<0: raise ValueError
     except Exception:
         await update.message.reply_text("❌ مبلغ نامعتبره؛ یک عدد بفرست (مثلاً 500 یا 50000).",**reply_kwargs(update.message)); return True
-    if amount<CASINO_MIN_ENTRY:
-        await update.message.reply_text(f"❌ حداقل مبلغ ورودی {CASINO_MIN_ENTRY:,} روب‌پوینته.",**reply_kwargs(update.message)); return True
+    if amount<min_entry_for_game(key):
+        await update.message.reply_text(f"❌ حداقل مبلغ ورودی این بازی {min_entry_for_game(key):,} روب‌پوینته.",**reply_kwargs(update.message)); return True
     if amount>max_entry_for_game(key):
         await update.message.reply_text(f"❌ سقف مبلغ ورودی {max_entry_for_game(key):,} روب‌پوینته.",**reply_kwargs(update.message)); return True
     session=get_session()
@@ -4552,7 +4558,7 @@ def factory_guide_text(page):
     pages = {
         1: (
             "🏭 راهنمای کارخانه روبی — ۱/۳\n\n"
-            "🪄 تولید: از بخش تولید، خط و محصول را انتخاب کن و درصد ساخت را بزن.\n"
+            "🪄 تولید: از بخش تولید، خط و محصول را انتخاب کن و درصد ساخت را بزن. وقتی محصولی درحال تولید است، دکمه به «درحال تولید⏳» تبدیل می‌شود و فقط وضعیت همان محصول را نشان می‌دهد.\n"
             "💰 هزینه: روب‌پوینت قبل از شروع سفارش کم می‌شود.\n"
             "🦊 کارگران: هر کارگر یک سفارش هم‌زمان را پشتیبانی می‌کند.\n"
             "🧳 انبار: ظرفیت سفارش‌های درحال تولید به سطح انبار بستگی دارد."
@@ -4565,9 +4571,9 @@ def factory_guide_text(page):
         ),
         3: (
             "🏭 راهنمای کارخانه روبی — ۳/۳\n\n"
-            "🏪 بازار و نوسانت: محصولات آماده‌شده را از اینجا می‌بینی و با قیمت روز بازار می‌فروشی.\n"
+            "📉 بازار و نوسانت: محصولات آماده‌شده را از اینجا می‌بینی و با قیمت روز بازار می‌فروشی.\n"
             "📈 قیمت بازار هر ۲۵ دقیقه تغییر می‌کند.\n"
-            "🖨 دستگاه تولید: با ارتقا، زمان تولید طبق سطح دستگاه تنظیم می‌شود.\n"
+            "⬆️ ارتقا کارخونه: کارکنان، انبار و دستگاه‌های تولید همه این‌جا هستند؛ ارتقای دستگاه زمان تولید را کمتر می‌کند.\n"
             "🔥 در حداکثر سطح کارخانه، زمان تولید ۱۰۰٪ برابر ۱۰ ساعت و ۴۵ دقیقه است.\n\n"
             "💡 نکته: بعد از تمام شدن تولید، محصول را برداشت کن تا وارد انبار محصول شود."
         ),
@@ -4588,6 +4594,33 @@ def factory_guide_keyboard(page, owner_id):
     return InlineKeyboardMarkup(rows)
 
 
+def factory_producing_orders(orders):
+    """سفارش‌هایی که همین الان درحال تولیدن (هنوز تموم نشدن)."""
+    out = []
+    for o in (orders or []):
+        total = max(1, (aware(o.ready_at) - aware(o.started_at)).total_seconds())
+        if seconds_left(o.started_at, total) > 0:
+            out.append(o)
+    return out
+
+
+def factory_upgrade_menu_text(user):
+    return ("⬆️ ارتقا کارخونه\n\n"
+            f"🦊 کارکنان: سطح {max(1, int(user.factory_workers_level or 1))}\n"
+            f"🛖 انبار: سطح {max(1, int(user.factory_storage_level or 1))}\n"
+            f"🖨 دستگاه های تولید: سطح {max(1, int(user.factory_machine_level or 1))}\n\n"
+            "یکی از بخش‌ها رو برای ارتقا انتخاب کن:")
+
+
+def factory_upgrade_menu_keyboard(owner_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("کارکنان🦊", callback_data=f"factory:menu:workers:{owner_id}")],
+        [InlineKeyboardButton("انبار🛖", callback_data=f"factory:menu:storage:{owner_id}")],
+        [InlineKeyboardButton("دستگاه های تولید 🖨", callback_data=f"factory:menu:machine:{owner_id}")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:home:0:{owner_id}")],
+    ])
+
+
 def factory_home_keyboard(owner_id, orders=None):
     rows = []
     if orders:
@@ -4599,17 +4632,15 @@ def factory_home_keyboard(owner_id, orders=None):
                     f"📦 برداشت {o.item_key} {info['name']} ({o.quantity:,} عدد)",
                     callback_data=f"factory:collect:{o.id}:{owner_id}"
                 )])
+    producing = factory_producing_orders(orders)
+    prod_label = "درحال تولید⏳" if producing else "تولید🪄"
     rows += [
         [
-            InlineKeyboardButton("تولید🪄", callback_data=f"factory:menu:production:{owner_id}"),
-            InlineKeyboardButton("بازار و نوسانت🏪", callback_data=f"factory:wh:0:{owner_id}"),
+            InlineKeyboardButton(prod_label, callback_data=f"factory:menu:production:{owner_id}"),
             InlineKeyboardButton("راهنما❔", callback_data=f"factory:guide:1:{owner_id}"),
         ],
-        [
-            InlineKeyboardButton("کارکنان🦊", callback_data=f"factory:menu:workers:{owner_id}"),
-            InlineKeyboardButton("انبار🛖", callback_data=f"factory:menu:storage:{owner_id}"),
-            InlineKeyboardButton("دستگاه های تولید 🖨", callback_data=f"factory:menu:machine:{owner_id}"),
-        ],
+        [InlineKeyboardButton("بازار و نوسانت📉", callback_data=f"factory:wh:0:{owner_id}")],
+        [InlineKeyboardButton("ارتقا کارخونه⬆️", callback_data=f"factory:menu:upgrade:{owner_id}")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -4707,7 +4738,7 @@ def factory_tier_text(tier):
 def factory_tier_keyboard(tier, owner_id):
     rows = [[InlineKeyboardButton(f"{emoji} {name}", callback_data=f"factory:item:{tier['key']}:{emoji}:{owner_id}")]
             for emoji, name, cost, sell in tier["items"]]
-    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:menu:production:{owner_id}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:menu:newprod:{owner_id}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -4761,13 +4792,14 @@ def factory_producing_status_text(user, order):
     )
 
 
-def factory_producing_status_keyboard(order, owner_id):
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ تایید", callback_data=f"factory:cancelorder:{order.id}:{owner_id}"),
-            InlineKeyboardButton("↩️ بازگشت", callback_data=f"factory:home:0:{owner_id}"),
-        ]
-    ])
+def factory_producing_status_keyboard(order, owner_id, can_add=False):
+    rows = [[
+        InlineKeyboardButton("✅ تایید", callback_data=f"factory:cancelorder:{order.id}:{owner_id}"),
+        InlineKeyboardButton("↩️ بازگشت", callback_data=f"factory:home:0:{owner_id}"),
+    ]]
+    if can_add:
+        rows.append([InlineKeyboardButton("➕ تولید محصول دیگر", callback_data=f"factory:menu:newprod:{owner_id}")])
+    return InlineKeyboardMarkup(rows)
 
 
 def factory_orders_text(orders):
@@ -4837,7 +4869,7 @@ def factory_upgrade_keyboard(kind, user, owner_id):
     cost = factory_upgrade_cost(level, max_level)
     if cost:
         rows.append([InlineKeyboardButton(f"⭐ ارتقا ({cost:,} روب‌پوینت)", callback_data=f"factory:upg:{kind}:{owner_id}")])
-    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:home:0:{owner_id}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:menu:upgrade:{owner_id}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -4966,10 +4998,47 @@ async def factory_button(update, context):
             kind = parts[2]
             if kind == "production":
                 await q.answer()
+                orders = factory_settle_orders(session, user.telegram_id)
+                producing = factory_producing_orders(orders)
+                workers_cap = factory_workers_capacity(max(1, min(FACTORY_WORKERS_MAX_LEVEL, int(user.factory_workers_level or 1))))
+                can_add = len(orders) < workers_cap
+                if len(producing) == 1:
+                    # فقط همون محصولِ درحال تولید (بدون خط‌های تولید)
+                    await q.message.edit_text(
+                        factory_producing_status_text(user, producing[0]),
+                        reply_markup=factory_producing_status_keyboard(producing[0], owner_id, can_add))
+                elif len(producing) > 1:
+                    rows = []
+                    for o in producing:
+                        info = FACTORY_ITEM_INDEX.get(o.item_key, {"name": o.item_key})
+                        rows.append([InlineKeyboardButton(f"⏳ {o.item_key} {info['name']} × {o.quantity:,}",
+                                                          callback_data=f"factory:order:{o.id}:{owner_id}")])
+                    if can_add:
+                        rows.append([InlineKeyboardButton("➕ تولید محصول دیگر", callback_data=f"factory:menu:newprod:{owner_id}")])
+                    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:home:0:{owner_id}")])
+                    await q.message.edit_text("⏳ محصول‌های درحال تولید:\n\nروی هرکدوم بزنی وضعیتش رو می‌بینی.",
+                                              reply_markup=InlineKeyboardMarkup(rows))
+                else:
+                    await q.message.edit_text(factory_production_menu_text(user), reply_markup=factory_production_menu_keyboard(user, owner_id))
+            elif kind == "newprod":
+                await q.answer()
                 await q.message.edit_text(factory_production_menu_text(user), reply_markup=factory_production_menu_keyboard(user, owner_id))
+            elif kind == "upgrade":
+                await q.answer()
+                await q.message.edit_text(factory_upgrade_menu_text(user), reply_markup=factory_upgrade_menu_keyboard(owner_id))
             elif kind in ("storage", "workers", "machine"):
                 await q.answer()
                 await q.message.edit_text(factory_upgrade_text(kind, user), reply_markup=factory_upgrade_keyboard(kind, user, owner_id))
+            return
+
+        if action == "order":
+            o = session.get(FactoryOrder, int(parts[2]))
+            if not o or o.user_id != owner_id or o.collected:
+                await q.answer("این سفارش دیگر در دسترس نیست.", show_alert=True)
+                return
+            await q.answer()
+            await q.message.edit_text(factory_producing_status_text(user, o),
+                                      reply_markup=factory_producing_status_keyboard(o, owner_id))
             return
 
         if action == "tier":

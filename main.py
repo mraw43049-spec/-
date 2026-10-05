@@ -864,7 +864,7 @@ def bomb_state(tg_user: dict = Depends(current_telegram_user)):
         return {
             "unlocked": int(user.level or 1) >= botmod.CASINO_UNLOCK_LEVEL,
             "unlock_level": botmod.CASINO_UNLOCK_LEVEL, "level": int(user.level or 1),
-            "min_entry": botmod.CASINO_MIN_ENTRY, "max_entry": botmod.CASINO_MAX_ENTRY,
+            "min_entry": botmod.BOMB_MIN_ENTRY, "max_entry": botmod.CASINO_MAX_ENTRY,
             "balance": int(user.fox_points or 0),
             "cooldown_left": int(botmod.ruby_cooldown_remaining(user, "cz_bomb")),
             "cooldown_total": int(botmod.CASINO_COOLDOWN_SECONDS),
@@ -891,8 +891,8 @@ def bomb_start(body: BombStart, tg_user: dict = Depends(current_telegram_user)):
             session.commit()
             return {"game": _bomb_game_payload(botmod, t), "balance": int(user.fox_points or 0), "resumed": True}
         amount = int(body.amount or 0)
-        if amount < botmod.CASINO_MIN_ENTRY:
-            raise HTTPException(status_code=400, detail=f"❌ حداقل مبلغ ورودی {botmod.CASINO_MIN_ENTRY:,} روب‌پوینته.")
+        if amount < botmod.BOMB_MIN_ENTRY:
+            raise HTTPException(status_code=400, detail=f"❌ حداقل مبلغ ورودی بمب {botmod.BOMB_MIN_ENTRY:,} روب‌پوینته.")
         if amount > botmod.CASINO_MAX_ENTRY:
             raise HTTPException(status_code=400, detail=f"❌ سقف مبلغ ورودی {botmod.CASINO_MAX_ENTRY:,} روب‌پوینته.")
         left = int(botmod.ruby_cooldown_remaining(user, "cz_bomb"))
