@@ -505,7 +505,7 @@ def get_profile(tg_user: dict = Depends(current_telegram_user)):
             # تولید معوق رو حساب می‌کنیم تا انبار روباه به‌روز نشون داده بشه (مثل پنل روباه بات)
             botmod.settle_fox_production(user)
             session.commit()
-        rank = session.query(User).filter(User.fox_points > (user.fox_points or 0)).count() + 1
+        rank = session.query(User).filter(User.fox_points > (user.fox_points or 0), ~User.telegram_id.in_(list(ADMIN_ID_SET) or [0])).count() + 1
         referral_count = (
             session.query(func.count(Referral.id))
             .filter(Referral.referrer_id == user.telegram_id, Referral.status == "approved")
@@ -677,7 +677,7 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
         if category == "referral":
             rows = (
                 session.query(Referral.referrer_id, func.count(Referral.id).label("cnt"))
-                .filter(Referral.status == "approved")
+                .filter(Referral.status == "approved", ~Referral.referrer_id.in_(list(ADMIN_ID_SET) or [0]))
                 .group_by(Referral.referrer_id)
                 .order_by(func.count(Referral.id).desc())
                 .limit(50).all()
@@ -698,7 +698,8 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
             raise HTTPException(status_code=400, detail="دسته‌ی لیدربرد نامعتبره.")
         field, label, emoji = LEADERBOARD_FIELDS[category]
         col = getattr(User, field)
-        users = session.query(User).order_by(col.desc(), User.telegram_id.asc()).limit(50).all()
+        users = (session.query(User).filter(~User.telegram_id.in_(list(ADMIN_ID_SET) or [0]))
+                 .order_by(col.desc(), User.telegram_id.asc()).limit(50).all())
         entries = []
         for i, u in enumerate(users):
             skins = active_skins(u)

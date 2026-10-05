@@ -248,10 +248,10 @@ def vip_factory_seconds(user, seconds):
     if VIP_SKIN_ICE in vip_active_skins(user):
         return max(60, seconds - VIP_ICE_FACTORY_REDUCE_SECONDS)
     return seconds
-# روباه زخمی: پایه هر ۴۵ دقیقه؛ به ازای هر سطح ارتقای شهر روبی، ۲ دقیقه زودتر می‌آید
-# (سطح ۱ = ۴۵ دقیقه، سطح ۲ = ۴۳ دقیقه، سطح ۳ = ۴۱ دقیقه و ...).
-INJURED_FOX_BASE_INTERVAL_MINUTES = 45
-INJURED_FOX_LEVEL_REDUCTION_MINUTES = 2
+# روباه زخمی: پایه هر ۱۲۰ دقیقه؛ به ازای هر سطح ارتقای شهر روبی، ۵ دقیقه زودتر می‌آید
+# (سطح ۱ = ۱۲۰ دقیقه، سطح ۲ = ۱۱۵ دقیقه، سطح ۳ = ۱۱۰ دقیقه و ... سطح ۱۰ = ۷۵ دقیقه).
+INJURED_FOX_BASE_INTERVAL_MINUTES = 120
+INJURED_FOX_LEVEL_REDUCTION_MINUTES = 5
 INJURED_FOX_MIN_INTERVAL_MINUTES = 5  # سقف حداقلی برای جلوگیری از بمباران پیام در سطوح خیلی بالا
 INJURED_FOX_INTERVAL = INJURED_FOX_BASE_INTERVAL_MINUTES * 60  # (نگه‌داشته‌شده برای سازگاری با کدهای قدیمی)
 INJURED_FOX_COST = 10
@@ -3832,8 +3832,16 @@ async def hunt_button(update, context):
             return
         settle_fox_production(user)
         if action == "feed":
-            old = user.fox_belly
             cap = int(user.fox_belly_capacity or 3)
+            if int(hunt.nutrition or 0) > cap:
+                # هر لول روباه ۱ جای غذا به شکمش اضافه می‌کنه؛ این شکار برای شکم فعلی روباه خیلی بزرگه.
+                cur_lvl = int(user.fox_level or 1)
+                need_lvl = cur_lvl + (int(hunt.nutrition or 0) - cap)
+                await q.answer(
+                    f"🦊 این شکار برای روباه لول {need_lvl} میاد! روباهت هنوز لول {cur_lvl}ـه و نمی‌تونه بخوردش.\n\n💸 شکار رو بفروش.",
+                    show_alert=True)
+                return
+            old = user.fox_belly
             user.fox_belly = min(cap, user.fox_belly + hunt.nutrition)
             hunt.status = "fed"
             session.commit()
@@ -5342,7 +5350,7 @@ async def lucky_bag_button(update, context):
 
 
 def injured_fox_interval_seconds(city_level):
-    """فاصلهٔ زمانی روباه زخمی بر اساس سطح شهر روبی: پایه ۴۵ دقیقه، هر سطح ۲ دقیقه زودتر."""
+    """فاصلهٔ زمانی روباه زخمی بر اساس سطح شهر روبی: پایه ۱۲۰ دقیقه، هر سطح ۵ دقیقه زودتر."""
     level = max(1, int(city_level or 1))
     minutes = INJURED_FOX_BASE_INTERVAL_MINUTES - INJURED_FOX_LEVEL_REDUCTION_MINUTES * (level - 1)
     minutes = max(INJURED_FOX_MIN_INTERVAL_MINUTES, minutes)
@@ -5437,8 +5445,8 @@ async def post_injured_fox_job(context):
         logger.warning("post injured fox failed in %s: %s", chat_id, e)
 
 
-# ---------- جغد روبی: هر ۱ ساعت و ۲۰ دقیقه یک جغد مرموز می‌آید؛ اولی که رمز را ریپلای کند می‌بردش ----------
-OWL_INTERVAL_SECONDS = 80 * 60      # ۱ ساعت و ۲۰ دقیقه
+# ---------- جغد روبی: هر ۲ ساعت (۱۲۰ دقیقه) یک جغد مرموز می‌آید؛ اولی که رمز را ریپلای کند می‌بردش ----------
+OWL_INTERVAL_SECONDS = 120 * 60     # ۲ ساعت
 OWL_CATCH_WINDOW_SECONDS = 120
 OWL_DAILY_LIMIT = 7
 
@@ -5641,7 +5649,7 @@ async def handle_owl_catch_text(update, context):
 def build_owl_leaderboard_text(session, page=1):
     OWL_TITLES = {1: "👑 جغدشاه", 2: "🥈 جغدگیر برتر", 3: "🥉 جغدگیر توانا"}
     users = (session.query(User)
-             .filter(User.owl_catch_count > 0)
+             .filter(User.owl_catch_count > 0, _no_admins())
              .order_by(User.owl_catch_count.desc(), User.telegram_id.asc())
              .limit(LEADERBOARD_LIMIT).all())
     entries = []
@@ -5674,7 +5682,7 @@ async def owl_command(update, context):
     minutes, seconds = format_minutes_seconds(remaining)
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏆 لیدر برد جغد روبی", callback_data="owllb:1")]])
     await update.message.reply_text(
-        "🦉 هر ۱ ساعت و ۲۰ دقیقه یک جغد مرموز و پیر تو گپ پیدا می‌شه؛ هر کی سریع‌تر جواب جمع رو روی همان پیام ریپلای کنه، می‌بردش.\n\n"
+        "🦉 هر ۲ ساعت یک جغد مرموز و پیر تو گپ پیدا می‌شه؛ هر کی سریع‌تر جواب جمع رو روی همان پیام ریپلای کنه، می‌بردش.\n\n"
         f"🦉 جغدهای شکارشده توسط تو امروز: {caught_today}/{OWL_DAILY_LIMIT}\n"
         f"⏳ تا جغد بعدی: {minutes} دقیقه و {seconds} ثانیه",
         reply_markup=kb, **reply_kwargs(update.message)
@@ -7129,11 +7137,12 @@ async def _active_jail(session, user):
 
 
 def jail_block_text(user):
+    left = _jail_time_left(user)
     return (
-        "⛓️ شما در زندان روبی هستید!\n\n"
-        "😡 شما روباه بدی بودی و توسط گرگ‌های پلیس دستگیر شدی.\n"
-        '🔒 برای دیدن سلول خودت بنویس «زندان روبی».\n'
-        "🚫 تا پایان حبس هیچ بخش دیگری از ربات برایت فعال نیست."
+        "⛓️ زندانی هستی!\n\n"
+        f"⏳ زمان باقی‌مانده: {jail_duration_text(left)}\n"
+        '🔒 برای دیدن سلولت بنویس «زندان روبی».\n'
+        "🚫 تا پایان حبس از دستورات روباهیو محرومی؛ ولی می‌تونی عادی چت کنی."
     )
 
 
@@ -7150,8 +7159,9 @@ _JAIL_ACTIVE_FLOW_FLAGS = (
 _JAIL_CLAIM_ALIASES = {'روب روب', 'هور هور', 'عو عو'}
 
 
-def _looks_like_bot_command(text, context):
-    """آیا این متن واقعاً یک تلاش برای اجرای دستور/بخشی از ربات است؟ (نه یک پیام معمولی مثل «سلام»)"""
+def _looks_like_bot_command(text, context, include_flows=True):
+    """آیا این متن واقعاً یک تلاش برای اجرای دستور/بخشی از ربات است؟ (نه یک پیام معمولی مثل «سلام»)
+    include_flows=False: فقط خودِ دستورها حساب می‌شن (نه جریان‌های نیمه‌کاره‌ی قبلی)."""
     t = (text or '').strip()
     if not t:
         return False
@@ -7165,7 +7175,7 @@ def _looks_like_bot_command(text, context):
         return True
     if _feature_key_for_text(t):
         return True
-    if any(context.user_data.get(k) for k in _JAIL_ACTIVE_FLOW_FLAGS):
+    if include_flows and any(context.user_data.get(k) for k in _JAIL_ACTIVE_FLOW_FLAGS):
         return True
     return False
 
@@ -7194,7 +7204,8 @@ async def ban_gate(update, context):
             raise ApplicationHandlerStop
 
         # ضداسپم: ۶ پیام متنی در ۱۰ ثانیه = ۱۵ دقیقه زندان روبی.
-        if update.message and update.message.text and not jail_cmd and not context.user_data.get("jail_memory_wait"):
+        _already_jailed = bool(getattr(u, "jail_until", None) and now_utc() < aware(u.jail_until))
+        if update.message and update.message.text and not jail_cmd and not _already_jailed and not context.user_data.get("jail_memory_wait"):
             now=now_utc()
             window=aware(getattr(u,"spam_window_at",None))
             if not window or (now-window).total_seconds()>SPAM_WINDOW_SECONDS:
@@ -7217,12 +7228,27 @@ async def ban_gate(update, context):
             # دستور زندان روبی و جریان نوشتن خاطره اجازه عبور دارند.
             if jail_cmd or context.user_data.get("jail_memory_wait"):
                 return
-            # پیام معمولی (نه یک دستور/بخش واقعی ربات، مثلاً «سلام») را نادیده می‌گیریم؛
-            # فقط تلاش واقعی برای استفاده از یک بخش ربات یادآوری زندان می‌گیرد.
-            if update.message and update.message.text and not _looks_like_bot_command(update.message.text, context):
+            msg = update.message
+            # ویرایش پیام، استیکر، عکس، ویس و ... دستور نیستن؛ بی‌صدا رد می‌شن.
+            if not msg or not msg.text:
                 return
-            if update.message:
-                await update.message.reply_text(jail_block_text(u), **reply_kwargs(update.message))
+            # پیام معمولی (مثل «سلام» یا چت عادی) هیچ پاسخ زندانی نمی‌گیره و عادی ادامه پیدا می‌کنه.
+            if not _looks_like_bot_command(msg.text, context, include_flows=False):
+                # اگه یه جریان نیمه‌کاره (بانک، ازدواج و ...) از قبل باز مونده بود، بی‌صدا لغوش می‌کنیم
+                # تا ورودی‌ش داخل بخش‌های ربات اجرا نشه (و این پیام هم تکرارِ پیام زندان نمی‌گیره).
+                had_flow = False
+                for _k in _JAIL_ACTIVE_FLOW_FLAGS:
+                    if context.user_data.pop(_k, None):
+                        had_flow = True
+                if had_flow:
+                    raise ApplicationHandlerStop
+                return
+            # فقط وقتی واقعاً یه دستور روباهیو می‌نویسه، زندانی بودنش یادآوری می‌شه
+            # (برای جلوگیری از اسپم، حداکثر هر ۲ ثانیه یک بار).
+            _t = now_utc().timestamp()
+            if _t - float(context.user_data.get("_jail_notice_at") or 0) >= 2:
+                context.user_data["_jail_notice_at"] = _t
+                await msg.reply_text(jail_block_text(u), **reply_kwargs(msg))
             raise ApplicationHandlerStop
     finally:
         session.close()
@@ -8552,8 +8578,11 @@ async def flag_callback(update, context):
 
 def user_mention(user):
     """اسم کاربر به‌صورت لینک آبی (فقط برای متن پیام‌ها؛ برای دکمه‌ها از user_display_name استفاده کن)."""
-    return mention_of(user.telegram_id, user_display_name(user)) + (" 🛡️" if int(user.telegram_id) in ADMIN_IDS else "")
-def ranking_position(session,field,value):return session.query(User).filter(getattr(User,field)>value).count()+1
+    return mention_of(user.telegram_id, user_display_name(user)) + (" \u26a0\ufe0e" if int(user.telegram_id) in ADMIN_IDS else "")
+def _no_admins():
+    """شرط SQL: اکانت‌های پشتیبانی (ADMIN_IDS) توی هیچ لیدربردی نمایش داده نمی‌شن."""
+    return ~User.telegram_id.in_(list(ADMIN_IDS) or [0])
+def ranking_position(session,field,value):return session.query(User).filter(getattr(User,field)>value,_no_admins()).count()+1
 def fox_level_requirement(level):
     req={1:0,2:5,3:15,4:40,5:70,6:115,7:175,8:250,9:350,10:500,11:700,12:950,13:1250,14:1650,15:2150,16:2600,17:3600,18:4600,19:5800,20:7250}
     if level<=20:return req[level]
@@ -9953,7 +9982,7 @@ async def city_top_donors_button(update, context):
               .all())
         totals={}
         for uid,amount in rows: totals[int(uid)]=totals.get(int(uid),0)+int(amount or 0)
-        ordered=sorted(totals.items(), key=lambda x:(-x[1],x[0]))[:20]
+        ordered=sorted(((u,t) for u,t in totals.items() if u not in ADMIN_IDS), key=lambda x:(-x[1],x[0]))[:20]
         lines=[f"🥇 برترین دونیت های شهر «{row.title or 'گپ'}»\n"]
         if not ordered:
             lines.append("هنوز کسی به خزانه دونیت نکرده.")
@@ -10070,7 +10099,7 @@ async def maybe_level_up_city(context, chat_id):
         session.close()
     if new_level is None:
         return
-    # با ارتقای شهر، روباه زخمی ۲ دقیقه زودتر از قبل می‌آید.
+    # با ارتقای شهر، روباه زخمی ۵ دقیقه زودتر از قبل می‌آید.
     schedule_injured_fox_job(context.application, chat_id, new_level)
     try:
         await context.bot.send_message(
@@ -10641,19 +10670,19 @@ def build_leaderboard_text(session, field, title, page=1):
     def _pfx(i): return f'{titles[i]} ' if i in titles else ''
     if field == 'referral_count':
         counts = dict(session.query(Referral.referrer_id, __import__('sqlalchemy').func.count(Referral.id)).filter(Referral.status=='approved').group_by(Referral.referrer_id).all())
-        users = session.query(User).filter(User.telegram_id.in_(list(counts.keys()) or [0])).all()
+        users = session.query(User).filter(User.telegram_id.in_(list(counts.keys()) or [0]), _no_admins()).all()
         users.sort(key=lambda u:(-counts.get(u.telegram_id,0),u.telegram_id))
         users=users[:LEADERBOARD_LIMIT]
         entries=[f'{i}. {_pfx(i)}{user_mention(u)} — {counts.get(u.telegram_id,0):,} رفرال' for i,u in enumerate(users,1)]
     elif field == 'edu_correct':
         rows = (session.query(User, EducationProgress.correct_answers)
                 .join(EducationProgress, EducationProgress.user_id == User.telegram_id)
-                .filter(EducationProgress.correct_answers > 0)
+                .filter(EducationProgress.correct_answers > 0, _no_admins())
                 .order_by(EducationProgress.correct_answers.desc(), User.telegram_id.asc())
                 .limit(LEADERBOARD_LIMIT).all())
         entries = [f'{i}. {_pfx(i)}{user_mention(u)} — {int(c or 0):,} پاسخ درست' for i, (u, c) in enumerate(rows, 1)]
     else:
-        users = session.query(User).order_by(getattr(User, field).desc(), User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
+        users = session.query(User).filter(_no_admins()).order_by(getattr(User, field).desc(), User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
         entries = [f'{i}. {_pfx(i)}{user_mention(u)} — {int(getattr(u, field) or 0):,}' for i, u in enumerate(users, 1)]
     return _render_leaderboard_page(title, entries, page)
 
@@ -10661,12 +10690,12 @@ def build_leaderboard_text(session, field, title, page=1):
 def leaderboard_profile_ids(session, field, page):
     if field == 'referral_count':
         counts=dict(session.query(Referral.referrer_id,__import__('sqlalchemy').func.count(Referral.id)).filter(Referral.status=='approved').group_by(Referral.referrer_id).all())
-        users=session.query(User).filter(User.telegram_id.in_(list(counts.keys()) or [0])).all()
+        users=session.query(User).filter(User.telegram_id.in_(list(counts.keys()) or [0]), _no_admins()).all()
         users.sort(key=lambda u:(-counts.get(u.telegram_id,0),u.telegram_id))
     elif field=='edu_correct':
-        users=[u for u,_c in session.query(User,EducationProgress.correct_answers).join(EducationProgress,EducationProgress.user_id==User.telegram_id).filter(EducationProgress.correct_answers>0).order_by(EducationProgress.correct_answers.desc(),User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()]
+        users=[u for u,_c in session.query(User,EducationProgress.correct_answers).join(EducationProgress,EducationProgress.user_id==User.telegram_id).filter(EducationProgress.correct_answers>0,_no_admins()).order_by(EducationProgress.correct_answers.desc(),User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()]
     else:
-        users=session.query(User).order_by(getattr(User,field).desc(),User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
+        users=session.query(User).filter(_no_admins()).order_by(getattr(User,field).desc(),User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
     start=(page-1)*LEADERBOARD_PAGE_SIZE
     return users[start:start+LEADERBOARD_PAGE_SIZE]
 
