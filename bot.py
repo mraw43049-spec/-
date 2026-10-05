@@ -2877,18 +2877,33 @@ BOMB_CELLS = 12
 BOMB_COUNT = 3
 # هر خانه‌ی سالم دقیقاً ۰٫۲۵ (۲۵٪) به مبلغ ورودی اضافه می‌کند؛ این مقدار به‌صورت خطی روی هم جمع می‌شود.
 BOMB_SAFE_CELLS = BOMB_CELLS - BOMB_COUNT  # ۹ خانه‌ی سالم
-BOMB_BONUS_PER_SAFE = 0.25
+# جایزه‌ی بمب (هم تو بات هم تو مینی‌اپ یکسانه):
+#  خانه‌ی سالم ۱ تا ۴: این مبلغِ ثابت به مبلغ ورودی اضافه می‌شه (نه تجمعی؛ همون عدد خانه‌ی فعلی).
+#  خانه‌ی سالم ۵ تا ۹: ضریب روی (مبلغ ورودی + ۵٬۰۰۰) ضرب می‌شه.
+BOMB_BONUS_STEPS = {1: 250, 2: 500, 3: 700, 4: 5000}
+BOMB_MULTIPLIERS = {5: 1.5, 6: 1.7, 7: 2.0, 8: 2.5, 9: 3.0}
 
-def bomb_bonus_rate(safe):
+def bomb_total(safe, entry=0):
+    """کل مبلغی که با «کافیه» به کاربر برمی‌گرده (ورودی + جایزه)."""
     safe = max(0, min(int(safe or 0), BOMB_SAFE_CELLS))
-    return safe * BOMB_BONUS_PER_SAFE
+    entry = max(0, int(entry or 0))
+    if entry <= 0 or safe <= 0:
+        return entry
+    if safe in BOMB_BONUS_STEPS:
+        return entry + BOMB_BONUS_STEPS[safe]
+    return int(round((entry + BOMB_BONUS_STEPS[4]) * BOMB_MULTIPLIERS[safe]))
 
 def bomb_reward(safe, entry=0):
-    """مبلغ جایزه‌ی اضافه‌شده به ورودی: هر خانه‌ی سالم ۰٫۲۵ برابر مبلغ ورودی."""
+    """جایزه‌ی اضافه‌شده به ورودی (کل دریافتی منهای ورودی)."""
     entry = max(0, int(entry or 0))
     if entry <= 0:
         return 0
-    return int(round(entry * bomb_bonus_rate(safe)))
+    return bomb_total(safe, entry) - entry
+
+def bomb_bonus_rate(safe):
+    """برای نمایش: ضریب فعلی (کل دریافتی ÷ ورودی) وقتی ورودی ۱ باشه؛ فقط در متن بات استفاده می‌شه."""
+    safe = max(0, min(int(safe or 0), BOMB_SAFE_CELLS))
+    return BOMB_MULTIPLIERS.get(safe, 0)
 
 def bomb_keyboard(tid, state, owner_id):
     revealed = set(state.get("revealed", []))
@@ -2904,15 +2919,20 @@ def bomb_keyboard(tid, state, owner_id):
     return InlineKeyboardMarkup(rows)
 
 def bomb_text(state, name, entry):
-    safe=int(state.get("safe",0)); reward=bomb_reward(safe, entry); rate=bomb_bonus_rate(safe)
+    safe=int(state.get("safe",0)); reward=bomb_reward(safe, entry)
     total=int(entry or 0)+reward
-    rate_text = f"+{rate * 100:.2f}%" if rate else "+0%"
+    if safe in BOMB_BONUS_STEPS:
+        step_text = f"+{BOMB_BONUS_STEPS[safe]:,} روب‌پوینت"
+    elif safe in BOMB_MULTIPLIERS:
+        step_text = f"ضریب ×{BOMB_MULTIPLIERS[safe]:g}"
+    else:
+        step_text = "—"
     return (f"💥 {name}\n\n🧩 خانه‌های سالم: {safe}/{BOMB_CELLS-BOMB_COUNT}\n"
             f"💰 مبلغ ورودی: {int(entry or 0):,} روب‌پوینت\n"
-            f"📈 ضریب فعلی: {rate_text}\n"
+            f"📈 پاداش فعلی: {step_text}\n"
             f"💵 دریافتی در صورت «کافیه»: {total:,} روب‌پوینت\n"
             "⚠️ سه بمب مخفی‌اند؛ پیدا کردن بمب بازی را تمام می‌کند و جایزه‌ای نمی‌گیری.\n"
-            "📈 پاداش هر خانه‌ی سالم: ۲۵٪ مبلغ ورودی (تجمعی، مثلاً ۴ خانه = ۱۰۰٪)")
+            "📈 پاداش خانه‌ها: ۱) +۲۵۰  ۲) +۵۰۰  ۳) +۷۰۰  ۴) +۵٬۰۰۰  ۵) ×۱٫۵  ۶) ×۱٫۷  ۷) ×۲  ۸) ×۲٫۵  ۹) ×۳ (ضریب‌ها روی ورودی + ۵٬۰۰۰)")
 
 async def ruby_bomb_button(update, context):
     q=update.callback_query; parts=q.data.split(":")
@@ -8576,9 +8596,21 @@ async def flag_callback(update, context):
         s.commit(); await q.answer("ذخیره شد ✅"); await q.edit_message_text(f"✅ انتخابت ذخیره شد: {label}\nاز این به بعد پرچم کنار نامت در بخش‌های نمایشی روبی می‌آید.")
     finally: s.close()
 
+def _strip_rank_lines_for_support(text):
+    """برای اکانت پشتیبانی خط‌های «🎖️ رتبه (N)» رو از پروفایل (روبام/روباش) حذف می‌کنه."""
+    import re as _re
+    out = []
+    for ln in text.split("\n"):
+        if _re.match(r"^\s*┘─ 🎖️ رتبه \([^)]*\)\s*$", ln):
+            if out and out[-1].startswith("┐─"):
+                out[-1] = "┘─" + out[-1][2:]
+            continue
+        out.append(ln)
+    return "\n".join(out)
+
 def user_mention(user):
     """اسم کاربر به‌صورت لینک آبی (فقط برای متن پیام‌ها؛ برای دکمه‌ها از user_display_name استفاده کن)."""
-    return mention_of(user.telegram_id, user_display_name(user)) + (" \u26a0\ufe0e" if int(user.telegram_id) in ADMIN_IDS else "")
+    return mention_of(user.telegram_id, user_display_name(user))
 def _no_admins():
     """شرط SQL: اکانت‌های پشتیبانی (ADMIN_IDS) توی هیچ لیدربردی نمایش داده نمی‌شن."""
     return ~User.telegram_id.in_(list(ADMIN_IDS) or [0])
@@ -9434,6 +9466,8 @@ async def roobam_command(update,context):
         user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0);ref_count=session.query(Referral).filter(Referral.referrer_id==user.telegram_id,Referral.status=='approved').count();ref_rank=session.query(Referral.referrer_id).filter(Referral.status=='approved').group_by(Referral.referrer_id).having(__import__('sqlalchemy').func.count(Referral.id)>ref_count).count()+1
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
         text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 🦊 روباه : {user.fox_name or 'مکار'}\n┘─ ⚧ جنسیت روباه : {fox_gender_label(user.fox_gender)}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points or 0):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 🦉 جغدهای شکارشده : {int(user.owl_catch_count or 0):,}\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╰─ 💍 وضعیت ازدواج : {('متاهل'+active_marriage(session,user.telegram_id).gift_emoji) if active_marriage(session,user.telegram_id) else 'مجرد'}\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
+        if int(user.telegram_id) in ADMIN_IDS:
+            text=_strip_rank_lines_for_support(text)
         label=user_display_name(user)
         _act=vip_active_skins(user);_sk=_act[-1] if _act else ''
         skin_path=vip_image_path(_sk,user.fox_gender) if _sk and (user.fox_gender or '') in ('male','female') else None

@@ -237,6 +237,33 @@ button:disabled::after,.lb-close::after{display:none}
 .lite .flow,.lite .sc-glint,.lite .sc-stars{animation:none}
 @media (prefers-reduced-motion:reduce){.flow,.sc-glint,.sc-stars{animation:none}}
 
+
+/* ===== بازی‌ها: گردونه + بمب 💥 (سبک: بدون انیمیشن بی‌نهایت) ===== */
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.seg button{border:1px solid #2f6b4f;background:linear-gradient(180deg,#17402f,#0e281e);color:#eafff3;border-radius:14px;padding:11px 6px;font-weight:900;font-size:14px;font-family:inherit}
+.seg button.on{background:linear-gradient(180deg,#ffc46b,#ff9a3c);color:#2a1204;border-color:#ffd27a}
+.bomb-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
+.bomb-top b{color:#ffc46b}
+.bomb-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0 12px;direction:ltr}
+.bcell{aspect-ratio:1/1;border-radius:14px;border:1px solid #3b7a5a;background:linear-gradient(180deg,#1b4a37,#0f2c20);color:#eafff3;font-size:26px;font-weight:900;display:flex;align-items:center;justify-content:center;font-family:inherit;padding:0;transition:transform .1s}
+.bcell:active:not(:disabled){transform:scale(.93)}
+.bcell.safe{background:linear-gradient(180deg,#2fbf7a,#17794d);border-color:#7af5c0}
+.bcell.boom{background:linear-gradient(180deg,#ff6a4d,#a32414);border-color:#ffb199}
+.bcell.ghost{opacity:.55}
+.bcell:disabled{opacity:1}
+.bomb-info{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.bomb-info .stat{background:#0a2018;border:1px solid #2c6a50;border-radius:12px;padding:8px 6px;text-align:center;font-size:11.5px;color:#a9d4bd}
+.bomb-info .stat b{display:block;color:#ffe9b8;font-size:15px;margin-top:2px}
+.bomb-amt{display:flex;gap:8px;margin:8px 0}
+.bomb-amt input{flex:1;min-width:0;border-radius:12px;border:1px solid #3b7a5a;background:#0a2018;color:#fff;padding:12px;font-size:16px;font-family:inherit;text-align:center}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.chips button{border:1px solid #3b7a5a;background:#153a2b;color:#eafff3;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:800;font-family:inherit}
+.bsteps{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+.bsteps div{background:#0a2018;border:1px solid #2c6a50;border-radius:10px;padding:6px 2px;text-align:center;font-size:11px;color:#a9d4bd}
+.bsteps div b{display:block;color:#ffc46b;font-size:13px}
+.bsteps div.cur{border-color:#ffc46b;background:#2a2a12}
+.bres{text-align:center;font-weight:900;margin:8px 0;min-height:22px}
+
 /* ===== دروازه‌ی عضویت اجباری ===== */
 .gate{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;padding:20px;background:#03090ff2;overflow:auto}
 .gate.open{display:flex}
@@ -389,7 +416,9 @@ button:disabled::after,.lb-close::after{display:none}
 </section>
 
 <section id="wheelView" class="view">
-  <div class="card" style="text-align:center">
+  <div class="seg"><button id="segWheel" class="on">🎡 گردونه</button><button id="segBomb">💥 بمب</button></div>
+
+  <div id="wheelCard" class="card" style="text-align:center">
     <div class="section-title">🎡 گردونه‌ی روزانه</div>
     <div class="wheel-wrap">
       <div class="wheel-pin">🔻</div>
@@ -399,6 +428,29 @@ button:disabled::after,.lb-close::after{display:none}
     <button id="spinBtn" class="spin-btn">🎡 بچرخون!</button>
     <div id="wheelRes" class="wheel-res"></div>
     <div id="wheelInfo" class="muted"></div>
+  </div>
+  <div id="bombCard" class="card" style="display:none">
+    <div class="section-title">💥 بمب</div>
+    <div class="bomb-top"><span>💰 موجودی: <b id="bBal">—</b></span><span id="bCd" class="muted"></span></div>
+    <div id="bSetup">
+      <div class="muted" id="bRule" style="line-height:1.9"></div>
+      <div class="bomb-amt"><input id="bAmt" type="number" inputmode="numeric" placeholder="مبلغ ورودی" autocomplete="off"></div>
+      <div class="chips" id="bChips"></div>
+      <button id="bStart" class="action" style="width:100%">💥 شروع بازی</button>
+    </div>
+    <div id="bPlay" style="display:none">
+      <div class="bomb-info">
+        <div class="stat">🧩 خانه‌ی سالم<b id="bSafe">۰</b></div>
+        <div class="stat">💰 ورودی<b id="bEntry">۰</b></div>
+        <div class="stat">💵 دریافتی با «کافیه»<b id="bCash">۰</b></div>
+        <div class="stat">⏭ خانه‌ی سالم بعدی<b id="bNext">—</b></div>
+      </div>
+      <div id="bGrid" class="bomb-grid"></div>
+      <button id="bCashBtn" class="action" style="width:100%">✅ کافیه</button>
+    </div>
+    <div id="bRes" class="bres"></div>
+    <div id="bSteps" class="bsteps"></div>
+    <div class="muted" style="margin-top:8px;line-height:1.9">۱۲ خانه داریم و ۳ تاش بمبه. هر خانه‌ی سالم پاداشش رو بالا می‌بره؛ بمب پیدا کنی همه‌چی می‌سوزه.</div>
   </div>
 </section>
 
@@ -416,7 +468,7 @@ button:disabled::after,.lb-close::after{display:none}
 <nav class="tabs">
   <button id="foxTab" class="tab active"><span class="ti">🦊</span>روباه</button>
   <button id="eduTab" class="tab"><span class="ti">🎓</span>درس</button>
-  <button id="wheelTab" class="tab"><span class="ti">🎡</span>گردونه</button>
+  <button id="wheelTab" class="tab"><span class="ti">🎮</span>بازی‌ها</button>
   <button id="leaderTab" class="tab"><span class="ti">🏆</span>لیدربرد</button>
   <button id="chatTab" class="tab"><span class="ti">💬</span>چت</button>
   <button id="btnRefresh" class="tab refresh-tab"><span class="ti" id="rfIcon">🔄</span>تازه‌سازی</button>
@@ -911,6 +963,113 @@ button:disabled::after,.lb-close::after{display:none}
     });
   };
 
+
+  // ---------- بازی بمب 💥 ----------
+  var bomb = null, bombBusy = false, bombMode = "wheel", bombCdAt = 0, bombTick = null;
+  function bombCd(){ return bomb ? Math.max(0, bomb.cooldown_left - Math.floor((Date.now() - bombCdAt) / 1000)) : 0; }
+  function setBombMode(m){
+    bombMode = m;
+    $("segWheel").classList.toggle("on", m === "wheel");
+    $("segBomb").classList.toggle("on", m === "bomb");
+    $("wheelCard").style.display = m === "wheel" ? "" : "none";
+    $("bombCard").style.display = m === "bomb" ? "" : "none";
+    clearInterval(bombTick); bombTick = null;
+    if (m === "bomb") { loadBomb(); bombTick = setInterval(drawBombCd, 1000); }
+  }
+  $("segWheel").onclick = function(){ setBombMode("wheel"); };
+  $("segBomb").onclick = function(){ setBombMode("bomb"); };
+  function drawBombCd(){
+    if (!bomb || bombMode !== "bomb") return;
+    var l = bombCd(), el = $("bCd");
+    el.textContent = (!bomb.game && l > 0) ? "⏳ بازی بعدی: " + fmtMS(l) : "";
+    $("bStart").disabled = !bomb.unlocked || l > 0;
+  }
+  function loadBomb(){
+    return api("/api/bomb").then(function(d){
+      bomb = d; bombCdAt = Date.now();
+      $("bBal").textContent = fa(d.balance);
+      $("bRule").textContent = d.unlocked ? ("حداقل " + fa(d.min_entry) + " و حداکثر " + fa(d.max_entry) + " روب‌پوینت.") : ("🔒 کازینو از سطح " + fa(d.unlock_level) + " باز می‌شه. (سطح تو: " + fa(d.level) + ")");
+      $("bStart").disabled = !d.unlocked;
+      var chips = $("bChips"); chips.innerHTML = "";
+      [500, 1000, 5000, 10000].forEach(function(v){
+        if (v < d.min_entry) return;
+        var b = document.createElement("button"); b.textContent = fa(v);
+        b.onclick = function(){ $("bAmt").value = v; }; chips.appendChild(b);
+      });
+      drawBomb(); drawBombCd(); stamp();
+    }).catch(function(e){ if (!e.gate) $("bRes").textContent = "خطا: " + e.message; });
+  }
+  function drawSteps(game){
+    var box = $("bSteps"); box.innerHTML = "";
+    if (!bomb) return;
+    bomb.steps.forEach(function(s){
+      var d = document.createElement("div");
+      if (game && game.safe === s.n) d.className = "cur";
+      d.innerHTML = "<b></b>خانه " + fa(s.n); d.firstChild.textContent = s.label; box.appendChild(d);
+    });
+  }
+  function drawBomb(final){
+    var g = final || (bomb && bomb.game);
+    var playing = !!(bomb && bomb.game && !final);
+    $("bSetup").style.display = (g && !final) ? "none" : "";
+    $("bPlay").style.display = g ? "" : "none";
+    $("bCashBtn").style.display = final ? "none" : "";
+    drawSteps(g);
+    if (!g) return;
+    $("bSafe").textContent = fa(g.safe) + " / " + fa(g.max_safe);
+    $("bEntry").textContent = fa(g.entry);
+    $("bCash").textContent = fa(g.cashout);
+    $("bNext").textContent = g.next ? fa(g.next) : "—";
+    $("bCashBtn").disabled = !(g.safe > 0);
+    var grid = $("bGrid"); grid.innerHTML = "";
+    var rev = {}; (g.revealed || []).forEach(function(i){ rev[i] = 1; });
+    var bombs = {}; (g.bombs || []).forEach(function(i){ bombs[i] = 1; });
+    for (var i = 0; i < g.cells; i++) {
+      var b = document.createElement("button"); b.className = "bcell"; b.dataset.i = i;
+      if (rev[i]) { b.classList.add("safe"); b.textContent = "✅"; b.disabled = true; }
+      else if (final) {
+        b.disabled = true;
+        if (bombs[i]) { b.textContent = "💣"; b.classList.add(g.bomb_hit === i ? "boom" : "ghost"); }
+        else { b.textContent = "❔"; b.classList.add("ghost"); }
+      } else b.textContent = "❔";
+      grid.appendChild(b);
+    }
+  }
+  $("bGrid").onclick = function(e){
+    var b = e.target.closest && e.target.closest(".bcell");
+    if (!b || b.disabled || bombBusy || !bomb || !bomb.game) return;
+    bombBusy = true; b.disabled = true;
+    api("/api/bomb/open", "POST", { cell: parseInt(b.dataset.i, 10) }).then(function(r){ bombResult(r); })
+      .catch(function(e){ toast(e.message, false); loadBomb(); }).then(function(){ bombBusy = false; });
+  };
+  $("bCashBtn").onclick = function(){
+    if (bombBusy || !bomb || !bomb.game) return;
+    bombBusy = true; $("bCashBtn").disabled = true;
+    api("/api/bomb/cashout", "POST").then(function(r){ bombResult(r); })
+      .catch(function(e){ toast(e.message, false); loadBomb(); }).then(function(){ bombBusy = false; });
+  };
+  function bombResult(r){
+    $("bBal").textContent = fa(r.balance);
+    try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(r.ended === "bomb" ? "heavy" : "light"); } catch(e){}
+    if (!r.ended) { bomb.game = r.game; drawBomb(); return; }
+    bomb.game = null; bomb.balance = r.balance;
+    bomb.cooldown_left = bomb.cooldown_total; bombCdAt = Date.now();
+    drawBomb(r.game);
+    $("bRes").textContent = r.message;
+    $("bSetup").style.display = "";   // بازی تموم شد؛ می‌تونه دوباره شروع کنه (بعد از انتظار)
+    toast(r.message, r.ended !== "bomb"); drawBombCd();
+  }
+  $("bStart").onclick = function(){
+    if (bombBusy || !bomb) return;
+    var amt = parseInt($("bAmt").value, 10);
+    if (!amt || amt < bomb.min_entry) { toast("حداقل مبلغ ورودی " + fa(bomb.min_entry) + " روب‌پوینته.", false); return; }
+    bombBusy = true; $("bStart").disabled = true; $("bRes").textContent = "";
+    api("/api/bomb/start", "POST", { amount: amt }).then(function(r){
+      bomb.game = r.game; bomb.balance = r.balance; $("bBal").textContent = fa(r.balance);
+      drawBomb(); if (r.resumed) toast("🔁 بازی نیمه‌کاره‌ات ادامه پیدا کرد.", true);
+    }).catch(function(e){ toast(e.message, false); loadBomb(); }).then(function(){ bombBusy = false; drawBombCd(); });
+  };
+
   // ---------- روباهیو درس ----------
   var edu = null, eduAt = 0, eduTick = null, eduBusy = false, botUser = null;
   function eduLeft(sec){ return Math.max(0, sec - Math.floor((Date.now() - eduAt)/1000)); }
@@ -1035,8 +1194,9 @@ button:disabled::after,.lb-close::after{display:none}
     clearInterval(chatTimer); chatTimer = null;
     clearInterval(eduTick); eduTick = null;
     clearInterval(wheelTick); wheelTick = null;
+    clearInterval(bombTick); bombTick = null;
     if (v === "edu") { loadEdu(); eduTick = setInterval(function(){ drawEdu(false); }, 1000); }
-    else if (v === "wheel") { loadWheel(); wheelTick = setInterval(drawWheelInfo, 1000); }
+    else if (v === "wheel") { loadWheel(); wheelTick = setInterval(drawWheelInfo, 1000); if (bombMode === "bomb") { loadBomb(); bombTick = setInterval(drawBombCd, 1000); } }
     else if (v === "leader") loadLeader();
     else if (v === "chat") { loadChat(); chatTimer = setInterval(function(){ if (!document.hidden) loadChat(); }, 4000); }
     else loadProfile();
@@ -1055,7 +1215,7 @@ button:disabled::after,.lb-close::after{display:none}
     var p;
     if (view === "leader") p = loadLeader();
     else if (view === "edu") p = loadEdu();
-    else if (view === "wheel") p = loadWheel();
+    else if (view === "wheel") p = (bombMode === "bomb" ? loadBomb() : loadWheel());
     else if (view === "chat") p = loadChat();
     else p = loadProfile();
     Promise.resolve(p).then(function(){ toast("🔄 اطلاعات بروز شد", true); }).then(function(){

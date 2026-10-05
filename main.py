@@ -784,6 +784,213 @@ def wheel_spin(tg_user: dict = Depends(current_telegram_user)):
         session.close()
 
 
+
+# ---------------------------------------------------------------------------
+# کازینو: بمب 💥 (همون بازی و همون قانون جایزه‌ی بات؛ جدولش هم همون RubyTable)
+# موقعیت بمب‌ها فقط سمت سرور می‌مونه و تا پایان بازی برای مینی‌اپ فرستاده نمی‌شه.
+# ---------------------------------------------------------------------------
+import json as _json
+import random as _random
+
+
+def _bomb_active(session, uid, botmod):
+    return (session.query(botmod.RubyTable)
+            .filter(botmod.RubyTable.creator_id == uid, botmod.RubyTable.game_type == "cz_bomb",
+                    botmod.RubyTable.status == "active")
+            .order_by(botmod.RubyTable.id.desc()).with_for_update().first())
+
+
+def _bomb_game_payload(botmod, t, state=None, reveal=False):
+    state = state if state is not None else _json.loads(t.state or "{}")
+    safe = int(state.get("safe", 0))
+    entry = int(t.entry_amount or 0)
+    max_safe = botmod.BOMB_CELLS - botmod.BOMB_COUNT
+    out = {
+        "id": t.id, "entry": entry, "safe": safe, "max_safe": max_safe,
+        "revealed": list(state.get("revealed", [])),
+        "cells": botmod.BOMB_CELLS, "bombs_count": botmod.BOMB_COUNT,
+        "cashout": int(botmod.bomb_total(safe, entry)),
+        "next": int(botmod.bomb_total(safe + 1, entry)) if safe < max_safe else None,
+    }
+    if reveal:
+        out["bombs"] = list(state.get("bombs", []))
+        out["bomb_hit"] = state.get("bomb_hit")
+    return out
+
+
+def _bomb_steps(botmod, entry=None):
+    """جدول جایزه برای نمایش (اگه ورودی داده بشه، دریافتیِ هر خانه هم حساب می‌شه)."""
+    rows = []
+    for k in range(1, botmod.BOMB_CELLS - botmod.BOMB_COUNT + 1):
+        if k in botmod.BOMB_BONUS_STEPS:
+            label = f"+{botmod.BOMB_BONUS_STEPS[k]:,}"
+        else:
+            label = f"×{botmod.BOMB_MULTIPLIERS[k]:g}"
+        rows.append({"n": k, "label": label,
+                     "total": int(botmod.bomb_total(k, entry)) if entry else None})
+    return rows
+
+
+def _bomb_guard(botmod, session, user):
+    """همون شرط‌های بات: لول کازینو، زندان، بن، مریضی روباه."""
+    if int(getattr(user, "is_banned", 0) or 0):
+        raise HTTPException(status_code=403, detail="⛔ دسترسی‌ات به ربات بسته شده.")
+    ju = getattr(user, "jail_until", None)
+    if ju and botmod.now_utc() < botmod.aware(ju):
+        raise HTTPException(status_code=403, detail="⛓️ زندانی هستی! تا پایان حبس از کازینو محرومی.")
+    if int(user.level or 1) < botmod.CASINO_UNLOCK_LEVEL:
+        raise HTTPException(status_code=403, detail=f"🔒 کازینو روبی از سطح {botmod.CASINO_UNLOCK_LEVEL} باز می‌شود. (سطح تو: {int(user.level or 1)})")
+    try:
+        botmod.sync_fox_sickness(user)
+    except Exception:  # noqa: BLE001
+        pass
+    if user.fox_sick_since:
+        session.commit()
+        raise HTTPException(status_code=403, detail="🤒 روباهت مریضه؛ اول از توی بات درمانش کن.")
+
+
+@app.get("/api/bomb")
+def bomb_state(tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = session.query(User).filter(User.telegram_id == tg_user["id"]).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        t = (session.query(botmod.RubyTable)
+             .filter(botmod.RubyTable.creator_id == user.telegram_id, botmod.RubyTable.game_type == "cz_bomb",
+                     botmod.RubyTable.status == "active")
+             .order_by(botmod.RubyTable.id.desc()).first())
+        return {
+            "unlocked": int(user.level or 1) >= botmod.CASINO_UNLOCK_LEVEL,
+            "unlock_level": botmod.CASINO_UNLOCK_LEVEL, "level": int(user.level or 1),
+            "min_entry": botmod.CASINO_MIN_ENTRY, "max_entry": botmod.CASINO_MAX_ENTRY,
+            "balance": int(user.fox_points or 0),
+            "cooldown_left": int(botmod.ruby_cooldown_remaining(user, "cz_bomb")),
+            "cooldown_total": int(botmod.CASINO_COOLDOWN_SECONDS),
+            "steps": _bomb_steps(botmod),
+            "game": _bomb_game_payload(botmod, t) if t else None,
+        }
+    finally:
+        session.close()
+
+
+class BombStart(BaseModel):
+    amount: int
+
+
+@app.post("/api/bomb/start")
+def bomb_start(body: BombStart, tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = locked_user(session, tg_user, botmod)
+        _bomb_guard(botmod, session, user)
+        t = _bomb_active(session, user.telegram_id, botmod)
+        if t:   # بازی نیمه‌کاره داری؛ دوباره پول نمی‌گیریم
+            session.commit()
+            return {"game": _bomb_game_payload(botmod, t), "balance": int(user.fox_points or 0), "resumed": True}
+        amount = int(body.amount or 0)
+        if amount < botmod.CASINO_MIN_ENTRY:
+            raise HTTPException(status_code=400, detail=f"❌ حداقل مبلغ ورودی {botmod.CASINO_MIN_ENTRY:,} روب‌پوینته.")
+        if amount > botmod.CASINO_MAX_ENTRY:
+            raise HTTPException(status_code=400, detail=f"❌ سقف مبلغ ورودی {botmod.CASINO_MAX_ENTRY:,} روب‌پوینته.")
+        left = int(botmod.ruby_cooldown_remaining(user, "cz_bomb"))
+        if left > 0:
+            raise HTTPException(status_code=429, detail=f"⏳ {left // 60} دقیقه و {left % 60} ثانیه‌ی دیگه می‌تونی بازی کازینو بسازی.")
+        if int(user.fox_points or 0) < amount:
+            raise HTTPException(status_code=400, detail="❌ روب‌پوینت کافی نداری.")
+        user.fox_points = int(user.fox_points or 0) - amount
+        user.last_casino_game_at = botmod.now_utc()
+        state = {"bombs": _random.sample(range(botmod.BOMB_CELLS), botmod.BOMB_COUNT),
+                 "revealed": [], "safe": 0, "ended": None, "src": "miniapp"}
+        t = botmod.RubyTable(chat_id=int(user.telegram_id), game_type="cz_bomb", creator_id=user.telegram_id,
+                             max_players=1, entry_amount=amount, pot=amount, players=str(user.telegram_id),
+                             status="active", message_id=None, state=_json.dumps(state), created_at=botmod.now_utc())
+        session.add(t)
+        session.commit()
+        return {"game": _bomb_game_payload(botmod, t, state), "balance": int(user.fox_points or 0), "resumed": False}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+class BombOpen(BaseModel):
+    cell: int
+
+
+@app.post("/api/bomb/open")
+def bomb_open(body: BombOpen, tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = locked_user(session, tg_user, botmod)
+        t = _bomb_active(session, user.telegram_id, botmod)
+        if not t:
+            raise HTTPException(status_code=404, detail="بازی فعالی نداری.")
+        state = _json.loads(t.state or "{}")
+        idx = int(body.cell)
+        if idx < 0 or idx >= botmod.BOMB_CELLS or idx in state.get("revealed", []):
+            raise HTTPException(status_code=400, detail="این خانه قبلاً باز شده.")
+        entry = int(t.entry_amount or 0)
+        if idx in state.get("bombs", []):
+            t.status = "finished"; state["ended"] = "bomb"; state["bomb_hit"] = idx
+            t.state = _json.dumps(state)
+            session.commit()
+            return {"ended": "bomb", "payout": 0, "balance": int(user.fox_points or 0),
+                    "game": _bomb_game_payload(botmod, t, state, reveal=True),
+                    "message": "💥 بمب پیدا شد! بازی تمام شد و جایزه‌ای نگرفتی."}
+        state.setdefault("revealed", []).append(idx)
+        state["safe"] = int(state.get("safe", 0)) + 1
+        if state["safe"] >= botmod.BOMB_CELLS - botmod.BOMB_COUNT:
+            payout = int(botmod.bomb_total(state["safe"], entry))
+            user.fox_points = int(user.fox_points or 0) + payout
+            t.status = "finished"; state["ended"] = "all_safe"
+            t.state = _json.dumps(state)
+            session.commit()
+            return {"ended": "all_safe", "payout": payout, "balance": int(user.fox_points or 0),
+                    "game": _bomb_game_payload(botmod, t, state, reveal=True),
+                    "message": f"🏆 همه‌ی خانه‌های سالم رو پیدا کردی! {payout:,} روب‌پوینت گرفتی."}
+        t.state = _json.dumps(state)
+        session.commit()
+        return {"ended": None, "payout": 0, "balance": int(user.fox_points or 0),
+                "game": _bomb_game_payload(botmod, t, state), "message": "✅ خانه سالم بود!"}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@app.post("/api/bomb/cashout")
+def bomb_cashout(tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = locked_user(session, tg_user, botmod)
+        t = _bomb_active(session, user.telegram_id, botmod)
+        if not t:
+            raise HTTPException(status_code=404, detail="بازی فعالی نداری.")
+        state = _json.loads(t.state or "{}")
+        if int(state.get("safe", 0)) <= 0:
+            raise HTTPException(status_code=400, detail="اول حداقل یه خانه‌ی سالم پیدا کن.")
+        payout = int(botmod.bomb_total(state.get("safe", 0), t.entry_amount))
+        user.fox_points = int(user.fox_points or 0) + payout
+        t.status = "finished"; state["ended"] = "cashout"
+        t.state = _json.dumps(state)
+        session.commit()
+        return {"ended": "cashout", "payout": payout, "balance": int(user.fox_points or 0),
+                "game": _bomb_game_payload(botmod, t, state, reveal=True),
+                "message": f"✅ از بازی خارج شدی و {payout:,} روب‌پوینت گرفتی."}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 # ---------------------------------------------------------------------------
 # روباهیو درس (همون منطق education.py؛ پیشرفت بین بات و مینی‌اپ مشترکه)
 # ---------------------------------------------------------------------------
