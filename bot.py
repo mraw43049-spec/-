@@ -304,6 +304,27 @@ SPAM_FINE = 750
 # ---------- کارخونه روبی ----------
 FACTORY_PERCENT_OPTIONS = [25, 50, 75, 100]
 
+# زمان جدید تولید ۱۰۰٪ در حالت حداکثر بودن دستگاه تولید
+# طبق تنظیم جدید کارخانه: ۱۰ ساعت و ۴۵ دقیقه
+FACTORY_MAX_100_SECONDS = 10 * 60 * 60 + 45 * 60
+
+def factory_effective_100_seconds(machine_level):
+    """زمان واقعی تولید ۱۰۰٪؛ در لول آخر طبق تنظیم جدید ۱۰:۴۵ است."""
+    level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(machine_level or 1)))
+    if level >= FACTORY_MACHINE_MAX_LEVEL:
+        return FACTORY_MAX_100_SECONDS
+    return int(factory_machine_hours_for_100(level) * 3600)
+
+def factory_effective_plan(item_key, percent, storage_level, machine_level):
+    """پلن تولید با زمان اصلاح‌شده‌ی دستگاه در لول آخر."""
+    plan = dict(factory_order_plan(item_key, int(percent), storage_level, machine_level))
+    old_100 = max(1, int(factory_machine_hours_for_100(machine_level) * 3600))
+    new_100 = factory_effective_100_seconds(machine_level)
+    if new_100 != old_100:
+        plan["seconds"] = max(1, round(int(plan.get("seconds", 1)) * new_100 / old_100))
+    return plan
+
+
 # ---------- ابزارهای عمومی ----------
 
 def now_utc():
@@ -4507,7 +4528,7 @@ def factory_panel_text(user, orders):
     capacity = factory_storage_capacity(storage_level)
     workers_cap = factory_workers_capacity(workers_level)
     active_count = len(orders)
-    hours_100 = factory_machine_hours_for_100(machine_level)
+    hours_100 = factory_effective_100_seconds(machine_level) / 3600
     produced = factory_produced_total_of(user)
     return (
         "🦊 کارخونه روبی 🏭\n\n"
@@ -4527,6 +4548,46 @@ def factory_panel_text(user, orders):
     )
 
 
+def factory_guide_text(page):
+    pages = {
+        1: (
+            "🏭 راهنمای کارخانه روبی — ۱/۳\n\n"
+            "🪄 تولید: از بخش تولید، خط و محصول را انتخاب کن و درصد ساخت را بزن.\n"
+            "💰 هزینه: روب‌پوینت قبل از شروع سفارش کم می‌شود.\n"
+            "🦊 کارگران: هر کارگر یک سفارش هم‌زمان را پشتیبانی می‌کند.\n"
+            "🧳 انبار: ظرفیت سفارش‌های درحال تولید به سطح انبار بستگی دارد."
+        ),
+        2: (
+            "🏭 راهنمای کارخانه روبی — ۲/۳\n\n"
+            "⏳ اگر دوباره روی محصولی که درحال تولید است بزنی، وضعیت همان سفارش نمایش داده می‌شود: محصول، مقدار ساخته‌شده، زمان گذشته، زمان باقی‌مانده و درصد پیشرفت.\n\n"
+            "❌ تایید: سفارش لغو می‌شود و کل روب‌پوینت پرداخت‌شده برمی‌گردد.\n"
+            "↩️ بازگشت: به صفحه اصلی کارخانه برمی‌گردی و تولید بدون تغییر ادامه دارد."
+        ),
+        3: (
+            "🏭 راهنمای کارخانه روبی — ۳/۳\n\n"
+            "🏪 بازار و نوسانت: محصولات آماده‌شده را از اینجا می‌بینی و با قیمت روز بازار می‌فروشی.\n"
+            "📈 قیمت بازار هر ۲۵ دقیقه تغییر می‌کند.\n"
+            "🖨 دستگاه تولید: با ارتقا، زمان تولید طبق سطح دستگاه تنظیم می‌شود.\n"
+            "🔥 در حداکثر سطح کارخانه، زمان تولید ۱۰۰٪ برابر ۱۰ ساعت و ۴۵ دقیقه است.\n\n"
+            "💡 نکته: بعد از تمام شدن تولید، محصول را برداشت کن تا وارد انبار محصول شود."
+        ),
+    }
+    return pages.get(int(page or 1), pages[1])
+
+def factory_guide_keyboard(page, owner_id):
+    page = int(page or 1)
+    rows = []
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("◀️ قبلی", callback_data=f"factory:guide:{page-1}:{owner_id}"))
+    if page < 3:
+        nav.append(InlineKeyboardButton("بعدی ▶️", callback_data=f"factory:guide:{page+1}:{owner_id}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton("🏭 بازگشت به کارخانه", callback_data=f"factory:home:0:{owner_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
 def factory_home_keyboard(owner_id, orders=None):
     rows = []
     if orders:
@@ -4539,11 +4600,16 @@ def factory_home_keyboard(owner_id, orders=None):
                     callback_data=f"factory:collect:{o.id}:{owner_id}"
                 )])
     rows += [
-        [InlineKeyboardButton("تولید🪄", callback_data=f"factory:menu:production:{owner_id}")],
-        [InlineKeyboardButton("📦 انبار محصول (فروش)", callback_data=f"factory:wh:0:{owner_id}")],
-        [InlineKeyboardButton("کارکنان🦊", callback_data=f"factory:menu:workers:{owner_id}")],
-        [InlineKeyboardButton("انبار🛖", callback_data=f"factory:menu:storage:{owner_id}")],
-        [InlineKeyboardButton("دستگاه های تولید 🖨", callback_data=f"factory:menu:machine:{owner_id}")],
+        [
+            InlineKeyboardButton("تولید🪄", callback_data=f"factory:menu:production:{owner_id}"),
+            InlineKeyboardButton("بازار و نوسانت🏪", callback_data=f"factory:wh:0:{owner_id}"),
+            InlineKeyboardButton("راهنما❔", callback_data=f"factory:guide:1:{owner_id}"),
+        ],
+        [
+            InlineKeyboardButton("کارکنان🦊", callback_data=f"factory:menu:workers:{owner_id}"),
+            InlineKeyboardButton("انبار🛖", callback_data=f"factory:menu:storage:{owner_id}"),
+            InlineKeyboardButton("دستگاه های تولید 🖨", callback_data=f"factory:menu:machine:{owner_id}"),
+        ],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -4651,7 +4717,7 @@ def factory_item_text(item_key, user):
     machine_level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(user.factory_machine_level or 1)))
     lines = [f"{item_key} {info['name']}", ""]
     for p in FACTORY_PERCENT_OPTIONS:
-        plan = factory_order_plan(item_key, p, storage_level, machine_level)
+        plan = factory_effective_plan(item_key, p, storage_level, machine_level)
         lines.append(
             f"┘─ {p}٪ : {plan['quantity']:,} عدد | هزینه: {plan['cost']:,} روب‌پوینت | "
             f"زمان: {format_duration(vip_factory_seconds(user, plan['seconds']))} | ارزش فروش: {plan['sell_total']:,} روب‌پوینت"
@@ -4679,22 +4745,27 @@ def factory_producing_status_text(user, order):
     percent = max(0, min(100, percent))
     bar = factory_progress_bar(percent)
     remaining_text = "تکمیل شد ✅" if remaining <= 0 else format_duration(remaining)
+    made = order.quantity if remaining <= 0 else min(order.quantity, int(order.quantity * percent / 100))
+    elapsed_text = format_duration(max(0, int(total_seconds - remaining)))
     return (
         "🦊 کارخونه روبی 🏭\n\n"
         f"💼 مدیر کارخونه : {user_mention(user)}\n\n"
-        f"✨ درحال تولید {order.item_key} {info['name']} ..\n"
-        f"┘─ ⏳ زمان باقی مانده : {remaining_text}\n"
-        f"┘─ ✅ تکمیل شده : {bar} | {percent}%\n\n"
-        "❗️ شما درحال تولید این محصول هستی؛ از هر محصول فقط یک سفارش هم‌زمان ممکنه.\n\n"
-        "❓ آیا از لغو تولید این محصول مطمئنی؟ (روب‌پوینتش کامل بهت برمی‌گرده)"
+        f"✨ محصول درحال تولید: {order.item_key} {info['name']}\n"
+        f"┘─ 📦 مقدار تولید: {order.quantity:,} عدد\n"
+        f"┘─ 🏭 ساخته شده تا الان: {made:,} / {order.quantity:,} عدد\n"
+        f"┘─ ⏱ زمان گذشته: {elapsed_text}\n"
+        f"┘─ ⏳ زمان باقی مانده: {remaining_text}\n"
+        f"┘─ ✅ پیشرفت: {bar} | {percent}%\n\n"
+        "⚠️ با «تایید» تولید لغو می‌شود و تمام روب‌پوینت هزینه‌ی این سفارش برمی‌گردد.\n"
+        "با «بازگشت» فقط به صفحه اصلی کارخانه می‌روی و تولید ادامه پیدا می‌کند."
     )
 
 
 def factory_producing_status_keyboard(order, owner_id):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ بله", callback_data=f"factory:cancelorder:{order.id}:{owner_id}"),
-            InlineKeyboardButton("❌ خیر", callback_data=f"factory:home:0:{owner_id}"),
+            InlineKeyboardButton("✅ تایید", callback_data=f"factory:cancelorder:{order.id}:{owner_id}"),
+            InlineKeyboardButton("↩️ بازگشت", callback_data=f"factory:home:0:{owner_id}"),
         ]
     ])
 
@@ -4745,11 +4816,11 @@ def factory_upgrade_text(kind, user):
         nxt = f"تعداد کارگر بعدی: {factory_workers_capacity(level + 1)} روباه" if cost else ""
     else:
         level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(user.factory_machine_level or 1)))
-        hours = factory_machine_hours_for_100(level)
+        hours = factory_effective_100_seconds(level) / 3600
         cost = factory_upgrade_cost(level, FACTORY_MACHINE_MAX_LEVEL)
         title = "🖨 دستگاه های تولید"
         cur = f"زمان تولید ۱۰۰٪ فعلی: {format_duration(hours * 3600)}"
-        nxt = f"زمان تولید ۱۰۰٪ بعدی: {format_duration(factory_machine_hours_for_100(level + 1) * 3600)}" if cost else ""
+        nxt = f"زمان تولید ۱۰۰٪ بعدی: {format_duration(factory_effective_100_seconds(level + 1))}" if cost else ""
     lines = [title, "", f"⭐ سطح فعلی: {level}", cur]
     if cost:
         lines += ["", nxt, f"💰 هزینه‌ی ارتقا: {cost:,} روب‌پوینت"]
@@ -4885,6 +4956,12 @@ async def factory_button(update, context):
             )
             return
 
+        if action == "guide":
+            page = int(parts[2]) if len(parts) > 2 else 1
+            await q.answer()
+            await q.message.edit_text(factory_guide_text(page), reply_markup=factory_guide_keyboard(page, owner_id))
+            return
+
         if action == "menu":
             kind = parts[2]
             if kind == "production":
@@ -4947,7 +5024,7 @@ async def factory_button(update, context):
                 return
             storage_level = max(1, min(FACTORY_STORAGE_MAX_LEVEL, int(user.factory_storage_level or 1)))
             machine_level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(user.factory_machine_level or 1)))
-            plan = factory_order_plan(item_key, int(percent_s), storage_level, machine_level)
+            plan = factory_effective_plan(item_key, int(percent_s), storage_level, machine_level)
             capacity = factory_storage_capacity(storage_level)
             used = factory_storage_used(orders)
             if used + plan["quantity"] > capacity:
