@@ -273,9 +273,36 @@ button:disabled::after,.lb-close::after{display:none}
 .gate-card p{margin:0 0 14px;font-size:13px;line-height:2;color:#cdeedb}
 .gate-btns{display:grid;gap:9px;margin-bottom:10px}
 .gate-btns .action,.gate-card .action{width:100%}
+
+/* ===== بوت سریع مینی‌اپ ===== */
+#bootScreen{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;overflow:hidden;background:radial-gradient(circle at 50% 35%,#123f2d 0,#06150f 42%,#020806 100%);transition:opacity .28s ease,visibility .28s ease}
+#bootScreen.hide{opacity:0;visibility:hidden;pointer-events:none}
+.boot-glow{position:absolute;width:52vw;height:52vw;max-width:420px;max-height:420px;border-radius:50%;background:#35d68a22;filter:blur(32px)}
+.boot-card{position:relative;width:min(88vw,360px);text-align:center;padding:26px 20px;border:1px solid #3fae83;border-radius:26px;background:linear-gradient(165deg,#12392cf2,#06160ff5);box-shadow:0 18px 60px #000c,inset 0 1px 0 #ffffff18}
+.boot-logo{font-size:58px;line-height:1;margin-bottom:10px;filter:drop-shadow(0 0 18px #ffb34766)}
+.boot-title{font-size:24px;font-weight:1000;color:#ffc46b;margin-bottom:5px}.boot-sub{font-size:12px;color:#a9d4bd;margin-bottom:18px}
+.boot-track{height:8px;border-radius:99px;background:#07130d;overflow:hidden;border:1px solid #2c6a50}.boot-fill{width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,#34d399,#ffc46b,#ff8a2a);box-shadow:0 0 14px #34d39988;transition:width .18s ease}
+.boot-status{margin-top:10px;font-size:11px;color:#7fb39a;min-height:17px}
+.boot-dots{display:flex;justify-content:center;gap:5px;margin-top:13px}.boot-dots i{width:6px;height:6px;border-radius:50%;background:#34d399;animation:bootdot .8s infinite alternate}.boot-dots i:nth-child(2){animation-delay:.18s}.boot-dots i:nth-child(3){animation-delay:.36s}@keyframes bootdot{to{opacity:.25;transform:translateY(3px)}}
+/* ===== افکت انفجار بمب ===== */
+#bombFx{position:fixed;inset:0;z-index:500;display:none;pointer-events:none;overflow:hidden;background:#160300}
+#bombFx.show{display:block;animation:bombFlash .9s ease-out both}
+.bomb-shock{position:absolute;left:50%;top:50%;width:12vmin;height:12vmin;border:8px solid #ffd27a;border-radius:50%;transform:translate(-50%,-50%) scale(.2);box-shadow:0 0 50px #ff4d0088,0 0 100px #ffb34755;animation:shock .85s cubic-bezier(.1,.7,.2,1) both}
+.bomb-rays{position:absolute;inset:0;background:repeating-conic-gradient(from 0deg,#ff6a0018 0deg 7deg,transparent 7deg 18deg);animation:rays .7s ease-out both}
+.bomb-smoke{position:absolute;inset:-15%;background:radial-gradient(circle at 25% 60%,#111c 0 4%,transparent 9%),radial-gradient(circle at 70% 35%,#333b 0 5%,transparent 11%),radial-gradient(circle at 50% 70%,#090909cc 0 6%,transparent 15%),radial-gradient(circle at 35% 30%,#5557 0 4%,transparent 10%);filter:blur(5px);animation:smoke 1s ease-out both}
+.bomb-word{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) rotate(-8deg) scale(.4);font-size:clamp(44px,16vw,120px);font-weight:1000;color:#fff;text-shadow:0 0 8px #fff,0 0 25px #ff6a00,6px 6px 0 #9b1600;animation:boomWord .8s cubic-bezier(.12,.8,.2,1) both}
+@keyframes bombFlash{0%,12%{background:#fff}20%{background:#ff7a00}45%{background:#160300}100%{background:#03090fe8}}
+@keyframes shock{to{transform:translate(-50%,-50%) scale(9);opacity:0}}
+@keyframes rays{to{transform:scale(1.7);opacity:0}}
+@keyframes smoke{to{transform:scale(1.35) rotate(8deg);opacity:0}}
+@keyframes boomWord{0%{transform:translate(-50%,-50%) rotate(-8deg) scale(.2);opacity:0}22%{transform:translate(-50%,-50%) rotate(3deg) scale(1.15);opacity:1}100%{transform:translate(-50%,-50%) rotate(-3deg) scale(1);opacity:0}}
+@media (prefers-reduced-motion:reduce){#bootScreen *,#bombFx *{animation:none!important}}
+
 </style>
 </head>
 <body>
+<div id="bootScreen" aria-label="در حال آماده‌سازی مینی‌اپ"><div class="boot-glow"></div><div class="boot-card"><div class="boot-logo">🦊</div><div class="boot-title">روباهیو</div><div class="boot-sub">در حال آماده‌سازی دنیای روباه‌ها...</div><div class="boot-track"><div id="bootFill" class="boot-fill"></div></div><div id="bootStatus" class="boot-status">اتصال سریع...</div><div class="boot-dots"><i></i><i></i><i></i></div></div></div><div id="bombFx" aria-hidden="true"><div class="bomb-rays"></div><div class="bomb-smoke"></div><div class="bomb-shock"></div><div class="bomb-word">💥 BOOM!</div></div>
+
 <div class="scene" aria-hidden="true">
   <div class="sc-stars"></div><div class="sc-stars s2"></div><div class="sc-moon"></div>
   <svg class="sc-mount" viewBox="0 0 400 500" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg">
@@ -944,8 +971,9 @@ button:disabled::after,.lb-close::after{display:none}
     }).catch(function(e){ if (!e.gate) $("wheelInfo").textContent = "خطا: " + e.message; });
   }
   $("spinBtn").onclick = function(){
+    audioUnlock();
     if (wheelBusy || !wheelData) return;
-    wheelBusy = true; $("spinBtn").disabled = true; $("wheelRes").textContent = "🎡 ...";
+    wheelBusy = true; $("spinBtn").disabled = true; $("wheelRes").textContent = "🎡 ..."; wheelSound();
     api("/api/wheel/spin", "POST").then(function(r){
       var n = wheelData.labels.length, seg = 360 / n;
       var target = 360 * 6 + (360 - (r.index * seg + seg/2));
@@ -955,6 +983,7 @@ button:disabled::after,.lb-close::after{display:none}
         wheelBusy = false;
         wheelData.left = r.left; wheelData.balance = r.balance; wheelLeftAt = Date.now();
         $("wheelRes").textContent = r.message;
+        if (r.reward > 0) winSound();
         toast(r.message, r.reward > 0);
         drawWheelInfo();
       }, 5200);
@@ -1048,12 +1077,20 @@ button:disabled::after,.lb-close::after{display:none}
     api("/api/bomb/cashout", "POST").then(function(r){ bombResult(r); })
       .catch(function(e){ toast(e.message, false); loadBomb(); }).then(function(){ bombBusy = false; });
   };
+  function triggerBombExplosion(){
+    audioUnlock(); bombSound();
+    var fx=$("bombFx"); if(!fx) return;
+    fx.classList.remove("show"); void fx.offsetWidth; fx.classList.add("show");
+    if(navigator.vibrate){ try{ navigator.vibrate([80,45,140,35,220]); }catch(e){} }
+    setTimeout(function(){ fx.classList.remove("show"); }, 1050);
+  }
   function bombResult(r){
     $("bBal").textContent = fa(r.balance);
     try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(r.ended === "bomb" ? "heavy" : "light"); } catch(e){}
     if (!r.ended) { bomb.game = r.game; drawBomb(); return; }
     bomb.game = null; bomb.balance = r.balance;
     bomb.cooldown_left = bomb.cooldown_total; bombCdAt = Date.now();
+    if (r.ended === "bomb") triggerBombExplosion(); else winSound();
     drawBomb(r.game);
     $("bRes").textContent = r.message;
     $("bSetup").style.display = "";   // بازی تموم شد؛ می‌تونه دوباره شروع کنه (بعد از انتظار)
@@ -1183,6 +1220,40 @@ button:disabled::after,.lb-close::after{display:none}
       .catch(function(e){ toast(e.message, false); });
   };
 
+  // ---------- موتور صدای سبک و بدون فایل ----------
+  var audioCtx = null, audioUnlocked = false;
+  function audioUnlock(){
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      if (!audioCtx) audioCtx = new AC();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      audioUnlocked = true;
+    } catch(e){}
+  }
+  function tone(freq, dur, type, vol, delay){
+    if (!audioCtx || !audioUnlocked) return;
+    try {
+      var o=audioCtx.createOscillator(), g=audioCtx.createGain(), t=audioCtx.currentTime+(delay||0);
+      o.type=type||"sine"; o.frequency.setValueAtTime(freq,t);
+      g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(Math.max(.0001,vol||.08),t+.008); g.gain.exponentialRampToValueAtTime(.0001,t+(dur||.12));
+      o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t+(dur||.12)+.02);
+    } catch(e){}
+  }
+  function wheelSound(){ tone(420,.08,"triangle",.09); tone(620,.10,"triangle",.07,.09); tone(860,.13,"sine",.08,.19); }
+  function tickSound(){ tone(520,.045,"square",.045); }
+  function winSound(){ tone(660,.12,"triangle",.11); tone(880,.16,"triangle",.09,.12); tone(1320,.22,"sine",.08,.25); }
+  function bombSound(){
+    if (!audioCtx || !audioUnlocked) return;
+    try {
+      var dur=.9, n=Math.floor(audioCtx.sampleRate*dur), buf=audioCtx.createBuffer(1,n,audioCtx.sampleRate), data=buf.getChannelData(0);
+      for(var i=0;i<n;i++){ var env=1-i/n; data[i]=(Math.random()*2-1)*env*env; }
+      var src=audioCtx.createBufferSource(), gain=audioCtx.createGain(), filter=audioCtx.createBiquadFilter();
+      src.buffer=buf; filter.type="lowpass"; filter.frequency.value=1800; gain.gain.value=.55; src.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination); src.start();
+      tone(75,.65,"sawtooth",.24); tone(48,.8,"sine",.3,.03);
+    } catch(e){}
+  }
+  document.addEventListener("pointerdown", audioUnlock, {passive:true, once:false});
+
   // ---------- ناوبری + تازه‌سازی ----------
   var view = "fox";
   function show(v){
@@ -1246,7 +1317,18 @@ button:disabled::after,.lb-close::after{display:none}
   } catch(e){}
   document.addEventListener("visibilitychange", function(){ document.documentElement.classList.toggle("paused", document.hidden); });
 
-  loadProfile();
+  // ---------- لودینگ سریع اولیه ----------
+  (function boot(){
+    var bs=$("bootScreen"), bf=$("bootFill"), st=$("bootStatus"), pct=0;
+    var timer=setInterval(function(){
+      pct=Math.min(92,pct+(pct<45?12:6)); if(bf) bf.style.width=pct+"%";
+      if(st) st.textContent=pct<35?"اتصال سریع...":pct<70?"آماده‌سازی بازی‌ها...":"تقریباً آماده شد...";
+    },70);
+    function finish(){ clearInterval(timer); if(bf) bf.style.width="100%"; if(st) st.textContent="آماده! 🦊"; setTimeout(function(){ if(bs) bs.classList.add("hide"); },120); }
+    // پروفایل اولین داده‌ی ضروری است؛ بقیه تب‌ها lazy-load می‌شوند.
+    Promise.resolve(loadProfile()).then(finish).catch(finish);
+    setTimeout(finish,2200);
+  })();
 })();
 </script>
 </body>
