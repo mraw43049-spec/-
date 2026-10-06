@@ -7817,7 +7817,7 @@ async def notify_user_private(bot, user_id, text):
         logger.info("Could not notify user %s: %s", user_id, e)
 
 
-async def _send_to_user_safe(bot, uid, text, max_retries=3):
+async def _send_to_user_safe(bot, uid, text, max_retries=3, reply_markup=None):
     """
     ارسال پیام به یک کاربر، با احترام به محدودیت نرخ ارسال تلگرام (Flood control).
     اگه تلگرام بگه صبر کن (RetryAfter)، به‌جای اینکه فوراً «ناموفق» حساب بشه،
@@ -7825,7 +7825,7 @@ async def _send_to_user_safe(bot, uid, text, max_retries=3):
     """
     for attempt in range(max_retries):
         try:
-            await bot.send_message(chat_id=uid, text=text)
+            await bot.send_message(chat_id=uid, text=text, reply_markup=reply_markup)
             return True
         except RetryAfter as e:
             await asyncio.sleep(float(e.retry_after) + 0.5)
@@ -7839,7 +7839,7 @@ async def _send_to_user_safe(bot, uid, text, max_retries=3):
     return False
 
 
-async def broadcast_to_users(bot, user_ids, text, delay=0.04):
+async def broadcast_to_users(bot, user_ids, text, delay=0.04, reply_markup=None):
     """
     پیام رو یکی‌یکی به کاربرا می‌فرسته، با یه فاصله‌ی کوچیک بین هر ارسال تا به
     محدودیت نرخ ارسال تلگرام (حدود ۳۰ پیام در ثانیه) نخوریم. قبلاً همه‌ی پیام‌ها
@@ -7849,7 +7849,7 @@ async def broadcast_to_users(bot, user_ids, text, delay=0.04):
     """
     ok = fail = 0
     for uid in user_ids:
-        sent = await _send_to_user_safe(bot, uid, text)
+        sent = await _send_to_user_safe(bot, uid, text, reply_markup=reply_markup)
         if sent:
             ok += 1
         else:
@@ -7922,6 +7922,7 @@ def admin_main_keyboard():
         [InlineKeyboardButton("👥 تعداد کاربران", callback_data="admin:users")],
         [InlineKeyboardButton("📣 پیام همگانی", callback_data="admin:broadcast")],
         [InlineKeyboardButton("🦊 افزودن/کسر روب‌پوینت", callback_data="admin:addpoints")],
+        [InlineKeyboardButton("🦉 افزودن/کسر جغد کاربر", callback_data="admin:addowls")],
         [InlineKeyboardButton("🎁 هدیه روب‌پوینت به همه", callback_data="admin:giftall")],
         [InlineKeyboardButton("🎟 ساخت کد هدیه", callback_data="admin:giftcode")],
         [InlineKeyboardButton("🎰 ساخت لینک قرعه‌کشی", callback_data="admin:gwcreate")],
@@ -8103,6 +8104,7 @@ async def admin_callback(update, context):
         await q.message.reply_text(f"👥 تعداد کاربران ثبت‌شده: {count}")
     elif action == "broadcast": context.user_data["admin_action"]="broadcast"; await q.message.reply_text("📣 متن پیام همگانی را بفرست.")
     elif action == "addpoints": context.user_data["admin_action"]="addpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی یا @شناسه کاربر + مقدار روب‌پوینت")
+    elif action == "addowls": context.user_data["admin_action"]="addowls"; await q.message.reply_text("🦉 فرمت: آیدی عددی یا @شناسه کاربر + تعداد جغد\nمثال افزودن: 123456789 5\nمثال کسر: 123456789 -3")
     elif action == "giftall":
         context.user_data["admin_action"]="giftall"
         await q.message.reply_text("🎁 چند روب‌پوینت به همه‌ی کاربرا هدیه داده بشه؟\nفقط عدد بفرست (مثلاً 500). برای کسر از همه، عدد منفی بفرست.")
@@ -8378,6 +8380,13 @@ async def admin_text(update, context):
             session.commit()
             await update.message.reply_text(f"🦊 انجام شد.\nروب‌پوینت کاربر: {user.fox_points:,}",**reply_kwargs(update.message))
             await notify_user_private(context.bot, uid, f"📢 اطلاعیه پشتیبانی\n\n🦊 روب‌پوینت‌های شما توسط پشتیبانی تغییر کرد.\n💰 مقدار قبلی: {old_points:,}\n💰 مقدار جدید: {user.fox_points:,}")
+        elif action=="addowls":
+            if abs(value)>100_000_000: await update.message.reply_text("عدد خیلی بزرگه (حداکثر ۱۰۰ میلیون).", **reply_kwargs(update.message)); return
+            old_owls=int(user.owl_catch_count or 0)
+            user.owl_catch_count=max(0,old_owls+value)
+            session.commit()
+            await update.message.reply_text(f"🦉 انجام شد.\nجغدهای کاربر: {old_owls:,} ← {user.owl_catch_count:,}",**reply_kwargs(update.message))
+            await notify_user_private(context.bot, uid, f"📢 اطلاعیه پشتیبانی\n\n🦉 جغدهای شما توسط پشتیبانی تغییر کرد.\n🦉 تعداد قبلی: {old_owls:,}\n🦉 تعداد جدید: {user.owl_catch_count:,}")
         elif action=="setlevel":
             if value<1 or value>100: await update.message.reply_text("سطح باید بین 1 تا 100 باشد.", **reply_kwargs(update.message)); return
             old_level=int(user.level or 1)
@@ -13182,6 +13191,61 @@ def gw_channels_of(g):
     return [c for c in data if isinstance(c, dict) and c.get('chat') not in (None, '')]
 
 
+def gw_prizes_of(g):
+    """جایزه‌ی هر برنده به ترتیب رتبه (برای قرعه‌کشی‌های قدیمی که یک جایزه‌ی مشترک دارن هم کار می‌کنه)."""
+    try:
+        p = json.loads(getattr(g, 'prizes', None) or '[]')
+    except Exception:
+        p = []
+    p = [str(x) for x in p if str(x).strip()]
+    n = max(1, int(g.winners_count or 1))
+    if not p:
+        p = [g.prize]
+    if len(p) < n:
+        p += [p[-1]] * (n - len(p))
+    return p[:n]
+
+
+def gw_prize_text(g, limit=10):
+    p = gw_prizes_of(g)
+    if len(set(p)) == 1:
+        return f"🎁 جایزه هر برنده: {p[0]}" if len(p) > 1 else f"🎁 جایزه: {p[0]}"
+    lines = ['🎁 جایزه‌ها:'] + [f"   {i}. {x}" for i, x in enumerate(p[:limit], 1)]
+    if len(p) > limit:
+        lines.append(f"   ... و {len(p) - limit} جایزه‌ی دیگه")
+    return '\n'.join(lines)
+
+
+def gw_prize_summary(prizes):
+    return prizes[0] if len(set(prizes)) == 1 else ' | '.join(prizes)[:900]
+
+
+def gw_reset_prizes_if_needed(d):
+    if d.get('prizes') and d.get('winners') is not None and len(d['prizes']) != int(d['winners']):
+        d.pop('prizes', None)
+        d.pop('prize', None)
+    d.pop('prizes_tmp', None)
+
+
+def gw_announce(g, link):
+    text = (f"🎰 {g.title}\n\n{gw_prize_text(g)}\n🏆 تعداد برنده: {g.winners_count}\n"
+            f"⏳ زمان باقی‌مانده: {format_duration(gw_seconds_left(g))}\n\nبرای شرکت دکمه‌ی زیر رو بزن 👇")
+    return text, InlineKeyboardMarkup([[InlineKeyboardButton('🎰 شرکت در قرعه‌کشی', url=link)]])
+
+
+_GW_BC_RUNNING = set()
+
+
+async def gw_broadcast_task(bot, gid, admin_chat, ids, text, kb):
+    try:
+        ok, fail = await broadcast_to_users(bot, ids, text, delay=0.05, reply_markup=kb)
+        await notify_user_private(bot, admin_chat, f"✅ پیام همگانی قرعه‌کشی #{gid} تموم شد.\n📨 موفق: {ok:,}\n❌ ناموفق (بلاک/حذف/خروج ربات): {fail:,}")
+    except Exception:
+        logger.exception('giveaway broadcast failed')
+    finally:
+        _GW_BC_RUNNING.discard(gid)
+
+
 def gw_seconds_left(g):
     return max(0, int((aware(g.ends_at) - now_utc()).total_seconds()))
 
@@ -13311,7 +13375,14 @@ def gw_active_count(session, gid):
 # ======================================================================
 def gw_draft_complete(d):
     return bool(d.get('title') and d.get('channels') and d.get('max') is not None and d.get('top') is not None
-                and d.get('prize') and d.get('winners') is not None and d.get('hours') is not None)
+                and d.get('prizes') and d.get('winners') is not None and len(d['prizes']) == int(d['winners']) and d.get('hours') is not None)
+
+
+def gw_draft_prizes_text(d, na):
+    p = d.get('prizes')
+    if not p:
+        return na if d.get('winners') is not None else '❌ اول تعداد برنده رو تنظیم کن'
+    return ''.join(f"\n   {i}. {x}" for i, x in enumerate(p[:10], 1)) + (f"\n   ... و {len(p) - 10} مورد دیگه" if len(p) > 10 else '')
 
 
 def gw_create_panel(d):
@@ -13325,8 +13396,8 @@ def gw_create_panel(d):
              f"📢 کانال‌های اجباری: {chan_txt}",
              f"👥 تعداد شرکت‌کننده: {(str(d['max']) + ' نفر') if d.get('max') is not None else na}",
              f"🏆 نمایش لیست برترین‌ها برای کاربرها: {top_txt}",
-             f"🎁 جایزه: {d.get('prize') or na}",
              f"🥇 تعداد برنده: {(str(d['winners']) + ' نفر') if d.get('winners') is not None else na}",
+             f"🎁 جایزه‌ها: {gw_draft_prizes_text(d, na)}",
              f"⏳ زمان قرعه‌کشی: {gw_hours_text(d['hours']) if d.get('hours') is not None else na}", '']
     if gw_draft_complete(d):
         lines.append('✅ همه‌ی موارد تنظیم شد؛ «ساخت لینک» رو بزن.')
@@ -13338,8 +13409,8 @@ def gw_create_panel(d):
         [InlineKeyboardButton(f"{mark(bool(chans))} 📢 کانال‌های اجباری", callback_data='gwc:opt:channels')],
         [InlineKeyboardButton(f"{mark(d.get('max') is not None)} 👥 تعداد شرکت‌کننده", callback_data='gwc:opt:max')],
         [InlineKeyboardButton(f"{mark(top is not None)} 🏆 نمایش لیست برترین‌ها", callback_data='gwc:opt:top')],
-        [InlineKeyboardButton(f"{mark(bool(d.get('prize')))} 🎁 جایزه", callback_data='gwc:opt:prize')],
         [InlineKeyboardButton(f"{mark(d.get('winners') is not None)} 🥇 تعداد برنده", callback_data='gwc:opt:winners')],
+        [InlineKeyboardButton(f"{mark(bool(d.get('prizes')))} 🎁 جایزه‌ی هر برنده", callback_data='gwc:opt:prize')],
         [InlineKeyboardButton(f"{mark(d.get('hours') is not None)} ⏳ زمان قرعه‌کشی", callback_data='gwc:opt:hours')],
     ]
     if gw_draft_complete(d):
@@ -13356,7 +13427,6 @@ GW_INPUT_PROMPTS = {
                  '  مثال: -1001234567890 https://t.me/+AbCdEf\n\n'
                  '⚠️ ربات باید توی همه‌ی این کانال‌ها ادمین باشه، وگرنه نمی‌تونه عضویت رو چک کنه.'),
     'max': '👥 تعداد شرکت‌کننده رو به‌صورت عدد بفرست. مثال: 300',
-    'prize': '🎁 جایزه‌ی قرعه‌کشی رو بنویس (حداکثر ۱۲۰ کاراکتر).\nمثال: ۱۰۰٬۰۰۰ روب‌پوینت',
     'winners': '🥇 تعداد برنده‌ها رو به‌صورت عدد بفرست. مثال: 3',
     'hours': '⏳ مدت قرعه‌کشی رو بر حسب «ساعت» بفرست (از لحظه‌ی ساخت لینک). مثال: 48',
 }
@@ -13405,6 +13475,14 @@ async def gw_show_create_panel(context, chat_id, message_id, d, fallback_message
     if fallback_message is not None:
         sent = await fallback_message.reply_text(text, reply_markup=kb)
         d['panel'] = (sent.chat_id, sent.message_id)
+
+
+def gw_prize_prompt(d):
+    n = int(d['winners'])
+    k = len(d.get('prizes_tmp') or []) + 1
+    left = n - k + 1
+    extra = f"\n\n💡 می‌تونی همه‌ی {left} جایزه‌ی باقی‌مونده رو هم یکجا بفرستی؛ هر جایزه توی یک خط." if left > 1 else ''
+    return f"🎁 جایزه‌ی نفر {k} (از {n}) رو بنویس (حداکثر {GW_MAX_PRIZE} کاراکتر).\nمثال: ۱۰۰٬۰۰۰ روب‌پوینت{extra}"
 
 
 def gw_clear_input_state(context):
@@ -13491,7 +13569,15 @@ async def gw_create_callback(update, context):
         return
     if action == 'opt' and len(parts) == 3 and parts[2] in ('title', 'channels', 'max', 'top', 'prize', 'winners', 'hours'):
         field = parts[2]
-        if field in ('title', 'prize'):
+        if field == 'prize':
+            if d.get('winners') is None:
+                await q.answer('اول تعداد برنده رو تنظیم کن، بعد جایزه‌ی هر برنده رو.', show_alert=True)
+                return
+            d['prizes_tmp'] = []
+            context.user_data['admin_action'] = 'gw_input:prize'
+            await q.message.edit_text(gw_prize_prompt(d), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت', callback_data='gwc:home')]]))
+            return
+        if field == 'title':
             context.user_data['admin_action'] = f'gw_input:{field}'
             await q.message.edit_text(GW_INPUT_PROMPTS[field], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت', callback_data='gwc:home')]]))
             return
@@ -13527,6 +13613,7 @@ async def gw_create_callback(update, context):
             d['top'] = n
         elif field == 'winners' and 1 <= n <= GW_MAX_WINNERS:
             d['winners'] = n
+            gw_reset_prizes_if_needed(d)
         elif field == 'hours' and 1 <= n <= GW_MAX_HOURS:
             d['hours'] = n
         else:
@@ -13553,10 +13640,26 @@ async def gw_handle_input(update, context, field, text):
             return
         d['title'] = raw
     elif field == 'prize':
-        if not (1 <= len(raw) <= GW_MAX_PRIZE):
-            await retry(f'❌ جایزه باید بین ۱ تا {GW_MAX_PRIZE} کاراکتر باشه.')
+        if d.get('winners') is None:
+            await retry('❌ اول تعداد برنده رو تنظیم کن.')
             return
-        d['prize'] = raw
+        n = int(d['winners'])
+        tmp = d.setdefault('prizes_tmp', [])
+        lines = [l.strip() for l in raw.split('\n') if l.strip()]
+        if not lines or any(len(l) > GW_MAX_PRIZE for l in lines):
+            await retry(f'❌ هر جایزه باید بین ۱ تا {GW_MAX_PRIZE} کاراکتر باشه.')
+            return
+        if len(lines) > 1 and len(lines) != n - len(tmp):
+            await retry(f'❌ باید دقیقاً {n - len(tmp)} جایزه (هر کدوم توی یک خط) بفرستی، یا یکی‌یکی بفرست.')
+            return
+        tmp.extend(lines)
+        if len(tmp) < n:
+            context.user_data['admin_action'] = 'gw_input:prize'
+            await msg.reply_text(gw_prize_prompt(d), **reply_kwargs(msg))
+            return
+        d['prizes'] = list(tmp)
+        d['prize'] = gw_prize_summary(d['prizes'])
+        d.pop('prizes_tmp', None)
     elif field == 'channels':
         wait = await msg.reply_text('⏳ دارم کانال‌ها رو چک می‌کنم...')
         channels, errors = await gw_parse_channels(context.bot, raw)
@@ -13587,6 +13690,7 @@ async def gw_handle_input(update, context, field, text):
                 await retry(f'❌ تعداد برنده باید بین ۱ تا {GW_MAX_WINNERS} باشه.')
                 return
             d['winners'] = int(n)
+            gw_reset_prizes_if_needed(d)
         elif field == 'hours':
             if not (1 <= n <= GW_MAX_HOURS):
                 await retry(f'❌ مدت باید بین ۱ تا {GW_MAX_HOURS} ساعت باشه.')
@@ -13606,7 +13710,7 @@ async def gw_create(update, context, d):
     session = get_session()
     try:
         g = Giveaway(
-            title=d['title'], prize=d['prize'], winners_count=int(d['winners']), max_participants=int(d['max']),
+            title=d['title'], prize=d['prize'], prizes=json.dumps(d['prizes'], ensure_ascii=False), winners_count=int(d['winners']), max_participants=int(d['max']),
             show_top=int(d['top']), channels=json.dumps(d['channels'], ensure_ascii=False),
             created_by=q.from_user.id, created_at=now_utc(),
             ends_at=now_utc() + timedelta(hours=int(d['hours'])), status='active',
@@ -13614,7 +13718,7 @@ async def gw_create(update, context, d):
         session.add(g)
         session.commit()
         gid = g.id
-        title, prize = g.title, g.prize
+        title, prize_txt = g.title, gw_prize_text(g)
     except Exception:
         session.rollback()
         logger.exception('giveaway create failed')
@@ -13627,10 +13731,12 @@ async def gw_create(update, context, d):
     context.user_data.pop('gw_draft', None)
     gw_clear_input_state(context)
     await q.message.edit_text(
-        f"✅ قرعه‌کشی ساخته شد!\n\n🎰 {title}\n🎁 جایزه: {prize}\n🏆 برنده‌ها: {d['winners']} نفر\n"
+        f"✅ قرعه‌کشی ساخته شد!\n\n🎰 {title}\n{prize_txt}\n🏆 برنده‌ها: {d['winners']} نفر\n"
         f"👥 ظرفیت: {d['max']:,} نفر\n⏳ مدت: {gw_hours_text(d['hours'])}\n\n"
         f"🔗 لینک قرعه‌کشی:\n{link}\n\nاین لینک رو برای کاربرها بفرست.",
         reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton('📢 ارسال لینک در کانال‌های اجباری', callback_data=f'gwa:postch:{gid}')],
+            [InlineKeyboardButton('📣 پیام همگانی قرعه‌کشی (گپ / پیوی)', callback_data=f'gwa:bc:{gid}')],
             [InlineKeyboardButton('🏆 مدیریت و لیست برترین‌ها', callback_data=f'gwa:view:{gid}')],
             [InlineKeyboardButton('🔙 پنل مدیریت', callback_data='admin:back')]]))
 
@@ -13661,7 +13767,7 @@ def gw_admin_view(session, g, uname):
     chans = '، '.join(c.get('title') or str(c['chat']) for c in gw_channels_of(g))
     lines = [f"🎰 {g.title} (#{g.id})", '',
              f"وضعیت: {GW_STATUS_LABEL.get(g.status, g.status)}", timing,
-             f"🎁 جایزه: {g.prize}", f"🥇 تعداد برنده: {g.winners_count}",
+             gw_prize_text(g, 15), f"🥇 تعداد برنده: {g.winners_count}",
              f"👥 شرکت‌کننده‌ی فعال: {total_active:,} از {g.max_participants:,}",
              f"🚪 لفت‌داده‌ها: {left:,}", f"🎟 مجموع تیکت‌های فعال: {tickets:,}",
              f"📢 کانال‌ها: {chans}",
@@ -13672,8 +13778,12 @@ def gw_admin_view(session, g, uname):
             ws = json.loads(g.winners)
         except Exception:
             ws = []
-        lines += ['', '🥇 برنده‌ها:'] + [f"{i}. {w.get('label') or w.get('uid')} — {w.get('tickets', 1)} تیکت" for i, w in enumerate(ws, 1)]
-    rows = [[InlineKeyboardButton('🏆 لیست برترین‌ها', callback_data=f'gwa:top:{g.id}:0')],
+        lines += ['', '🥇 برنده‌ها:'] + [f"{i}. {w.get('label') or w.get('uid')} — {w.get('tickets', 1)} تیکت — 🎁 {w.get('prize', '')}" for i, w in enumerate(ws, 1)]
+    rows = []
+    if g.status == 'active':
+        rows.append([InlineKeyboardButton('📢 ارسال لینک در کانال‌های اجباری', callback_data=f'gwa:postch:{g.id}')])
+        rows.append([InlineKeyboardButton('📣 پیام همگانی قرعه‌کشی (گپ / پیوی)', callback_data=f'gwa:bc:{g.id}')])
+    rows += [[InlineKeyboardButton('🏆 لیست برترین‌ها', callback_data=f'gwa:top:{g.id}:0')],
             [InlineKeyboardButton(('🙈 مخفی کردن لیست از کاربرها' if g.show_top else '👁 نمایش لیست برای کاربرها'), callback_data=f'gwa:toggletop:{g.id}')]]
     if g.status == 'active':
         rows.append([InlineKeyboardButton('🎲 قرعه‌کشی همین الان', callback_data=f'gwa:draw:{g.id}'),
@@ -13795,6 +13905,76 @@ async def gw_admin_callback(update, context):
             await q.answer('❌ لغو شد.')
             text, kb = gw_admin_view(session, g, uname)
             await _edit_or_send(q, text, kb)
+        elif action == 'postch':
+            if not gw_is_open(g):
+                await q.answer('این قرعه‌کشی دیگه فعال نیست.', show_alert=True)
+                return
+            await q.answer('⏳ درحال ارسال به کانال‌ها...')
+            text, kb = gw_announce(g, gw_link(uname, g.id))
+            chans = gw_channels_of(g)
+            ok, fail = [], []
+            for c in chans:
+                name = c.get('title') or str(c['chat'])
+                try:
+                    await context.bot.send_message(chat_id=c['chat'], text=text, reply_markup=kb)
+                    ok.append(name)
+                except RetryAfter as e:
+                    await asyncio.sleep(float(e.retry_after) + 0.5)
+                    try:
+                        await context.bot.send_message(chat_id=c['chat'], text=text, reply_markup=kb)
+                        ok.append(name)
+                    except Exception as e2:
+                        fail.append(f"{name}: {str(e2)[:60]}")
+                except Exception as e:
+                    fail.append(f"{name}: {str(e)[:60]}")
+            rep_lines = [f"📢 ارسال لینک قرعه‌کشی «{g.title}» به کانال‌ها:", '']
+            rep_lines += [f"✅ {n}" for n in ok] + [f"❌ {n}" for n in fail]
+            if fail:
+                rep_lines += ['', 'برای کانال‌های ناموفق مطمئن شو ربات ادمینه و اجازه‌ی «ارسال پیام» داره.']
+            await q.message.reply_text('\n'.join(rep_lines))
+        elif action == 'bc':
+            if not gw_is_open(g):
+                await q.answer('این قرعه‌کشی دیگه فعال نیست.', show_alert=True)
+                return
+            await q.answer()
+            n_users = session.query(User).count()
+            n_groups = session.query(GroupChat).filter(GroupChat.active == 1).count()
+            await _edit_or_send(q, f"📣 پیام همگانی قرعه‌کشی «{g.title}»\n\nپیام شامل اطلاعات قرعه‌کشی و دکمه‌ی شرکت هست. کجا بره؟",
+                InlineKeyboardMarkup([
+                    [InlineKeyboardButton(f"👥 فقط توی گپ‌ها ({n_groups:,})", callback_data=f'gwa:bcc:{g.id}:g')],
+                    [InlineKeyboardButton(f"👤 فقط توی پیوی کاربرها ({n_users:,})", callback_data=f'gwa:bcc:{g.id}:u')],
+                    [InlineKeyboardButton(f"🌐 هر دو ({n_groups + n_users:,})", callback_data=f'gwa:bcc:{g.id}:a')],
+                    [InlineKeyboardButton('🔙 بازگشت', callback_data=f'gwa:view:{g.id}')]]))
+        elif action == 'bcc' and len(parts) >= 4 and parts[3] in ('g', 'u', 'a'):
+            if not gw_is_open(g):
+                await q.answer('این قرعه‌کشی دیگه فعال نیست.', show_alert=True)
+                return
+            await q.answer()
+            where = {'g': 'گپ‌ها', 'u': 'پیوی کاربرها', 'a': 'گپ‌ها و پیوی کاربرها'}[parts[3]]
+            await _edit_or_send(q, f"⚠️ مطمئنی پیام قرعه‌کشی «{g.title}» برای {where} ارسال بشه؟\nارسال ممکنه چند دقیقه طول بکشه و برگشت نداره.",
+                InlineKeyboardMarkup([[InlineKeyboardButton('✅ بله، بفرست', callback_data=f'gwa:bcgo:{g.id}:{parts[3]}'),
+                                       InlineKeyboardButton('↩️ نه', callback_data=f'gwa:bc:{g.id}')]]))
+        elif action == 'bcgo' and len(parts) >= 4 and parts[3] in ('g', 'u', 'a'):
+            if not gw_is_open(g):
+                await q.answer('این قرعه‌کشی دیگه فعال نیست.', show_alert=True)
+                return
+            if g.id in _GW_BC_RUNNING:
+                await q.answer('یک ارسال همگانی برای این قرعه‌کشی همین الان درحال انجامه.', show_alert=True)
+                return
+            ids = []
+            if parts[3] in ('g', 'a'):
+                ids += [c.chat_id for c in session.query(GroupChat).filter(GroupChat.active == 1).all()]
+            if parts[3] in ('u', 'a'):
+                ids += [u.telegram_id for u in session.query(User).all()]
+            ids = list(dict.fromkeys(ids))
+            text, kb = gw_announce(g, gw_link(uname, g.id))
+            _GW_BC_RUNNING.add(g.id)
+            task = asyncio.create_task(gw_broadcast_task(context.bot, g.id, q.from_user.id, ids, text, kb))
+            _GW_TASKS.add(task)
+            task.add_done_callback(_GW_TASKS.discard)
+            await q.answer('✅ ارسال شروع شد.')
+            await _edit_or_send(q, f"📣 ارسال به {len(ids):,} مقصد شروع شد.\nوقتی تموم شد گزارشش برات میاد.",
+                InlineKeyboardMarkup([[InlineKeyboardButton('🔙 مدیریت قرعه‌کشی', callback_data=f'gwa:view:{g.id}')]]))
         else:
             await q.answer()
     finally:
@@ -13805,7 +13985,7 @@ async def gw_admin_callback(update, context):
 # سمت کاربر: ورود با لینک، عضویت، جمع، تیکت و لینک اختصاصی
 # ======================================================================
 def gw_info_text(session, g):
-    return (f"🎰 {g.title}\n\n🎁 جایزه: {g.prize}\n🏆 تعداد برنده: {g.winners_count}\n"
+    return (f"🎰 {g.title}\n\n{gw_prize_text(g)}\n🏆 تعداد برنده: {g.winners_count}\n"
             f"⏳ زمان باقی‌مانده: {format_duration(gw_seconds_left(g))}\n"
             f"👥 شرکت‌کننده‌ها: {gw_active_count(session, g.id):,} از {g.max_participants:,}\n")
 
@@ -13843,14 +14023,14 @@ def gw_ticket_view(session, g, uid, uname):
 def gw_ended_text(session, g):
     if g.status == 'cancelled':
         return f"🎰 {g.title}\n\n❌ این قرعه‌کشی لغو شده."
-    text = f"🎰 {g.title}\n\n🎁 جایزه: {g.prize}\n🏁 این قرعه‌کشی تموم شده."
+    text = f"🎰 {g.title}\n\n{gw_prize_text(g)}\n🏁 این قرعه‌کشی تموم شده."
     if g.status == 'finished' and g.winners:
         try:
             ws = json.loads(g.winners)
         except Exception:
             ws = []
         if ws:
-            text += '\n\n🥇 برنده‌ها:\n' + '\n'.join(f"{i}. {w.get('label') or w.get('uid')}" for i, w in enumerate(ws, 1))
+            text += '\n\n🥇 برنده‌ها:\n' + '\n'.join(f"{i}. {w.get('label') or w.get('uid')}" + (f" — 🎁 {w['prize']}" if w.get('prize') else '') for i, w in enumerate(ws, 1))
     elif g.status != 'finished':
         text += '\n⏳ نتیجه به‌زودی اعلام می‌شه.'
     return text
@@ -14188,7 +14368,7 @@ async def gw_finish(bot, gid):
         g.status = 'drawing'
         session.commit()
         channels = gw_channels_of(g)
-        title, prize, n_win, creator = g.title, g.prize, int(g.winners_count), g.created_by
+        title, prizes, n_win, creator = g.title, gw_prizes_of(g), int(g.winners_count), g.created_by
         rank = gw_ranking(session, gid)
     finally:
         session.close()
@@ -14206,7 +14386,7 @@ async def gw_finish(bot, gid):
             pool = [(u, t) for u, t in pool if u != uid]
             continue
         tickets = next(t for u, t in pool if u == uid)
-        winners.append({'uid': uid, 'tickets': tickets})
+        winners.append({'uid': uid, 'tickets': tickets, 'prize': prizes[min(len(winners), len(prizes) - 1)]})
         pool = [(u, t) for u, t in pool if u != uid]
 
     session = get_session()
@@ -14222,7 +14402,7 @@ async def gw_finish(bot, gid):
         g = session.get(Giveaway, gid)
         g.status = 'finished'
         g.finished_at = now_utc()
-        g.winners = json.dumps([{'uid': w['uid'], 'tickets': w['tickets'], 'label': w['label']} for w in winners], ensure_ascii=False)
+        g.winners = json.dumps([{'uid': w['uid'], 'tickets': w['tickets'], 'label': w['label'], 'prize': w['prize']} for w in winners], ensure_ascii=False)
         session.commit()
         participants = [e.user_id for e in session.query(GiveawayEntry).filter(
             GiveawayEntry.giveaway_id == gid, GiveawayEntry.status == 'active').all()]
@@ -14230,19 +14410,19 @@ async def gw_finish(bot, gid):
         session.close()
 
     # اطلاع‌رسانی: برنده‌ها، پشتیبانی، و بقیه‌ی شرکت‌کننده‌ها
-    names = '\n'.join(f"{i}. {w['label']}" for i, w in enumerate(winners, 1)) or 'هیچ شرکت‌کننده‌ی واجد شرایطی نبود.'
+    names = '\n'.join(f"{i}. {w['label']} — 🎁 {w['prize']}" for i, w in enumerate(winners, 1)) or 'هیچ شرکت‌کننده‌ی واجد شرایطی نبود.'
     for w in winners:
         await notify_user_private(
             bot, w['uid'],
-            f"🎉🏆 تبریک! تو برنده‌ی قرعه‌کشی «{title}» شدی!\n\n🎁 جایزه: {prize}\n\nپشتیبانی برای تحویل جایزه باهات تماس می‌گیره.")
-    admin_report = (f"🎰 نتیجه‌ی قرعه‌کشی «{title}» (#{gid})\n🎁 جایزه: {prize}\n\n🥇 برنده‌ها:\n" +
-                    ('\n'.join(f"{i}. {w['admin_label']} — 🎟 {w['tickets']}" for i, w in enumerate(winners, 1)) or 'هیچ شرکت‌کننده‌ی واجد شرایطی نبود.'))
+            f"🎉🏆 تبریک! تو برنده‌ی قرعه‌کشی «{title}» شدی!\n\n🎁 جایزه‌ی تو: {w['prize']}\n\nپشتیبانی برای تحویل جایزه باهات تماس می‌گیره.")
+    admin_report = (f"🎰 نتیجه‌ی قرعه‌کشی «{title}» (#{gid})\n\n🥇 برنده‌ها:\n" +
+                    ('\n'.join(f"{i}. {w['admin_label']} — 🎟 {w['tickets']} — 🎁 {w['prize']}" for i, w in enumerate(winners, 1)) or 'هیچ شرکت‌کننده‌ی واجد شرایطی نبود.'))
     for aid in sorted(set(ADMIN_IDS) | {creator}):
         await notify_user_private(bot, aid, admin_report)
     winner_ids = {w['uid'] for w in winners}
     others = [u for u in participants if u not in winner_ids]
     if others:
-        text = f"🏁 قرعه‌کشی «{title}» تموم شد!\n\n🎁 جایزه: {prize}\n\n🥇 برنده‌ها:\n{names}\n\nمرسی که شرکت کردی 🦊"
+        text = f"🏁 قرعه‌کشی «{title}» تموم شد!\n\n🥇 برنده‌ها:\n{names}\n\nمرسی که شرکت کردی 🦊"
         task = asyncio.create_task(broadcast_to_users(bot, others, text, delay=0.05))
         _GW_TASKS.add(task)
         task.add_done_callback(_GW_TASKS.discard)
@@ -14294,10 +14474,10 @@ def main():
     app.add_handler(CallbackQueryHandler(support_button,pattern=r"^support:(?:open|cancel)(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|gwcreate|gwmanage|backup|back)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|addowls|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|gwcreate|gwmanage|backup|back)$"))
     app.add_handler(CallbackQueryHandler(admin_jailset_callback,pattern=r"^admin:jailset:(?:add|free)$"))
     app.add_handler(CallbackQueryHandler(gw_create_callback,pattern=r"^gwc:(?:home|cancel|create|chdef|opt:[a-z]+|set:[a-z]+:[A-Za-z0-9]+)$"))
-    app.add_handler(CallbackQueryHandler(gw_admin_callback,pattern=r"^gwa:(?:list|(?:view|top|toggletop|draw|drawyes|cancel|cancelyes):\d+(?::\d+)?|user:\d+:\d+:\d+)$"))
+    app.add_handler(CallbackQueryHandler(gw_admin_callback,pattern=r"^gwa:(?:list|(?:view|top|toggletop|draw|drawyes|cancel|cancelyes|postch|bc):\d+(?::\d+)?|(?:bcc|bcgo):\d+:[gua]|user:\d+:\d+:\d+)$"))
     app.add_handler(CallbackQueryHandler(gw_user_callback,pattern=r"^gwu:(?:(?:check|me|top):\d+|ans:\d+:-?\d+)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))

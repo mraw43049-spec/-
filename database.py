@@ -281,6 +281,7 @@ class Giveaway(Base):
     status = Column(String, nullable=False, default='active', index=True)   # active | drawing | finished | cancelled
     winners = Column(String, nullable=True)                        # JSON برنده‌ها بعد از قرعه‌کشی
     finished_at = Column(DateTime(timezone=True), nullable=True)
+    prizes = Column(String, nullable=True)                         # JSON: جایزه‌ی هر برنده به ترتیب رتبه ["جایزه نفر ۱", ...]
 
 
 class GiveawayEntry(Base):
@@ -884,6 +885,10 @@ def init_db():
             cm_cols = {c['name'] for c in inspector.get_columns('city_market_items')}
             if 'updated_at' not in cm_cols:
                 conn.execute(text(f'ALTER TABLE city_market_items ADD COLUMN updated_at {DT_SQL_TYPE}'))
+        if 'giveaways' in inspector.get_table_names():
+            gw_cols = {c['name'] for c in inspector.get_columns('giveaways')}
+            if 'prizes' not in gw_cols:
+                conn.execute(text('ALTER TABLE giveaways ADD COLUMN prizes VARCHAR'))
         if 'fox_knowledge' in inspector.get_table_names():
             fk_cols = {c['name'] for c in inspector.get_columns('fox_knowledge')}
             for name, definition in {'media_type': 'VARCHAR', 'file_id': 'VARCHAR', 'file_unique_id': 'VARCHAR'}.items():
