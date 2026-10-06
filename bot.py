@@ -947,6 +947,7 @@ def jail_keyboard(user_id, payable=True):
     rows = [[InlineKeyboardButton("✏️ نوشتن خاطره", callback_data=f"jail:memory:{user_id}")]]
     if payable:   # حبس پشتیبانی جریمه ندارد؛ دکمه‌ی پرداخت جریمه فقط برای حبس‌های دارای جریمه است
         rows.append([InlineKeyboardButton("💸 پرداخت جریمه", callback_data=f"jail:pay:{user_id}")])
+        rows.append([InlineKeyboardButton("💳 پرداخت با کارت بانکی", callback_data=f"jail:bank:{user_id}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -1015,6 +1016,25 @@ async def jail_button(update,context):
             context.user_data['jail_memory_wait']=True
             await q.answer()
             await q.message.reply_text("✏️ خاطره‌ای کوتاه برای دیوار زندان بنویس؛ خاطره‌ات برای یک زندانی دیگر نمایش داده می‌شود.")
+            return
+        if action=='bank':
+            fine=int(user.jail_fine or 0)
+            if fine<=0:
+                await q.answer("🔒 این حبس توسط پشتیبانی است و با پرداخت جریمه باز نمی‌شود.",show_alert=True); return
+            account=session.query(BankAccount).filter(BankAccount.user_id==user.telegram_id).first()
+            if not account:
+                await q.answer("🏦 حساب بانکی روبی نداری؛ از «پرداخت جریمه» با روب‌پوینت کیف پولت استفاده کن.",show_alert=True); return
+            apply_bank_interest(account,session); session.commit()
+            context.user_data.pop('fine_bank_wait',None)
+            context.user_data['jail_bank_wait']=True
+            _clean,_ents=bank_send_kwargs(user,account,fine_bank_prompt_text(fine,int(user.fox_points or 0),int(account.balance or 0),"⛓️ جریمه‌ی زندان"))
+            await q.answer()
+            await q.message.edit_text(_clean,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت",callback_data=f"jail:bankcancel:{owner_id}")]]),entities=_ents)
+            return
+        if action=='bankcancel':
+            context.user_data.pop('jail_bank_wait',None)
+            await q.answer()
+            await q.message.edit_text(jail_wall_memory_text(session,user),reply_markup=jail_keyboard(user.telegram_id,payable=int(user.jail_fine or 0)>0))
             return
         if action=='pay':
             fine=int(user.jail_fine or 0)
@@ -7374,6 +7394,26 @@ async def ban_gate(update, context):
         if banned:
             raise ApplicationHandlerStop
 
+        # جریمه‌ی پشتیبانی: تا پرداخت نشه هیچ بخشی از ربات کار نمی‌کنه (فقط دکمه‌ی پرداخت).
+        if int(getattr(u, "fine_amount", 0) or 0) > 0:
+            msg = update.message
+            if not msg:
+                return
+            # مرحله‌ی وارد کردن مبلغ برداشت از بانک برای پرداخت جریمه اجازه‌ی عبور دارد.
+            if msg.text and context.user_data.get("fine_bank_wait"):
+                return
+            in_private = bool(update.effective_chat and update.effective_chat.type == "private")
+            if in_private or (msg.text and _looks_like_bot_command(msg.text, context, include_flows=True)):
+                _t = now_utc().timestamp()
+                if _t - float(context.user_data.get("_fine_notice_at") or 0) >= 2:
+                    context.user_data["_fine_notice_at"] = _t
+                    if in_private:
+                        await msg.reply_text(fine_block_text(u), reply_markup=fine_pay_keyboard(), **reply_kwargs(msg))
+                    else:
+                        await msg.reply_text("💸 جریمه‌ی پرداخت‌نشده داری؛ برای پرداخت وارد پیوی ربات شو.", **reply_kwargs(msg))
+                raise ApplicationHandlerStop
+            return
+
         # ضداسپم: ۶ پیام متنی در ۱۰ ثانیه = ۱۵ دقیقه زندان روبی.
         _already_jailed = bool(getattr(u, "jail_until", None) and now_utc() < aware(u.jail_until))
         if update.message and update.message.text and not jail_cmd and not _already_jailed and not context.user_data.get("jail_memory_wait"):
@@ -7397,7 +7437,7 @@ async def ban_gate(update, context):
         jailed = await _active_jail(session, u)
         if jailed:
             # دستور زندان روبی و جریان نوشتن خاطره اجازه عبور دارند.
-            if jail_cmd or context.user_data.get("jail_memory_wait"):
+            if jail_cmd or context.user_data.get("jail_memory_wait") or context.user_data.get("jail_bank_wait"):
                 return
             msg = update.message
             # ویرایش پیام، استیکر، عکس، ویس و ... دستور نیستن؛ بی‌صدا رد می‌شن.
@@ -7423,6 +7463,208 @@ async def ban_gate(update, context):
             raise ApplicationHandlerStop
     finally:
         session.close()
+
+
+def fine_block_text(u):
+    reason = (getattr(u, "fine_reason", None) or "").strip()
+    return ("💸 شما جریمه‌ی پرداخت‌نشده دارید!\n\n"
+            f"💰 مبلغ جریمه: {int(u.fine_amount or 0):,} روب‌پوینت\n"
+            + (f"📝 دلیل: {reason}\n" if reason else "")
+            + "\n🚫 تا زمانی که جریمه رو پرداخت نکنی به هیچ‌کدوم از امکانات ربات و مینی‌اپ دسترسی نداری.")
+
+
+def fine_pay_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💰 پرداخت مستقیم جریمه", callback_data="fine:pay")],
+        [InlineKeyboardButton("💳 پرداخت با کارت بانکی", callback_data="fine:bank")],
+    ])
+
+
+async def fine_callback_gate(update, context):
+    """کاربر جریمه‌شده هیچ دکمه‌ای جز دکمه‌ی پرداخت جریمه نمی‌تونه بزنه."""
+    q = update.callback_query
+    if not q or not q.from_user or q.from_user.id in ADMIN_IDS:
+        return
+    if (q.data or "").startswith("fine:"):
+        return
+    session = get_session()
+    try:
+        u = session.get(User, q.from_user.id)
+        if not u or int(getattr(u, "fine_amount", 0) or 0) <= 0:
+            return
+        await q.answer("💸 اول باید جریمه‌ات رو پرداخت کنی.", show_alert=True)
+        raise ApplicationHandlerStop
+    finally:
+        session.close()
+
+
+async def fine_pay_callback(update, context):
+    q = update.callback_query
+    session = get_session()
+    try:
+        u = session.query(User).filter(User.telegram_id == q.from_user.id).with_for_update().first()
+        fine = int(getattr(u, "fine_amount", 0) or 0) if u else 0
+        if not u or fine <= 0:
+            await q.answer("✅ جریمه‌ای نداری.", show_alert=True)
+            try:
+                await q.message.edit_text("✅ جریمه‌ای نداری؛ می‌تونی از ربات استفاده کنی.")
+            except Exception:
+                pass
+            return
+        have = int(u.fox_points or 0)
+        if have < fine:
+            await q.answer(f"❌ روب‌پوینت کافی نداری.\nجریمه: {fine:,}\nموجودی تو: {have:,}", show_alert=True)
+            return
+        u.fox_points = have - fine
+        u.fine_amount = 0
+        u.fine_reason = None
+        u.fine_at = None
+        session.commit()
+        left = int(u.fox_points or 0)
+    finally:
+        session.close()
+    await q.answer("✅ جریمه پرداخت شد.")
+    try:
+        await q.message.edit_text(f"✅ جریمه‌ات ({fine:,} روب‌پوینت) پرداخت شد و دسترسی‌هات برگشت.\n💰 موجودی فعلی: {left:,} 🦊")
+    except Exception:
+        pass
+    for aid in ADMIN_IDS:
+        await notify_user_private(context.bot, aid, f"💸 کاربر {q.from_user.id} جریمه‌اش ({fine:,} روب‌پوینت) رو پرداخت کرد.")
+
+
+def fine_bank_prompt_text(fine, wallet, bank_balance, title):
+    need = max(1, fine - wallet)
+    return (f"\n\n💳 پرداخت با کارت بانکی\n"
+            f"{title}: {fine:,} روب‌پوینت\n"
+            f"👛 موجودی کیف پول: {wallet:,} روب‌پوینت\n"
+            f"🏦 موجودی بانک: {bank_balance:,} روب‌پوینت\n\n"
+            f"➖ مقدار برداشت را وارد کنید (حداقل {need:,}).\n"
+            f"مثال: 5000 / 5k / 5کا")
+
+
+async def fine_bank_callback(update, context):
+    """دکمه‌ی «پرداخت با کارت بانکی» برای جریمه‌ی پشتیبانی + دکمه‌ی بازگشت."""
+    q = update.callback_query
+    action = (q.data or "").split(":")[1] if ":" in (q.data or "") else ""
+    session = get_session()
+    try:
+        u = session.get(User, q.from_user.id)
+        fine = int(getattr(u, "fine_amount", 0) or 0) if u else 0
+        if fine <= 0:
+            context.user_data.pop("fine_bank_wait", None)
+            await q.answer("✅ جریمه‌ای نداری.", show_alert=True)
+            try:
+                await q.message.edit_text("✅ جریمه‌ای نداری؛ می‌تونی از ربات استفاده کنی.")
+            except Exception:
+                pass
+            return
+        if action == "back":
+            context.user_data.pop("fine_bank_wait", None)
+            await q.answer()
+            await q.message.edit_text(fine_block_text(u), reply_markup=fine_pay_keyboard())
+            return
+        account = session.query(BankAccount).filter(BankAccount.user_id == u.telegram_id).first()
+        if not account:
+            await q.answer("🏦 حساب بانکی روبی نداری؛ از «پرداخت مستقیم جریمه» استفاده کن.", show_alert=True)
+            return
+        apply_bank_interest(account, session)
+        session.commit()
+        context.user_data["fine_bank_wait"] = True
+        context.user_data.pop("jail_bank_wait", None)
+        _clean, _ents = bank_send_kwargs(u, account, fine_bank_prompt_text(fine, int(u.fox_points or 0), int(account.balance or 0), "💸 مبلغ جریمه"))
+        await q.answer()
+        await q.message.edit_text(
+            _clean,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="fine:back")]]),
+            entities=_ents,
+        )
+    finally:
+        session.close()
+
+
+async def handle_fine_bank_text(update, context):
+    """مبلغ برداشت از بانک را می‌گیرد، از حساب بانکی کم می‌کند و جریمه (پشتیبانی یا زندان) را می‌پردازد."""
+    kind = "fine" if context.user_data.get("fine_bank_wait") else ("jail" if context.user_data.get("jail_bank_wait") else None)
+    msg = update.message
+    if not kind or not msg or not msg.text or not update.effective_user:
+        return False
+    flag = "fine_bank_wait" if kind == "fine" else "jail_bank_wait"
+    paid_info = None
+    reply = None
+    session = get_session()
+    try:
+        u = session.query(User).filter(User.telegram_id == update.effective_user.id).with_for_update().first()
+        if kind == "fine":
+            fine = int(getattr(u, "fine_amount", 0) or 0) if u else 0
+            active = fine > 0
+        else:
+            fine = int(getattr(u, "jail_fine", 0) or 0) if u else 0
+            active = bool(u) and fine > 0 and await _active_jail(session, u)
+        if not active:
+            context.user_data.pop(flag, None)
+            return False
+        account = session.query(BankAccount).filter(BankAccount.user_id == u.telegram_id).with_for_update().first()
+        if not account:
+            context.user_data.pop(flag, None)
+            await msg.reply_text("🏦 حساب بانکی روبی نداری.", **reply_kwargs(msg))
+            return True
+        apply_bank_interest(account, session)
+        try:
+            amount = parse_amount(msg.text)
+        except ValueError:
+            amount = 0
+        wallet = int(u.fox_points or 0)
+        balance = int(account.balance or 0)
+        need = max(1, fine - wallet)
+        if amount <= 0:
+            session.commit()
+            reply = "❌ مبلغ نامعتبره؛ فقط عدد وارد کن.\nمثال: 5000 / 5k / 5کا"
+        elif amount > balance:
+            session.commit()
+            reply = f"❌ موجودی بانک کافی نیست.\n🏦 موجودی بانک: {balance:,} روب‌پوینت"
+        elif amount < need:
+            session.commit()
+            reply = (f"❌ این مبلغ برای پرداخت جریمه کافی نیست.\n"
+                     f"💸 جریمه: {fine:,}\n👛 کیف پول: {wallet:,}\n"
+                     f"➖ حداقل مبلغ برداشت: {need:,} روب‌پوینت")
+        else:
+            account.balance = balance - amount
+            u.fox_points = wallet + amount
+            session.add(BankTransaction(account_number=account.account_number, direction="withdraw", amount=amount,
+                                        description="برداشت برای پرداخت جریمه"))
+            u.fox_points = int(u.fox_points) - fine
+            if kind == "fine":
+                u.fine_amount = 0
+                u.fine_reason = None
+                u.fine_at = None
+            else:
+                u.jail_until = None
+                u.jail_reason = None
+                u.jail_fine = 0
+                u.jail_arrested_at = None
+            session.commit()
+            paid_info = (amount, fine, int(u.fox_points or 0), int(account.balance or 0))
+    finally:
+        session.close()
+    if paid_info is None:
+        await msg.reply_text(reply, **reply_kwargs(msg))
+        return True
+    context.user_data.pop(flag, None)
+    amount, fine, left, bank_left = paid_info
+    if kind == "fine":
+        await msg.reply_text(
+            f"✅ {amount:,} روب‌پوینت از بانکت برداشت شد و جریمه‌ات ({fine:,} روب‌پوینت) پرداخت شد؛ دسترسی‌هات برگشت.\n"
+            f"👛 موجودی کیف پول: {left:,} 🦊\n🏦 موجودی بانک: {bank_left:,}",
+            **reply_kwargs(msg))
+        for aid in ADMIN_IDS:
+            await notify_user_private(context.bot, aid, f"💸 کاربر {update.effective_user.id} جریمه‌اش ({fine:,} روب‌پوینت) رو با برداشت از بانک پرداخت کرد.")
+    else:
+        await msg.reply_text(
+            f"✅ {amount:,} روب‌پوینت از بانکت برداشت شد و جریمه‌ات ({fine:,} روب‌پوینت) پرداخت شد.\n"
+            f"👛 موجودی کیف پول: {left:,} 🦊\n🏦 موجودی بانک: {bank_left:,}\n\n"
+            + free_jail_text(),
+            **reply_kwargs(msg))
+    return True
 
 
 async def jail_callback_gate(update, context):
@@ -7923,6 +8165,8 @@ def admin_main_keyboard():
         [InlineKeyboardButton("📣 پیام همگانی", callback_data="admin:broadcast")],
         [InlineKeyboardButton("🦊 افزودن/کسر روب‌پوینت", callback_data="admin:addpoints")],
         [InlineKeyboardButton("🦉 افزودن/کسر جغد کاربر", callback_data="admin:addowls")],
+        [InlineKeyboardButton("💸 جریمه کردن کاربر", callback_data="admin:fineadd")],
+        [InlineKeyboardButton("✅ لغو جریمه کاربر", callback_data="admin:finefree")],
         [InlineKeyboardButton("🎁 هدیه روب‌پوینت به همه", callback_data="admin:giftall")],
         [InlineKeyboardButton("🎟 ساخت کد هدیه", callback_data="admin:giftcode")],
         [InlineKeyboardButton("🎰 ساخت لینک قرعه‌کشی", callback_data="admin:gwcreate")],
@@ -8102,8 +8346,16 @@ async def admin_callback(update, context):
         try: count=session.query(User).count()
         finally: session.close()
         await q.message.reply_text(f"👥 تعداد کاربران ثبت‌شده: {count}")
-    elif action == "broadcast": context.user_data["admin_action"]="broadcast"; await q.message.reply_text("📣 متن پیام همگانی را بفرست.")
+    elif action == "broadcast":
+        context.user_data["admin_action"]="broadcast"
+        await q.message.reply_text("📣 پیام همگانی رو بفرست.\n\n• متن یا مدیا (عکس، ویدیو، گیف، فایل، ویس، آهنگ، استیکر...) با کپشن\n• فرمت‌بندی تلگرام حفظ می‌شه: بولد، ایتالیک، زیرخط، خط‌خورده، اسپویلر، نقل‌قول، کد، لینک و نیم‌فاصله\n\nهمون‌طور که بفرستی برای همه (کاربرها و گپ‌ها) کپی می‌شه.")
     elif action == "addpoints": context.user_data["admin_action"]="addpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی یا @شناسه کاربر + مقدار روب‌پوینت")
+    elif action == "fineadd":
+        context.user_data["admin_action"]="fine:add"
+        await q.message.reply_text("💸 جریمه کردن کاربر\n\nفرمت: آیدی عددی + مبلغ (روب‌پوینت) + دلیل\nمثال: 123456789 5000 توهین به کاربرها\n\nتا پرداخت جریمه، کاربر به هیچ امکانی از ربات و مینی‌اپ دسترسی نداره.")
+    elif action == "finefree":
+        context.user_data["admin_action"]="fine:free"
+        await q.message.reply_text("✅ لغو جریمه\n\nآیدی عددی کاربر رو بفرست.")
     elif action == "addowls": context.user_data["admin_action"]="addowls"; await q.message.reply_text("🦉 فرمت: آیدی عددی یا @شناسه کاربر + تعداد جغد\nمثال افزودن: 123456789 5\nمثال کسر: 123456789 -3")
     elif action == "giftall":
         context.user_data["admin_action"]="giftall"
@@ -8212,6 +8464,63 @@ async def admin_jailset_callback(update, context):
         await q.message.reply_text("✅ آزاد کردن کاربر\n\nآیدی عددی کاربر مورد نظر رو بفرست.")
 
 
+async def _copy_to_chat_safe(bot, chat_id, from_chat_id, message_id, max_retries=3):
+    for _ in range(max_retries):
+        try:
+            await bot.copy_message(chat_id=chat_id, from_chat_id=from_chat_id, message_id=message_id)
+            return True
+        except RetryAfter as e:
+            await asyncio.sleep(float(e.retry_after) + 0.5)
+        except (Forbidden, BadRequest):
+            return False
+        except (TimedOut, NetworkError):
+            await asyncio.sleep(1.5)
+        except Exception:
+            return False
+    return False
+
+
+async def _admin_broadcast_task(bot, admin_chat, ids, from_chat_id, message_id):
+    ok = fail = 0
+    try:
+        for cid in ids:
+            if await _copy_to_chat_safe(bot, cid, from_chat_id, message_id):
+                ok += 1
+            else:
+                fail += 1
+            await asyncio.sleep(0.05)
+    except Exception:
+        logger.exception("admin broadcast failed")
+    await notify_user_private(bot, admin_chat, f"✅ پیام همگانی تموم شد.\n📨 موفق: {ok:,}\n❌ ناموفق (بلاک/حذف حساب/خروج ربات): {fail:,}")
+
+
+async def run_admin_broadcast(update, context):
+    """پیام ادمین (متن یا مدیا، با فرمت تلگرام) رو عیناً کپی می‌کنه برای همه‌ی کاربرها و گپ‌ها."""
+    msg = update.message
+    session = get_session()
+    try:
+        users = [u.telegram_id for u in session.query(User).all()]
+        groups = [c.chat_id for c in session.query(GroupChat).filter(GroupChat.active == 1).all()]
+    finally:
+        session.close()
+    recipients = list(dict.fromkeys(users + groups))
+    await msg.reply_text(f"📣 ارسال به {len(recipients):,} مقصد (کاربر و گپ) شروع شد؛ وقتی تموم شد گزارشش رو می‌فرستم.", **reply_kwargs(msg))
+    task = asyncio.create_task(_admin_broadcast_task(context.bot, msg.chat_id, recipients, msg.chat_id, msg.message_id))
+    _GW_TASKS.add(task)
+    task.add_done_callback(_GW_TASKS.discard)
+
+
+async def admin_broadcast_media(update, context):
+    """مدیای ادمین وقتی توی حالت «پیام همگانی» باشه (بقیه‌ی حالت‌ها دست نمی‌خورن)."""
+    if not update.message or not admin_only(update.effective_user.id):
+        return
+    if context.user_data.get("admin_action") != "broadcast":
+        return
+    context.user_data.pop("admin_action", None)
+    await run_admin_broadcast(update, context)
+    raise ApplicationHandlerStop
+
+
 async def admin_text(update, context):
     if not admin_only(update.effective_user.id): return
     action=context.user_data.get("admin_action")
@@ -8269,15 +8578,7 @@ async def admin_text(update, context):
         finally:
             session.close()
     if action == "broadcast":
-        session=get_session()
-        try:
-            users=[u.telegram_id for u in session.query(User).all()]
-            groups=[c.chat_id for c in session.query(GroupChat).filter(GroupChat.active == 1).all()]
-        finally: session.close()
-        recipients = list(dict.fromkeys(users + groups))
-        await update.message.reply_text(f"📣 در حال ارسال به {len(recipients)} مقصد (کاربر و گپ)... ممکنه چند دقیقه طول بکشه.", **reply_kwargs(update.message))
-        ok, fail = await broadcast_to_users(context.bot, recipients, "📢 پیام مدیریت:\n\n"+text)
-        await update.message.reply_text(f"✅ ارسال شد: {ok}\n❌ ناموفق (بلاک/حذف حساب): {fail}", **reply_kwargs(update.message)); return
+        await run_admin_broadcast(update, context); return
     if action == "giftall":
         cleaned = text.replace(",", "").replace("،", "").strip()
         if not cleaned.lstrip("-").isdigit():
@@ -8306,6 +8607,57 @@ async def admin_text(update, context):
         await gc_handle_input(update, context, action.split(":",1)[1], text); return
     if action.startswith("gw_input:"):
         await gw_handle_input(update, context, action.split(":",1)[1], text); return True
+    if action == "fine:add":
+        norm = text.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789'))
+        m = re.match(r'^\s*(\d+)\s+([\d,،]+)\s*(.*)$', norm, re.S)
+        if not m:
+            context.user_data["admin_action"] = action
+            await update.message.reply_text("❗️ فرمت اشتباهه.\nدرست: آیدی عددی + مبلغ + دلیل\nمثال: 123456789 5000 توهین به کاربرها", **reply_kwargs(update.message)); return
+        uid = int(m.group(1)); amount = int(m.group(2).replace(',', '').replace('،', '')); reason = (m.group(3) or '').strip()[:200]
+        if amount < 1 or amount > 1_000_000_000:
+            context.user_data["admin_action"] = action
+            await update.message.reply_text("❗️ مبلغ باید بین ۱ تا ۱,۰۰۰,۰۰۰,۰۰۰ باشه.", **reply_kwargs(update.message)); return
+        if uid in ADMIN_IDS:
+            context.user_data["admin_action"] = action
+            await update.message.reply_text("⚠️ ادمین‌ها رو نمی‌شه جریمه کرد.", **reply_kwargs(update.message)); return
+        session = get_session()
+        try:
+            user = session.get(User, uid)
+            if not user:
+                context.user_data["admin_action"] = action
+                await update.message.reply_text("کاربر پیدا نشد.", **reply_kwargs(update.message)); return
+            user.fine_amount = amount; user.fine_reason = reason or None; user.fine_at = now_utc()
+            session.commit()
+            notice = fine_block_text(user)
+        finally:
+            session.close()
+        await update.message.reply_text(f"✅ کاربر {uid} به مبلغ {amount:,} روب‌پوینت جریمه شد.\nتا پرداخت، به هیچ بخشی دسترسی نداره.", **reply_kwargs(update.message))
+        try:
+            await context.bot.send_message(chat_id=uid, text="📢 اطلاعیه پشتیبانی\n\n" + notice, reply_markup=fine_pay_keyboard())
+        except Exception:
+            pass
+        return
+    if action == "fine:free":
+        digits = text.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789')).strip()
+        if not digits.isdigit():
+            context.user_data["admin_action"] = action
+            await update.message.reply_text("❗️ فقط آیدی عددی بفرست.", **reply_kwargs(update.message)); return
+        uid = int(digits)
+        session = get_session()
+        try:
+            user = session.get(User, uid)
+            if not user:
+                await update.message.reply_text("کاربر پیدا نشد.", **reply_kwargs(update.message)); return
+            had = int(user.fine_amount or 0)
+            user.fine_amount = 0; user.fine_reason = None; user.fine_at = None
+            session.commit()
+        finally:
+            session.close()
+        if not had:
+            await update.message.reply_text(f"ℹ️ کاربر {uid} جریمه‌ای نداشت.", **reply_kwargs(update.message)); return
+        await update.message.reply_text(f"✅ جریمه‌ی کاربر {uid} ({had:,} روب‌پوینت) لغو شد.", **reply_kwargs(update.message))
+        await notify_user_private(context.bot, uid, "📢 اطلاعیه پشتیبانی\n\n✅ جریمه‌ی شما توسط پشتیبانی لغو شد و دسترسی‌هات برگشت.")
+        return
     if action == "football_add_match":
         await football_add_match_text(update, context); return
     if action == "jail:add":
@@ -12976,6 +13328,7 @@ async def feature_toggle_command(update, context):
 
 
 async def text_router(update, context):
+    if await handle_fine_bank_text(update, context): return
     if await support_admin_reply(update, context): return
     if await support_text(update, context): return
     if await emoji_transfer_text(update, context): return
@@ -14411,14 +14764,26 @@ async def gw_finish(bot, gid):
 
     # اطلاع‌رسانی: برنده‌ها، پشتیبانی، و بقیه‌ی شرکت‌کننده‌ها
     names = '\n'.join(f"{i}. {w['label']} — 🎁 {w['prize']}" for i, w in enumerate(winners, 1)) or 'هیچ شرکت‌کننده‌ی واجد شرایطی نبود.'
-    for w in winners:
-        await notify_user_private(
+    undelivered = []
+    for i, w in enumerate(winners, 1):
+        okmsg = await _send_to_user_safe(
             bot, w['uid'],
-            f"🎉🏆 تبریک! تو برنده‌ی قرعه‌کشی «{title}» شدی!\n\n🎁 جایزه‌ی تو: {w['prize']}\n\nپشتیبانی برای تحویل جایزه باهات تماس می‌گیره.")
+            f"🎉🎊 تبریک! 🎊🎉\n\n🏆 تو برنده‌ی نفر {i}ِ قرعه‌کشی «{title}» شدی!\n\n🎁 جایزه‌ی تو: {w['prize']}\n\nپشتیبانی برای تحویل جایزه باهات تماس می‌گیره. 🦊")
+        if not okmsg:
+            undelivered.append(w['admin_label'])
     admin_report = (f"🎰 نتیجه‌ی قرعه‌کشی «{title}» (#{gid})\n\n🥇 برنده‌ها:\n" +
                     ('\n'.join(f"{i}. {w['admin_label']} — 🎟 {w['tickets']} — 🎁 {w['prize']}" for i, w in enumerate(winners, 1)) or 'هیچ شرکت‌کننده‌ی واجد شرایطی نبود.'))
+    if undelivered:
+        admin_report += '\n\n⚠️ پیام تبریک به این برنده‌ها نرسید (ربات رو بلاک کردن)؛ خودتون خبرشون کنید:\n' + '\n'.join(undelivered)
     for aid in sorted(set(ADMIN_IDS) | {creator}):
         await notify_user_private(bot, aid, admin_report)
+    if winners:
+        res_text = f"🏁 نتیجه‌ی قرعه‌کشی «{title}»\n\n🥇 برنده‌ها:\n{names}\n\n🎉 به همه‌ی برنده‌ها تبریک می‌گیم!"
+        for c in channels:
+            try:
+                await bot.send_message(chat_id=c['chat'], text=res_text)
+            except Exception:
+                pass
     winner_ids = {w['uid'] for w in winners}
     others = [u for u in participants if u not in winner_ids]
     if others:
@@ -14471,10 +14836,14 @@ def main():
     app.add_handler(CommandHandler("roobam",roobam_command))
     app.add_handler(CommandHandler("leaderboard",leaderboard_command))
     app.add_handler(CallbackQueryHandler(jail_callback_gate), group=-20)
+    app.add_handler(CallbackQueryHandler(fine_callback_gate), group=-19)
+    app.add_handler(CallbackQueryHandler(fine_pay_callback, pattern=r"^fine:pay$"))
+    app.add_handler(CallbackQueryHandler(fine_bank_callback, pattern=r"^fine:(?:bank|back)$"))
+    app.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE & filters.User(user_id=list(ADMIN_IDS)), admin_broadcast_media), group=-5)
     app.add_handler(CallbackQueryHandler(support_button,pattern=r"^support:(?:open|cancel)(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|addowls|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|gwcreate|gwmanage|backup|back)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|addowls|fineadd|finefree|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|gwcreate|gwmanage|backup|back)$"))
     app.add_handler(CallbackQueryHandler(admin_jailset_callback,pattern=r"^admin:jailset:(?:add|free)$"))
     app.add_handler(CallbackQueryHandler(gw_create_callback,pattern=r"^gwc:(?:home|cancel|create|chdef|opt:[a-z]+|set:[a-z]+:[A-Za-z0-9]+)$"))
     app.add_handler(CallbackQueryHandler(gw_admin_callback,pattern=r"^gwa:(?:list|(?:view|top|toggletop|draw|drawyes|cancel|cancelyes|postch|bc):\d+(?::\d+)?|(?:bcc|bcgo):\d+:[gua]|user:\d+:\d+:\d+)$"))
@@ -14528,7 +14897,7 @@ def main():
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     app.add_handler(CallbackQueryHandler(lucky_bag_button,pattern=r"^luckybag:(?:open|skip):\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|potion|rest):\d+$"))
-    app.add_handler(CallbackQueryHandler(jail_button,pattern=r"^jail:(memory|pay):\d+$"))
+    app.add_handler(CallbackQueryHandler(jail_button,pattern=r"^jail:(memory|pay|bank|bankcancel):\d+$"))
     app.add_handler(CallbackQueryHandler(smuggling_button,pattern=r"^smuggle:(plus|minus|all|confirm):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(friend_decision_button,pattern=r"^friend(?:accept|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(friend_request_button,pattern=r"^friend:(?:home|add|view|points|msg|remove):\d+(?::\d+)?$"))

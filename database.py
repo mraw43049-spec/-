@@ -68,6 +68,9 @@ class User(Base):
     potion_count = Column(Integer, nullable=False, default=0)
     ratkiller_count = Column(Integer, nullable=False, default=0)  # تعداد مرگ‌موش خریداری‌شده از مارکت روبی
     owl_catch_count = Column(Integer, nullable=False, default=0)  # تعداد جغدهایی که گرفته
+    fine_amount = Column(Integer, nullable=False, default=0)      # جریمه‌ی پشتیبانی؛ تا پرداخت نشه کاربر به هیچ بخشی دسترسی نداره
+    fine_reason = Column(String, nullable=True)
+    fine_at = Column(DateTime(timezone=True), nullable=True)
     fox_level = Column(Integer, nullable=False, default=1)
     fox_belly = Column(Integer, nullable=False, default=3)
     fox_belly_capacity = Column(Integer, nullable=False, default=3)
@@ -739,6 +742,9 @@ def init_db():
         'potion_count': 'INTEGER NOT NULL DEFAULT 0',
         'ratkiller_count': 'INTEGER NOT NULL DEFAULT 0',
         'owl_catch_count': 'INTEGER NOT NULL DEFAULT 0',
+        'fine_amount': 'INTEGER NOT NULL DEFAULT 0',
+        'fine_reason': 'VARCHAR',
+        'fine_at': DT_SQL_TYPE,
     }
     with engine.begin() as conn:
         added_user_cols = set()

@@ -312,6 +312,12 @@ button:disabled::after,.lb-close::after{display:none}
   <button id="gateCheck" class="action">✅ عضو شدم، بررسی کن</button>
   <div id="gateMsg" class="muted" style="margin-top:10px;min-height:18px"></div>
 </div></div>
+<div id="blocked" class="gate"><div class="gate-card">
+  <div class="gate-ico" id="blockedIco">⛔</div>
+  <h2 id="blockedTitle">دسترسی بسته است</h2>
+  <p id="blockedMsg" style="white-space:pre-line"></p>
+  <button id="blockedRetry" class="action">🔄 بررسی دوباره</button>
+</div></div>
 <div id="toast" class="toast"></div>
 <div id="lightbox" class="lightbox"><button id="lbClose" class="lb-close">✕</button><img id="lbImg" alt="اسکین"><div class="lb-tip">با دو انگشت زوم کن • دوبار تپ = زوم • بکش تا جابجا بشه</div></div>
 <div class="topbar"><h1>🦊 روبی</h1></div>
@@ -554,6 +560,7 @@ button:disabled::after,.lb-close::after{display:none}
         if (!r.ok) {
           var d = b.detail;
           if (d && typeof d === "object" && !Array.isArray(d)) {
+            if (d.code === "restricted") { showBlocked(d); var re = new Error(d.message || "دسترسی بسته است."); re.gate = true; throw re; }
             if (d.code === "not_member") { showGate(d.channels || []); var ge = new Error(d.message || "اول باید عضو کانال‌ها بشی."); ge.gate = true; throw ge; }
             d = d.message || "";
           }
@@ -573,6 +580,14 @@ button:disabled::after,.lb-close::after{display:none}
     } catch(e){}
     window.open(u, "_blank");
   }
+  function showBlocked(d){
+    gateOpen = true;
+    $("blockedIco").textContent = d.kind === "jail" ? "⛓️" : d.kind === "sick" ? "🤒" : d.kind === "fine" ? "💸" : "⛔";
+    $("blockedTitle").textContent = d.title || "دسترسی بسته است";
+    $("blockedMsg").textContent = d.message || "";
+    $("blocked").classList.add("open");
+  }
+  $("blockedRetry").onclick = function(){ location.reload(); };
   function showGate(chs){
     gateOpen = true;
     var box = $("gateBtns"); box.innerHTML = "";

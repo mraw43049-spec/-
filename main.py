@@ -333,11 +333,61 @@ def current_telegram_user_raw(x_init_data: str = Header(..., alias="X-Init-Data"
     return _auth_user(x_init_data)
 
 
+def _restriction_detail(uid: int):
+    """بن، جریمه‌ی پرداخت‌نشده، زندان روبی یا مریضی روباه = مینی‌اپ کلاً بسته است (ادمین‌ها معافن)."""
+    uid = int(uid)
+    if uid in ADMIN_ID_SET:
+        return None
+
+    def aw(d):
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+    def det(kind, title, message):
+        return {"code": "restricted", "kind": kind, "title": title, "message": message}
+
+    session = get_session()
+    try:
+        u = session.get(User, uid)
+        if not u:
+            return None
+        now = datetime.now(timezone.utc)
+        if int(getattr(u, "is_banned", 0) or 0) or (getattr(u, "banned_until", None) and aw(u.banned_until) > now):
+            return det("ban", "⛔ دسترسی بسته شده", "دسترسی‌ات به ربات بسته شده.")
+        fine = int(getattr(u, "fine_amount", 0) or 0)
+        if fine > 0:
+            reason = (getattr(u, "fine_reason", None) or "").strip()
+            return det("fine", "💸 جریمه‌ی پرداخت‌نشده",
+                       f"مبلغ جریمه: {fine:,} روب‌پوینت" + (f"\nدلیل: {reason}" if reason else "") +
+                       "\n\nتا پرداخت جریمه از توی بات (دکمه‌ی «پرداخت جریمه») به مینی‌اپ دسترسی نداری.")
+        ju = getattr(u, "jail_until", None)
+        if ju and aw(ju) > now:
+            left = int((aw(ju) - now).total_seconds())
+            h, m = left // 3600, (left % 3600) // 60
+            return det("jail", "⛓️ زندانی هستی",
+                       f"زمان باقی‌مانده: {h} ساعت و {m} دقیقه\n\nتا پایان حبس نمی‌تونی از مینی‌اپ استفاده کنی.")
+        try:
+            botmod = load_botmod()
+            if int(u.level or 1) >= botmod.FOX_SICK_UNLOCK_LEVEL:
+                if botmod.sync_fox_sickness(u):
+                    session.commit()
+        except Exception:  # noqa: BLE001
+            pass
+        if u.fox_sick_since is not None:
+            return det("sick", "🤒 روباهت مریضه",
+                       "تا وقتی روباهت مریضه نمی‌تونی از مینی‌اپ استفاده کنی.\nاول از توی بات درمانش کن، بعد برگرد.")
+    finally:
+        session.close()
+    return None
+
+
 def current_telegram_user(x_init_data: str = Header(..., alias="X-Init-Data")):
-    """هویت + عضویت اجباری؛ همه‌ی endpointهای مینی‌اپ از این استفاده می‌کنن."""
+    """هویت + عضویت اجباری + نبودن محدودیت (زندان/جریمه/مریضی/بن)؛ همه‌ی endpointهای مینی‌اپ از این استفاده می‌کنن."""
     tg_user = _auth_user(x_init_data)
     if not membership_ok(tg_user["id"]):
         raise HTTPException(status_code=403, detail=_not_member_detail())
+    blocked = _restriction_detail(tg_user["id"])
+    if blocked:
+        raise HTTPException(status_code=403, detail=blocked)
     return tg_user
 
 
