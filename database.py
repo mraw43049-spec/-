@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, Float, create_engine, inspect, text
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, Float, UniqueConstraint, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from config import DATABASE_URL
 
@@ -263,6 +263,44 @@ class GiftCode(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     active = Column(Integer, nullable=False, default=1)
     expires_at = Column(DateTime(timezone=True), nullable=True)   # None = بدون محدودیت زمانی
+
+
+class Giveaway(Base):
+    """قرعه‌کشی‌ای که پشتیبانی با لینک می‌سازه (کانال‌های اجباری مخصوص خودش دارد)."""
+    __tablename__ = 'giveaways'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String, nullable=False)
+    prize = Column(String, nullable=False)
+    winners_count = Column(Integer, nullable=False, default=1)
+    max_participants = Column(Integer, nullable=False, default=100)
+    show_top = Column(Integer, nullable=False, default=0)          # 1 = لیست برترین‌ها برای کاربرها هم نمایش داده بشه
+    channels = Column(String, nullable=False, default='[]')        # JSON: [{"chat": "@x", "url": "...", "title": "..."}]
+    created_by = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    ends_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String, nullable=False, default='active', index=True)   # active | drawing | finished | cancelled
+    winners = Column(String, nullable=True)                        # JSON برنده‌ها بعد از قرعه‌کشی
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class GiveawayEntry(Base):
+    """یک شرکت‌کننده در یک قرعه‌کشی. تیکت‌ها از روی همین ردیف‌ها حساب می‌شن:
+    ۱ تیکت برای خودش (وقتی active باشه) + ۱ تیکت برای هر زیرمجموعه‌ی active."""
+    __tablename__ = 'giveaway_entries'
+    __table_args__ = (UniqueConstraint('giveaway_id', 'user_id', name='uq_giveaway_user'),)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    giveaway_id = Column(Integer, ForeignKey('giveaways.id'), nullable=False, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    inviter_id = Column(BigInteger, nullable=True, index=True)
+    status = Column(String, nullable=False, default='pending', index=True)  # pending | active | left
+    captcha_answer = Column(Integer, nullable=True)
+    captcha_fails = Column(Integer, nullable=False, default=0)
+    locked_until = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    left_at = Column(DateTime(timezone=True), nullable=True)
+    last_checked_at = Column(DateTime(timezone=True), nullable=True)
+
 
 class FoxKnowledge(Base):
     """پاسخ‌های دستی که ادمین به روباه یاد می‌دهد («یاد بگیر: کلید | جواب»)."""

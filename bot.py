@@ -22,7 +22,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, RubyOwl, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, RubyOwl, Giveaway, GiveawayEntry, get_session, init_db
 )
 import ai_service as ai
 import attack_owl
@@ -1262,6 +1262,11 @@ async def start_command(update, context):
     # require_membership همینجا برمی‌گرده و قبلاً کد رفرال اصلاً پردازش نمی‌شد.
     if context.args:
         payload = context.args[0].strip()
+        gw_m = re.fullmatch(r"gw_(\d+)(?:_(\d+))?", payload)
+        if gw_m:
+            # لینک قرعه‌کشی: کانال‌های اجباری مخصوص خودش رو داره، پس از چک عضویتِ اصلیِ ربات رد می‌شه.
+            await giveaway_start(update, context, int(gw_m.group(1)), int(gw_m.group(2)) if gw_m.group(2) else None)
+            return
         if re.fullmatch(r"ref_\d+", payload):
             context.user_data['pending_referral'] = payload
     if not await require_membership(update, context):
@@ -7919,6 +7924,8 @@ def admin_main_keyboard():
         [InlineKeyboardButton("🦊 افزودن/کسر روب‌پوینت", callback_data="admin:addpoints")],
         [InlineKeyboardButton("🎁 هدیه روب‌پوینت به همه", callback_data="admin:giftall")],
         [InlineKeyboardButton("🎟 ساخت کد هدیه", callback_data="admin:giftcode")],
+        [InlineKeyboardButton("🎰 ساخت لینک قرعه‌کشی", callback_data="admin:gwcreate")],
+        [InlineKeyboardButton("🏆 مدیریت قرعه‌کشی‌ها", callback_data="admin:gwmanage")],
         [InlineKeyboardButton("⭐ تنظیم سطح", callback_data="admin:setlevel")],
         [InlineKeyboardButton("🐾 تنظیم روب روب", callback_data="admin:setclaims")],
         [InlineKeyboardButton("📚 سوالات درس", callback_data="admin:eduq")],
@@ -8099,6 +8106,15 @@ async def admin_callback(update, context):
     elif action == "giftall":
         context.user_data["admin_action"]="giftall"
         await q.message.reply_text("🎁 چند روب‌پوینت به همه‌ی کاربرا هدیه داده بشه؟\nفقط عدد بفرست (مثلاً 500). برای کسر از همه، عدد منفی بفرست.")
+    elif action == "gwcreate":
+        await gw_start_create(update, context)
+    elif action == "gwmanage":
+        session=get_session()
+        try:
+            gw_text, gw_kb = gw_admin_list_markup(session)
+        finally:
+            session.close()
+        await q.message.reply_text(gw_text, reply_markup=gw_kb)
     elif action == "giftcode":
         context.user_data.pop("admin_action", None)
         context.user_data["gc_draft"] = {}
@@ -8286,6 +8302,8 @@ async def admin_text(update, context):
         await update.message.reply_text(f"✅ روب‌پوینت {count} کاربر آپدیت شد.\n📨 اطلاع‌رسانی موفق: {ok}\n❌ ناموفق (بلاک/حذف حساب): {fail}", **reply_kwargs(update.message)); return
     if action.startswith("gc_input:"):
         await gc_handle_input(update, context, action.split(":",1)[1], text); return
+    if action.startswith("gw_input:"):
+        await gw_handle_input(update, context, action.split(":",1)[1], text); return True
     if action == "football_add_match":
         await football_add_match_text(update, context); return
     if action == "jail:add":
@@ -13133,6 +13151,1104 @@ async def post_init(application):
         logger.exception("Could not configure Telegram command menu: %s", exc)
 
 
+# ======================================================================
+# 🎰 قرعه‌کشی: پشتیبانی لینک می‌سازه؛ کاربرها با تیکت و دعوت شرکت می‌کنن
+# ======================================================================
+from urllib.parse import quote as _gw_quote
+
+GW_MAX_CHANNELS = 5
+GW_MAX_TITLE = 60
+GW_MAX_PRIZE = 120
+GW_PARTICIPANT_PRESETS = [50, 100, 500, 1000, 5000]
+GW_WINNER_PRESETS = [1, 2, 3, 5, 10]
+GW_HOURS_PRESETS = [1, 6, 12, 24, 48, 72, 168]
+GW_MAX_PARTICIPANTS = 1_000_000
+GW_MAX_WINNERS = 100
+GW_MAX_HOURS = 24 * 90
+GW_CAPTCHA_MAX_FAILS = 3
+GW_CAPTCHA_LOCK_SECONDS = 300
+GW_CHECK_BATCH = 40          # هر دقیقه حداکثر این‌قدر شرکت‌کننده برای لفت‌دادن چک می‌شه
+GW_PAGE = 10
+_GW_TASKS = set()
+GW_STATUS_LABEL = {'active': '🟢 فعال', 'drawing': '⏳ درحال قرعه‌کشی', 'finished': '✅ تمام‌شده', 'cancelled': '❌ لغوشده'}
+
+
+# ---------- ابزارهای کمکی ----------
+def gw_channels_of(g):
+    try:
+        data = json.loads(g.channels or '[]')
+    except Exception:
+        data = []
+    return [c for c in data if isinstance(c, dict) and c.get('chat') not in (None, '')]
+
+
+def gw_seconds_left(g):
+    return max(0, int((aware(g.ends_at) - now_utc()).total_seconds()))
+
+
+def gw_is_open(g):
+    return g is not None and g.status == 'active' and gw_seconds_left(g) > 0
+
+
+def gw_hours_text(hours):
+    hours = int(hours)
+    if hours % 24 == 0:
+        return f"{to_fa_digits(hours // 24)} روز"
+    return f"{to_fa_digits(hours)} ساعت"
+
+
+async def gw_bot_username(bot):
+    try:
+        if bot.username:
+            return bot.username
+    except Exception:
+        pass
+    try:
+        return (await bot.get_me()).username
+    except Exception:
+        return "bot"
+
+
+def gw_link(bot_username, gid, uid=None):
+    base = f"https://t.me/{bot_username}?start=gw_{int(gid)}"
+    return f"{base}_{int(uid)}" if uid else base
+
+
+def gw_user_label(session, uid, admin=False):
+    u = session.get(User, int(uid))
+    if not u:
+        return str(uid)
+    name = strip_mentions(user_display_name(u))
+    if not admin:
+        return name
+    extra = f" (@{u.username})" if u.username and u.username not in name else ""
+    return f"{name}{extra} | {uid}"
+
+
+# ---------- بررسی عضویت (سه‌حالته: True / False / None=نامشخص) ----------
+async def gw_member_state(bot, chat, uid):
+    """فقط وقتی تلگرام صریحاً بگه عضو نیست False می‌دیم؛ خطای موقت (قطعی، محدودیت نرخ، ...) = None،
+    تا کسی به‌خاطر یک خطای شبکه از قرعه‌کشی حذف نشه."""
+    try:
+        m = await bot.get_chat_member(chat, int(uid))
+    except BadRequest as e:
+        low = str(e).lower()
+        if 'user not found' in low or 'participant_id_invalid' in low:
+            return False
+        logger.warning("gw membership check failed for %s: %s", chat, e)
+        return None
+    except Exception as e:
+        logger.warning("gw membership check failed for %s: %s", chat, e)
+        return None
+    st = getattr(m, 'status', '')
+    if st in ('member', 'administrator', 'creator'):
+        return True
+    if st == 'restricted':
+        return bool(getattr(m, 'is_member', False))
+    return False
+
+
+async def gw_missing_channels(bot, channels, uid):
+    """(کانال‌هایی که عضو نیست، آیا بعضی‌ها نامشخص بودن؟)"""
+    missing, unknown = [], False
+    for c in channels:
+        st = await gw_member_state(bot, c['chat'], uid)
+        if st is False:
+            missing.append(c)
+        elif st is None:
+            unknown = True
+    return missing, unknown
+
+
+# ---------- کپچای جمع ----------
+def gw_make_captcha():
+    rnd = random.SystemRandom()
+    a, b = rnd.randint(3, 19), rnd.randint(3, 19)
+    ans = a + b
+    opts = {ans}
+    while len(opts) < 6:
+        v = ans + rnd.choice([-1, 1]) * rnd.randint(1, 7)
+        if v > 0:
+            opts.add(v)
+    opts = list(opts)
+    rnd.shuffle(opts)
+    return a, b, ans, opts
+
+
+# ---------- تیکت و رتبه‌بندی ----------
+def gw_ranking(session, gid):
+    """لیست شرکت‌کننده‌های فعال، مرتب‌شده بر اساس تیکت (بیشترین اول)."""
+    entries = session.query(GiveawayEntry).filter(
+        GiveawayEntry.giveaway_id == gid, GiveawayEntry.status == 'active').all()
+    inv = {}
+    for e in entries:
+        if e.inviter_id:
+            inv[e.inviter_id] = inv.get(e.inviter_id, 0) + 1
+    rows = [{'uid': e.user_id, 'eid': e.id, 'invited': inv.get(e.user_id, 0), 'tickets': 1 + inv.get(e.user_id, 0)}
+            for e in entries]
+    rows.sort(key=lambda r: (-r['tickets'], r['eid']))
+    return rows
+
+
+def gw_tickets_of(session, gid, uid):
+    """(تیکت‌ها، تعداد دعوت‌شده‌های فعال) برای یک کاربر."""
+    entry = session.query(GiveawayEntry).filter(
+        GiveawayEntry.giveaway_id == gid, GiveawayEntry.user_id == int(uid)).first()
+    invited = session.query(GiveawayEntry).filter(
+        GiveawayEntry.giveaway_id == gid, GiveawayEntry.inviter_id == int(uid),
+        GiveawayEntry.status == 'active').count()
+    own = 1 if (entry and entry.status == 'active') else 0
+    return own + invited, invited
+
+
+def gw_active_count(session, gid):
+    return session.query(GiveawayEntry).filter(
+        GiveawayEntry.giveaway_id == gid, GiveawayEntry.status == 'active').count()
+
+
+# ======================================================================
+# پنل پشتیبانی: ساخت لینک قرعه‌کشی
+# ======================================================================
+def gw_draft_complete(d):
+    return bool(d.get('title') and d.get('channels') and d.get('max') is not None and d.get('top') is not None
+                and d.get('prize') and d.get('winners') is not None and d.get('hours') is not None)
+
+
+def gw_create_panel(d):
+    na = '❌ تنظیم نشده'
+    chans = d.get('channels') or []
+    chan_txt = ('، '.join(c.get('title') or str(c['chat']) for c in chans)) if chans else na
+    top = d.get('top')
+    top_txt = na if top is None else ('✅ بله' if top else '❌ خیر')
+    lines = ['🎰 ساخت لینک قرعه‌کشی', '',
+             f"📝 اسم قرعه‌کشی: {d.get('title') or na}",
+             f"📢 کانال‌های اجباری: {chan_txt}",
+             f"👥 تعداد شرکت‌کننده: {(str(d['max']) + ' نفر') if d.get('max') is not None else na}",
+             f"🏆 نمایش لیست برترین‌ها برای کاربرها: {top_txt}",
+             f"🎁 جایزه: {d.get('prize') or na}",
+             f"🥇 تعداد برنده: {(str(d['winners']) + ' نفر') if d.get('winners') is not None else na}",
+             f"⏳ زمان قرعه‌کشی: {gw_hours_text(d['hours']) if d.get('hours') is not None else na}", '']
+    if gw_draft_complete(d):
+        lines.append('✅ همه‌ی موارد تنظیم شد؛ «ساخت لینک» رو بزن.')
+    else:
+        lines.append('هر گزینه رو بزن و تنظیم کن؛ بعد از تکمیل همه، دکمه‌ی ساخت لینک میاد.')
+    mark = lambda ok: '✅' if ok else '▫️'
+    rows = [
+        [InlineKeyboardButton(f"{mark(bool(d.get('title')))} 📝 اسم قرعه‌کشی", callback_data='gwc:opt:title')],
+        [InlineKeyboardButton(f"{mark(bool(chans))} 📢 کانال‌های اجباری", callback_data='gwc:opt:channels')],
+        [InlineKeyboardButton(f"{mark(d.get('max') is not None)} 👥 تعداد شرکت‌کننده", callback_data='gwc:opt:max')],
+        [InlineKeyboardButton(f"{mark(top is not None)} 🏆 نمایش لیست برترین‌ها", callback_data='gwc:opt:top')],
+        [InlineKeyboardButton(f"{mark(bool(d.get('prize')))} 🎁 جایزه", callback_data='gwc:opt:prize')],
+        [InlineKeyboardButton(f"{mark(d.get('winners') is not None)} 🥇 تعداد برنده", callback_data='gwc:opt:winners')],
+        [InlineKeyboardButton(f"{mark(d.get('hours') is not None)} ⏳ زمان قرعه‌کشی", callback_data='gwc:opt:hours')],
+    ]
+    if gw_draft_complete(d):
+        rows.append([InlineKeyboardButton('🎰 ساخت لینک', callback_data='gwc:create')])
+    rows.append([InlineKeyboardButton('❌ انصراف', callback_data='gwc:cancel')])
+    return '\n'.join(lines), InlineKeyboardMarkup(rows)
+
+
+GW_INPUT_PROMPTS = {
+    'title': '📝 اسم قرعه‌کشی رو بفرست (حداکثر ۶۰ کاراکتر).\nمثال: قرعه‌کشی ۱۰۰ هزار روب‌پوینتی',
+    'channels': ('📢 کانال‌های اجباری این قرعه‌کشی رو بفرست؛ هر کانال توی یک خط (حداکثر ۵ کانال).\n\n'
+                 '• کانال عمومی: @username یا https://t.me/username\n'
+                 '• کانال خصوصی: آیدی عددی + لینک دعوت توی یک خط\n'
+                 '  مثال: -1001234567890 https://t.me/+AbCdEf\n\n'
+                 '⚠️ ربات باید توی همه‌ی این کانال‌ها ادمین باشه، وگرنه نمی‌تونه عضویت رو چک کنه.'),
+    'max': '👥 تعداد شرکت‌کننده رو به‌صورت عدد بفرست. مثال: 300',
+    'prize': '🎁 جایزه‌ی قرعه‌کشی رو بنویس (حداکثر ۱۲۰ کاراکتر).\nمثال: ۱۰۰٬۰۰۰ روب‌پوینت',
+    'winners': '🥇 تعداد برنده‌ها رو به‌صورت عدد بفرست. مثال: 3',
+    'hours': '⏳ مدت قرعه‌کشی رو بر حسب «ساعت» بفرست (از لحظه‌ی ساخت لینک). مثال: 48',
+}
+
+
+def gw_create_submenu(field):
+    back = [InlineKeyboardButton('🔙 بازگشت', callback_data='gwc:home')]
+    if field == 'channels':
+        rows = [[InlineKeyboardButton('📌 همون کانال‌های اجباریِ خود ربات', callback_data='gwc:chdef')],
+                [InlineKeyboardButton('✍️ نوشتن کانال‌ها', callback_data='gwc:set:channels:custom')], back]
+        return '📢 کانال‌های اجباری قرعه‌کشی از کجا بیاد؟', InlineKeyboardMarkup(rows)
+    if field == 'max':
+        row = [InlineKeyboardButton(f'{n:,}', callback_data=f'gwc:set:max:{n}') for n in GW_PARTICIPANT_PRESETS]
+        return '👥 حداکثر چند نفر بتونن شرکت کنن؟', InlineKeyboardMarkup([row, [InlineKeyboardButton('✍️ عدد دلخواه', callback_data='gwc:set:max:custom')], back])
+    if field == 'top':
+        rows = [[InlineKeyboardButton('✅ بله، نمایش بده', callback_data='gwc:set:top:1'),
+                 InlineKeyboardButton('❌ خیر', callback_data='gwc:set:top:0')], back]
+        return '🏆 لیست برترین‌ها (بیشترین تیکت) برای کاربرها هم نمایش داده بشه؟\n(پشتیبانی همیشه لیست رو می‌بینه.)', InlineKeyboardMarkup(rows)
+    if field == 'winners':
+        row = [InlineKeyboardButton(str(n), callback_data=f'gwc:set:winners:{n}') for n in GW_WINNER_PRESETS]
+        return '🥇 چند نفر برنده داشته باشیم؟', InlineKeyboardMarkup([row, [InlineKeyboardButton('✍️ عدد دلخواه', callback_data='gwc:set:winners:custom')], back])
+    if field == 'hours':
+        rows, row = [], []
+        for h in GW_HOURS_PRESETS:
+            row.append(InlineKeyboardButton(gw_hours_text(h), callback_data=f'gwc:set:hours:{h}'))
+            if len(row) == 3:
+                rows.append(row); row = []
+        if row:
+            rows.append(row)
+        rows.append([InlineKeyboardButton('✍️ دلخواه (ساعت)', callback_data='gwc:set:hours:custom')])
+        return '⏳ قرعه‌کشی چند ساعت دیگه انجام بشه؟', InlineKeyboardMarkup(rows + [back])
+    return GW_INPUT_PROMPTS.get(field, ''), InlineKeyboardMarkup([back])
+
+
+async def gw_show_create_panel(context, chat_id, message_id, d, fallback_message=None):
+    text, kb = gw_create_panel(d)
+    if chat_id and message_id:
+        try:
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=kb)
+            return
+        except BadRequest as e:
+            if 'not modified' in str(e).lower():
+                return
+        except Exception:
+            pass
+    if fallback_message is not None:
+        sent = await fallback_message.reply_text(text, reply_markup=kb)
+        d['panel'] = (sent.chat_id, sent.message_id)
+
+
+def gw_clear_input_state(context):
+    if str(context.user_data.get('admin_action', '')).startswith('gw_input:'):
+        context.user_data.pop('admin_action', None)
+
+
+async def gw_parse_channels(bot, text):
+    """متن چندخطی کانال‌ها → (لیست کانال‌های معتبر، لیست خطاها). ربات باید توی هر کانال ادمین باشه."""
+    channels, errors, seen = [], [], set()
+    me = None
+    for raw in (text or '').replace('،', '\n').split('\n'):
+        line = raw.strip()
+        if not line:
+            continue
+        toks = line.split()
+        tok, link = toks[0], (toks[1] if len(toks) > 1 else '')
+        chat, url = None, ''
+        m = re.fullmatch(r'(?:https?://)?(?:t\.me|telegram\.me)/([A-Za-z][A-Za-z0-9_]{3,})/?', tok)
+        if re.fullmatch(r'@[A-Za-z][A-Za-z0-9_]{3,}', tok):
+            chat, url = tok, f"https://t.me/{tok[1:]}"
+        elif m:
+            chat, url = '@' + m.group(1), f"https://t.me/{m.group(1)}"
+        elif re.fullmatch(r'-?\d{5,}', tok):
+            chat = int(tok)
+            if re.fullmatch(r'(?:https?://)?(?:t\.me|telegram\.me)/\S+', link):
+                url = link if link.startswith('http') else 'https://' + link
+            else:
+                errors.append(f"❌ {tok}: برای کانال خصوصی لینک دعوت هم بنویس (مثلاً: {tok} https://t.me/+AbCdEf)")
+                continue
+        else:
+            errors.append(f"❌ «{line[:40]}» شبیه آیدی/لینک کانال نیست.")
+            continue
+        if chat in seen:
+            continue
+        seen.add(chat)
+        try:
+            chat_obj = await bot.get_chat(chat)
+            if me is None:
+                me = await bot.get_me()
+            bm = await bot.get_chat_member(chat, me.id)
+        except Exception as e:
+            errors.append(f"❌ {tok}: کانال پیدا نشد یا ربات توش نیست ({str(e)[:50]})")
+            continue
+        if getattr(bm, 'status', '') not in ('administrator', 'creator'):
+            errors.append(f"❌ {tok}: ربات توی این کانال ادمین نیست.")
+            continue
+        channels.append({'chat': chat, 'url': url, 'title': (getattr(chat_obj, 'title', None) or str(chat))[:40]})
+    if len(channels) > GW_MAX_CHANNELS:
+        errors.append(f"❌ حداکثر {GW_MAX_CHANNELS} کانال مجازه.")
+        channels = channels[:GW_MAX_CHANNELS]
+    return channels, errors
+
+
+async def gw_start_create(update, context):
+    q = update.callback_query
+    context.user_data.pop('admin_action', None)
+    context.user_data['gw_draft'] = {}
+    text, kb = gw_create_panel(context.user_data['gw_draft'])
+    sent = await q.message.reply_text(text, reply_markup=kb)
+    context.user_data['gw_draft']['panel'] = (sent.chat_id, sent.message_id)
+
+
+async def gw_create_callback(update, context):
+    q = update.callback_query
+    if not admin_only(q.from_user.id):
+        await q.answer('دسترسی نداری.', show_alert=True)
+        return
+    await q.answer()
+    parts = q.data.split(':')
+    action = parts[1] if len(parts) > 1 else ''
+    d = context.user_data.setdefault('gw_draft', {})
+    d['panel'] = (q.message.chat_id, q.message.message_id)
+
+    if action == 'cancel':
+        context.user_data.pop('gw_draft', None)
+        gw_clear_input_state(context)
+        await q.message.edit_text('❌ ساخت قرعه‌کشی لغو شد.')
+        return
+    if action == 'home':
+        gw_clear_input_state(context)
+        text, kb = gw_create_panel(d)
+        await q.message.edit_text(text, reply_markup=kb)
+        return
+    if action == 'opt' and len(parts) == 3 and parts[2] in ('title', 'channels', 'max', 'top', 'prize', 'winners', 'hours'):
+        field = parts[2]
+        if field in ('title', 'prize'):
+            context.user_data['admin_action'] = f'gw_input:{field}'
+            await q.message.edit_text(GW_INPUT_PROMPTS[field], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت', callback_data='gwc:home')]]))
+            return
+        text, kb = gw_create_submenu(field)
+        await q.message.edit_text(text, reply_markup=kb)
+        return
+    if action == 'chdef':
+        chans = []
+        for chat, url, label in REQUIRED_CHANNELS:
+            if chat:
+                chans.append({'chat': chat, 'url': url or '', 'title': str(chat).lstrip('@')[:40]})
+        if not chans:
+            await q.answer('کانال اجباری برای خود ربات تنظیم نشده.', show_alert=True)
+            return
+        d['channels'] = chans
+        text, kb = gw_create_panel(d)
+        await q.message.edit_text(text, reply_markup=kb)
+        return
+    if action == 'set' and len(parts) == 4:
+        field, value = parts[2], parts[3]
+        if field not in ('channels', 'max', 'top', 'winners', 'hours'):
+            return
+        if value == 'custom':
+            context.user_data['admin_action'] = f'gw_input:{field}'
+            await q.message.edit_text(GW_INPUT_PROMPTS[field], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت', callback_data='gwc:home')]]))
+            return
+        if not value.isdigit():
+            return
+        n = int(value)
+        if field == 'max' and 1 <= n <= GW_MAX_PARTICIPANTS:
+            d['max'] = n
+        elif field == 'top' and n in (0, 1):
+            d['top'] = n
+        elif field == 'winners' and 1 <= n <= GW_MAX_WINNERS:
+            d['winners'] = n
+        elif field == 'hours' and 1 <= n <= GW_MAX_HOURS:
+            d['hours'] = n
+        else:
+            return
+        text, kb = gw_create_panel(d)
+        await q.message.edit_text(text, reply_markup=kb)
+        return
+    if action == 'create':
+        await gw_create(update, context, d)
+
+
+async def gw_handle_input(update, context, field, text):
+    d = context.user_data.setdefault('gw_draft', {})
+    msg = update.message
+
+    async def retry(err):
+        context.user_data['admin_action'] = f'gw_input:{field}'
+        await msg.reply_text(err + '\n\nدوباره بفرست یا از پنل «بازگشت» رو بزن.', **reply_kwargs(msg))
+
+    raw = (text or '').strip()
+    if field == 'title':
+        if not (1 <= len(raw) <= GW_MAX_TITLE):
+            await retry(f'❌ اسم باید بین ۱ تا {GW_MAX_TITLE} کاراکتر باشه.')
+            return
+        d['title'] = raw
+    elif field == 'prize':
+        if not (1 <= len(raw) <= GW_MAX_PRIZE):
+            await retry(f'❌ جایزه باید بین ۱ تا {GW_MAX_PRIZE} کاراکتر باشه.')
+            return
+        d['prize'] = raw
+    elif field == 'channels':
+        wait = await msg.reply_text('⏳ دارم کانال‌ها رو چک می‌کنم...')
+        channels, errors = await gw_parse_channels(context.bot, raw)
+        try:
+            await wait.delete()
+        except Exception:
+            pass
+        if errors:
+            await retry('\n'.join(errors))
+            return
+        if not channels:
+            await retry('❌ هیچ کانال معتبری پیدا نشد.')
+            return
+        d['channels'] = channels
+    else:
+        try:
+            n = parse_amount(raw)
+        except Exception:
+            await retry('❌ فقط عدد بفرست.')
+            return
+        if field == 'max':
+            if not (1 <= n <= GW_MAX_PARTICIPANTS):
+                await retry(f'❌ عدد باید بین ۱ تا {GW_MAX_PARTICIPANTS:,} باشه.')
+                return
+            d['max'] = int(n)
+        elif field == 'winners':
+            if not (1 <= n <= GW_MAX_WINNERS):
+                await retry(f'❌ تعداد برنده باید بین ۱ تا {GW_MAX_WINNERS} باشه.')
+                return
+            d['winners'] = int(n)
+        elif field == 'hours':
+            if not (1 <= n <= GW_MAX_HOURS):
+                await retry(f'❌ مدت باید بین ۱ تا {GW_MAX_HOURS} ساعت باشه.')
+                return
+            d['hours'] = int(n)
+        else:
+            return
+    chat_id, message_id = d.get('panel', (None, None))
+    await gw_show_create_panel(context, chat_id, message_id, d, fallback_message=msg)
+
+
+async def gw_create(update, context, d):
+    q = update.callback_query
+    if not gw_draft_complete(d):
+        await q.answer('اول همه‌ی گزینه‌ها رو تنظیم کن.', show_alert=True)
+        return
+    session = get_session()
+    try:
+        g = Giveaway(
+            title=d['title'], prize=d['prize'], winners_count=int(d['winners']), max_participants=int(d['max']),
+            show_top=int(d['top']), channels=json.dumps(d['channels'], ensure_ascii=False),
+            created_by=q.from_user.id, created_at=now_utc(),
+            ends_at=now_utc() + timedelta(hours=int(d['hours'])), status='active',
+        )
+        session.add(g)
+        session.commit()
+        gid = g.id
+        title, prize = g.title, g.prize
+    except Exception:
+        session.rollback()
+        logger.exception('giveaway create failed')
+        await q.answer('❌ ساخت قرعه‌کشی ناموفق بود.', show_alert=True)
+        return
+    finally:
+        session.close()
+    uname = await gw_bot_username(context.bot)
+    link = gw_link(uname, gid)
+    context.user_data.pop('gw_draft', None)
+    gw_clear_input_state(context)
+    await q.message.edit_text(
+        f"✅ قرعه‌کشی ساخته شد!\n\n🎰 {title}\n🎁 جایزه: {prize}\n🏆 برنده‌ها: {d['winners']} نفر\n"
+        f"👥 ظرفیت: {d['max']:,} نفر\n⏳ مدت: {gw_hours_text(d['hours'])}\n\n"
+        f"🔗 لینک قرعه‌کشی:\n{link}\n\nاین لینک رو برای کاربرها بفرست.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton('🏆 مدیریت و لیست برترین‌ها', callback_data=f'gwa:view:{gid}')],
+            [InlineKeyboardButton('🔙 پنل مدیریت', callback_data='admin:back')]]))
+
+
+# ======================================================================
+# پنل پشتیبانی: مدیریت قرعه‌کشی‌ها، لیست برترین‌ها و زیرمجموعه‌ها
+# ======================================================================
+def gw_admin_list_markup(session):
+    rows_db = session.query(Giveaway).order_by(Giveaway.id.desc()).limit(15).all()
+    rows = []
+    for g in rows_db:
+        icon = {'active': '🟢', 'drawing': '⏳', 'finished': '✅', 'cancelled': '❌'}.get(g.status, '▫️')
+        rows.append([InlineKeyboardButton(f"{icon} #{g.id} {g.title[:30]}", callback_data=f"gwa:view:{g.id}")])
+    rows.append([InlineKeyboardButton('🎰 ساخت لینک قرعه‌کشی', callback_data='admin:gwcreate')])
+    rows.append([InlineKeyboardButton('🔙 پنل مدیریت', callback_data='admin:back')])
+    return ('🏆 مدیریت قرعه‌کشی‌ها' if rows_db else '🏆 هنوز قرعه‌کشی‌ای نساختی.'), InlineKeyboardMarkup(rows)
+
+
+def gw_admin_view(session, g, uname):
+    total_active = gw_active_count(session, g.id)
+    left = session.query(GiveawayEntry).filter(GiveawayEntry.giveaway_id == g.id, GiveawayEntry.status == 'left').count()
+    rank = gw_ranking(session, g.id)
+    tickets = sum(r['tickets'] for r in rank)
+    if g.status == 'active':
+        timing = f"⏳ باقی‌مانده: {format_duration(gw_seconds_left(g))}" if gw_seconds_left(g) > 0 else "⏳ زمانش تموم شده (درحال قرعه‌کشی)"
+    else:
+        timing = f"🏁 پایان: {aware(g.finished_at or g.ends_at).strftime('%Y-%m-%d %H:%M')} UTC"
+    chans = '، '.join(c.get('title') or str(c['chat']) for c in gw_channels_of(g))
+    lines = [f"🎰 {g.title} (#{g.id})", '',
+             f"وضعیت: {GW_STATUS_LABEL.get(g.status, g.status)}", timing,
+             f"🎁 جایزه: {g.prize}", f"🥇 تعداد برنده: {g.winners_count}",
+             f"👥 شرکت‌کننده‌ی فعال: {total_active:,} از {g.max_participants:,}",
+             f"🚪 لفت‌داده‌ها: {left:,}", f"🎟 مجموع تیکت‌های فعال: {tickets:,}",
+             f"📢 کانال‌ها: {chans}",
+             f"🏆 نمایش لیست برترین‌ها برای کاربرها: {'✅ روشن' if g.show_top else '❌ خاموش'}", '',
+             f"🔗 لینک: {gw_link(uname, g.id)}"]
+    if g.status == 'finished' and g.winners:
+        try:
+            ws = json.loads(g.winners)
+        except Exception:
+            ws = []
+        lines += ['', '🥇 برنده‌ها:'] + [f"{i}. {w.get('label') or w.get('uid')} — {w.get('tickets', 1)} تیکت" for i, w in enumerate(ws, 1)]
+    rows = [[InlineKeyboardButton('🏆 لیست برترین‌ها', callback_data=f'gwa:top:{g.id}:0')],
+            [InlineKeyboardButton(('🙈 مخفی کردن لیست از کاربرها' if g.show_top else '👁 نمایش لیست برای کاربرها'), callback_data=f'gwa:toggletop:{g.id}')]]
+    if g.status == 'active':
+        rows.append([InlineKeyboardButton('🎲 قرعه‌کشی همین الان', callback_data=f'gwa:draw:{g.id}'),
+                     InlineKeyboardButton('❌ لغو قرعه‌کشی', callback_data=f'gwa:cancel:{g.id}')])
+    rows.append([InlineKeyboardButton('🔄 تازه‌سازی', callback_data=f'gwa:view:{g.id}')])
+    rows.append([InlineKeyboardButton('🔙 لیست قرعه‌کشی‌ها', callback_data='gwa:list')])
+    return '\n'.join(lines), InlineKeyboardMarkup(rows)
+
+
+def gw_admin_top(session, g, page):
+    rank = gw_ranking(session, g.id)
+    pages = max(1, (len(rank) + GW_PAGE - 1) // GW_PAGE)
+    page = max(0, min(int(page), pages - 1))
+    chunk = rank[page * GW_PAGE:(page + 1) * GW_PAGE]
+    lines = [f"🏆 لیست برترین‌ها — {g.title}", f"(صفحه {page + 1} از {pages} | {len(rank):,} شرکت‌کننده)", '']
+    rows = []
+    if not chunk:
+        lines.append('هنوز کسی ثبت‌نام نکرده.')
+    for i, r in enumerate(chunk, page * GW_PAGE + 1):
+        label = gw_user_label(session, r['uid'], admin=False)
+        lines.append(f"{i}. {gw_user_label(session, r['uid'], admin=True)} — 🎟 {r['tickets']}")
+        rows.append([InlineKeyboardButton(f"{i}. {label[:24]} — 🎟 {r['tickets']} 👥 {r['invited']}", callback_data=f"gwa:user:{g.id}:{r['uid']}:{page}")])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton('⬅️ قبلی', callback_data=f'gwa:top:{g.id}:{page - 1}'))
+    if page < pages - 1:
+        nav.append(InlineKeyboardButton('بعدی ➡️', callback_data=f'gwa:top:{g.id}:{page + 1}'))
+    if nav:
+        rows.append(nav)
+    lines.append('')
+    lines.append('روی اسم هر نفر بزن تا زیرمجموعه‌هاش رو ببینی.')
+    rows.append([InlineKeyboardButton('🔙 بازگشت', callback_data=f'gwa:view:{g.id}')])
+    return '\n'.join(lines), InlineKeyboardMarkup(rows)
+
+
+def gw_admin_user(session, g, uid, page):
+    tickets, invited = gw_tickets_of(session, g.id, uid)
+    entry = session.query(GiveawayEntry).filter(GiveawayEntry.giveaway_id == g.id, GiveawayEntry.user_id == int(uid)).first()
+    subs = session.query(GiveawayEntry).filter(GiveawayEntry.giveaway_id == g.id, GiveawayEntry.inviter_id == int(uid)).order_by(GiveawayEntry.id.asc()).all()
+    status_icon = {'active': '✅ تیکت‌دار', 'left': '❌ لفت داده (تیکت حذف شد)', 'pending': '⏳ عضویت کامل نشده'}
+    lines = [f"👤 {gw_user_label(session, uid, admin=True)}", '',
+             f"🎟 مجموع تیکت: {tickets} (خودش: {1 if entry and entry.status == 'active' else 0} + زیرمجموعه‌ی فعال: {invited})"]
+    if entry and entry.inviter_id:
+        lines.append(f"🔗 دعوت‌شده توسط: {gw_user_label(session, entry.inviter_id, admin=True)}")
+    lines += ['', f"👥 زیرمجموعه‌ها ({len(subs)} نفر):"]
+    if not subs:
+        lines.append('هنوز کسی با لینکش وارد نشده.')
+    for e in subs[:40]:
+        lines.append(f"• {gw_user_label(session, e.user_id, admin=True)} — {status_icon.get(e.status, e.status)}")
+    if len(subs) > 40:
+        lines.append(f"... و {len(subs) - 40} نفر دیگه")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton('🔙 لیست برترین‌ها', callback_data=f'gwa:top:{g.id}:{page}')]])
+    return '\n'.join(lines), kb
+
+
+async def gw_admin_callback(update, context):
+    q = update.callback_query
+    if not admin_only(q.from_user.id):
+        await q.answer('دسترسی نداری.', show_alert=True)
+        return
+    parts = q.data.split(':')
+    action = parts[1] if len(parts) > 1 else ''
+    gid = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+    uname = await gw_bot_username(context.bot)
+    session = get_session()
+    try:
+        if action == 'list':
+            await q.answer()
+            text, kb = gw_admin_list_markup(session)
+            await _edit_or_send(q, text, kb)
+            return
+        g = session.get(Giveaway, gid) if gid else None
+        if not g:
+            await q.answer('این قرعه‌کشی پیدا نشد.', show_alert=True)
+            return
+        if action == 'view':
+            await q.answer()
+            text, kb = gw_admin_view(session, g, uname)
+            await _edit_or_send(q, text, kb)
+        elif action == 'top':
+            await q.answer()
+            page = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+            text, kb = gw_admin_top(session, g, page)
+            await _edit_or_send(q, text, kb)
+        elif action == 'user' and len(parts) >= 5 and parts[3].isdigit():
+            await q.answer()
+            text, kb = gw_admin_user(session, g, int(parts[3]), int(parts[4]) if parts[4].isdigit() else 0)
+            await _edit_or_send(q, text, kb)
+        elif action == 'toggletop':
+            g.show_top = 0 if g.show_top else 1
+            session.commit()
+            await q.answer('✅ تغییر کرد.')
+            text, kb = gw_admin_view(session, g, uname)
+            await _edit_or_send(q, text, kb)
+        elif action in ('draw', 'cancel'):
+            if g.status != 'active':
+                await q.answer('این قرعه‌کشی دیگه فعال نیست.', show_alert=True)
+                return
+            await q.answer()
+            ask = ('🎲 مطمئنی همین الان قرعه‌کشی انجام بشه؟' if action == 'draw'
+                   else '❌ مطمئنی قرعه‌کشی لغو بشه؟ (برنده‌ای انتخاب نمی‌شه)')
+            await _edit_or_send(q, f"{ask}\n\n🎰 {g.title}", InlineKeyboardMarkup([[
+                InlineKeyboardButton('✅ بله', callback_data=f'gwa:{action}yes:{g.id}'),
+                InlineKeyboardButton('↩️ نه', callback_data=f'gwa:view:{g.id}')]]))
+        elif action == 'drawyes':
+            await q.answer('🎲 درحال قرعه‌کشی...')
+            session.close()
+            await gw_finish(context.bot, gid)
+            session = get_session()
+            g = session.get(Giveaway, gid)
+            text, kb = gw_admin_view(session, g, uname)
+            await _edit_or_send(q, text, kb)
+        elif action == 'cancelyes':
+            g = session.query(Giveaway).filter(Giveaway.id == gid).with_for_update().first()
+            if g and g.status == 'active':
+                g.status = 'cancelled'
+                g.finished_at = now_utc()
+                session.commit()
+            await q.answer('❌ لغو شد.')
+            text, kb = gw_admin_view(session, g, uname)
+            await _edit_or_send(q, text, kb)
+        else:
+            await q.answer()
+    finally:
+        session.close()
+
+
+# ======================================================================
+# سمت کاربر: ورود با لینک، عضویت، جمع، تیکت و لینک اختصاصی
+# ======================================================================
+def gw_info_text(session, g):
+    return (f"🎰 {g.title}\n\n🎁 جایزه: {g.prize}\n🏆 تعداد برنده: {g.winners_count}\n"
+            f"⏳ زمان باقی‌مانده: {format_duration(gw_seconds_left(g))}\n"
+            f"👥 شرکت‌کننده‌ها: {gw_active_count(session, g.id):,} از {g.max_participants:,}\n")
+
+
+def gw_join_view(session, g, note=''):
+    text = gw_info_text(session, g) + '\n'
+    if note:
+        text += note + '\n\n'
+    text += ('برای شرکت توی قرعه‌کشی:\n1️⃣ توی کانال‌های زیر عضو شو\n2️⃣ دکمه‌ی «عضو شدم» رو بزن\n'
+             '3️⃣ جواب جمع ساده رو انتخاب کن (برای اطمینان از اینکه ربات نیستی)\n4️⃣ تیکتت و لینک اختصاصیت رو بگیر!')
+    rows = []
+    for c in gw_channels_of(g):
+        if c.get('url'):
+            rows.append([InlineKeyboardButton(f"📢 {c.get('title') or 'عضویت در کانال'}", url=c['url'])])
+    rows.append([InlineKeyboardButton('✅ عضو شدم، ادامه', callback_data=f'gwu:check:{g.id}')])
+    return text, InlineKeyboardMarkup(rows)
+
+
+def gw_ticket_view(session, g, uid, uname):
+    tickets, invited = gw_tickets_of(session, g.id, uid)
+    link = gw_link(uname, g.id, uid)
+    text = (gw_info_text(session, g) +
+            f"\n✅ تو توی قرعه‌کشی ثبت‌نام شدی!\n\n🎟 تیکت‌های تو: {tickets}\n👥 دعوت‌شده‌های فعال: {invited}\n\n"
+            f"🔗 لینک اختصاصی تو:\n{link}\n\n"
+            "هر نفر که با لینک تو وارد بشه و عضویتش رو کامل کنه ۱ تیکت برات میاره و همون لحظه بهت خبر می‌دم. "
+            "اگه اون نفر از کانال‌ها لفت بده، تیکتش از تو حذف می‌شه.")
+    share = f"https://t.me/share/url?url={_gw_quote(link, safe='')}&text={_gw_quote('توی قرعه‌کشی ' + g.title + ' شرکت کن! 🎁', safe='')}"
+    rows = [[InlineKeyboardButton('📤 اشتراک‌گذاری لینک', url=share)]]
+    if g.show_top:
+        rows.append([InlineKeyboardButton('🏆 برترین‌ها', callback_data=f'gwu:top:{g.id}')])
+    rows.append([InlineKeyboardButton('🔄 بروزرسانی', callback_data=f'gwu:me:{g.id}')])
+    return text, InlineKeyboardMarkup(rows)
+
+
+def gw_ended_text(session, g):
+    if g.status == 'cancelled':
+        return f"🎰 {g.title}\n\n❌ این قرعه‌کشی لغو شده."
+    text = f"🎰 {g.title}\n\n🎁 جایزه: {g.prize}\n🏁 این قرعه‌کشی تموم شده."
+    if g.status == 'finished' and g.winners:
+        try:
+            ws = json.loads(g.winners)
+        except Exception:
+            ws = []
+        if ws:
+            text += '\n\n🥇 برنده‌ها:\n' + '\n'.join(f"{i}. {w.get('label') or w.get('uid')}" for i, w in enumerate(ws, 1))
+    elif g.status != 'finished':
+        text += '\n⏳ نتیجه به‌زودی اعلام می‌شه.'
+    return text
+
+
+async def gw_reply(update, text, kb=None):
+    q = update.callback_query
+    if q:
+        try:
+            await q.message.edit_text(text, reply_markup=kb)
+            return
+        except BadRequest as e:
+            if 'not modified' in str(e).lower():
+                return
+        except Exception:
+            pass
+        await q.message.reply_text(text, reply_markup=kb)
+    elif update.message:
+        await update.message.reply_text(text, reply_markup=kb, **reply_kwargs(update.message))
+
+
+async def giveaway_start(update, context, gid, inviter_id):
+    """ورود با لینک https://t.me/BOT?start=gw_<id>[_<دعوت‌کننده>]"""
+    tg_user = update.effective_user
+    uname = await gw_bot_username(context.bot)
+    session = get_session()
+    try:
+        g = session.get(Giveaway, gid)
+        if not g:
+            await gw_reply(update, '❌ این قرعه‌کشی پیدا نشد.')
+            return
+        get_or_create_user(session, tg_user)
+        if not gw_is_open(g):
+            await gw_reply(update, gw_ended_text(session, g))
+            return
+        entry = session.query(GiveawayEntry).filter(
+            GiveawayEntry.giveaway_id == gid, GiveawayEntry.user_id == tg_user.id).first()
+        if entry is None:
+            if gw_active_count(session, gid) >= g.max_participants:
+                await gw_reply(update, f"🎰 {g.title}\n\n😔 ظرفیت این قرعه‌کشی ({g.max_participants:,} نفر) تکمیل شده.")
+                return
+            valid_inviter = None
+            if inviter_id and inviter_id != tg_user.id:
+                inv_entry = session.query(GiveawayEntry).filter(
+                    GiveawayEntry.giveaway_id == gid, GiveawayEntry.user_id == inviter_id,
+                    GiveawayEntry.status == 'active').first()
+                if inv_entry:
+                    valid_inviter = inviter_id
+            entry = GiveawayEntry(giveaway_id=gid, user_id=tg_user.id, inviter_id=valid_inviter,
+                                  status='pending', created_at=now_utc())
+            session.add(entry)
+            try:
+                session.commit()
+            except Exception:
+                session.rollback()      # دو تا کلیک هم‌زمان: ردیف قبلاً ساخته شده
+                entry = session.query(GiveawayEntry).filter(
+                    GiveawayEntry.giveaway_id == gid, GiveawayEntry.user_id == tg_user.id).first()
+        if entry and entry.status == 'active':
+            text, kb = gw_ticket_view(session, g, tg_user.id, uname)
+        elif entry and entry.status == 'left':
+            text, kb = gw_join_view(session, g, '⚠️ قبلاً از کانال‌ها لفت دادی و تیکتت حذف شده؛ دوباره عضو شو و «عضو شدم» رو بزن تا برگرده.')
+        else:
+            text, kb = gw_join_view(session, g)
+    finally:
+        session.close()
+    await gw_reply(update, text, kb)
+
+
+def gw_activate(session, g, entry):
+    """ثبت‌نام/برگشت شرکت‌کننده. خروجی: 'new' برای بار اول، 'back' اگه قبلاً لفت داده بود."""
+    first = entry.verified_at is None
+    entry.status = 'active'
+    entry.verified_at = entry.verified_at or now_utc()
+    entry.left_at = None
+    entry.captcha_answer = None
+    entry.captcha_fails = 0
+    entry.last_checked_at = now_utc()
+    session.commit()
+    return 'new' if first else 'back'
+
+
+async def gw_notify_inviter(bot, gid, title, inviter_id, user_id, kind):
+    """kind: new | back | left — به دعوت‌کننده خبر می‌ده و مجموع تیکتش رو می‌گه.
+    فقط مقدار ساده می‌گیره (نه آبجکت ORM) چون سشن‌ها بعد از commit منقضی می‌شن."""
+    if not inviter_id:
+        return
+    session = get_session()
+    try:
+        inv_entry = session.query(GiveawayEntry).filter(
+            GiveawayEntry.giveaway_id == gid, GiveawayEntry.user_id == inviter_id).first()
+        if not inv_entry or inv_entry.status != 'active':
+            return
+        total, _ = gw_tickets_of(session, gid, inviter_id)
+        name = gw_user_label(session, user_id, admin=False)
+    finally:
+        session.close()
+    if kind == 'new':
+        text = f"🎉 {name} با لینک تو وارد قرعه‌کشی «{title}» شد و عضویتش تایید شد!\n🎟 ۱ تیکت گرفتی. مجموع تیکت‌هات: {total}"
+    elif kind == 'back':
+        text = f"🔁 {name} دوباره توی کانال‌های قرعه‌کشی «{title}» عضو شد.\n🎟 ۱ تیکت برات برگشت. مجموع تیکت‌هات: {total}"
+    else:
+        text = f"⚠️ {name} از کانال‌های قرعه‌کشی «{title}» لفت داد و ۱ تیکت از تو حذف شد.\n🎟 مجموع تیکت‌هات: {total}"
+    await notify_user_private(bot, inviter_id, text)
+
+
+async def gw_user_callback(update, context):
+    q = update.callback_query
+    parts = (q.data or '').split(':')
+    if len(parts) < 3 or not parts[2].isdigit():
+        await q.answer()
+        return
+    action, gid = parts[1], int(parts[2])
+    uid = q.from_user.id
+    uname = await gw_bot_username(context.bot)
+    session = get_session()
+    try:
+        g = session.get(Giveaway, gid)
+        if not g:
+            await q.answer('این قرعه‌کشی پیدا نشد.', show_alert=True)
+            return
+        entry = session.query(GiveawayEntry).filter(GiveawayEntry.giveaway_id == gid, GiveawayEntry.user_id == uid).first()
+        if action == 'top':
+            if not g.show_top:
+                await q.answer('لیست برترین‌ها برای این قرعه‌کشی نمایش داده نمی‌شه.', show_alert=True)
+                return
+            await q.answer()
+            rank = gw_ranking(session, gid)
+            lines = [f"🏆 برترین‌های قرعه‌کشی «{g.title}»", '']
+            for i, r in enumerate(rank[:10], 1):
+                lines.append(f"{i}. {gw_user_label(session, r['uid'])} — 🎟 {r['tickets']}")
+            if not rank:
+                lines.append('هنوز کسی ثبت‌نام نکرده.')
+            mine = next((i for i, r in enumerate(rank, 1) if r['uid'] == uid), None)
+            if mine:
+                lines += ['', f"📍 رتبه‌ی تو: {mine} | 🎟 {rank[mine - 1]['tickets']} تیکت"]
+            await gw_reply(update, '\n'.join(lines), InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت', callback_data=f'gwu:me:{gid}')]]))
+            return
+        if not entry:
+            await q.answer('اول با لینک قرعه‌کشی وارد شو.', show_alert=True)
+            return
+        if not gw_is_open(g):
+            await q.answer()
+            await gw_reply(update, gw_ended_text(session, g))
+            return
+        if action == 'me' and entry.status == 'active':
+            await q.answer()
+            text, kb = gw_ticket_view(session, g, uid, uname)
+            await gw_reply(update, text, kb)
+            return
+
+        if action in ('check', 'me'):
+            channels = gw_channels_of(g)
+            session.close()
+            missing, unknown = await gw_missing_channels(context.bot, channels, uid)
+            session = get_session()
+            g = session.get(Giveaway, gid)
+            entry = session.query(GiveawayEntry).filter(GiveawayEntry.giveaway_id == gid, GiveawayEntry.user_id == uid).first()
+            if missing:
+                await q.answer('هنوز عضو این کانال‌ها نشدی:\n' + '\n'.join('• ' + (c.get('title') or str(c['chat'])) for c in missing), show_alert=True)
+                return
+            if unknown:
+                await q.answer('الان نتونستم عضویتت رو چک کنم؛ چند لحظه بعد دوباره بزن.', show_alert=True)
+                return
+            if entry.status == 'active':
+                await q.answer()
+                text, kb = gw_ticket_view(session, g, uid, uname)
+                await gw_reply(update, text, kb)
+                return
+            if entry.verified_at is not None:
+                # قبلاً کپچا رو رد کرده و فقط لفت داده بود؛ بدون کپچا برمی‌گرده
+                if gw_active_count(session, gid) >= g.max_participants:
+                    await q.answer('ظرفیت قرعه‌کشی تکمیل شده.', show_alert=True)
+                    return
+                kind = gw_activate(session, g, entry)
+                await q.answer('✅ برگشتی!')
+                text, kb = gw_ticket_view(session, g, uid, uname)
+                inviter, title = entry.inviter_id, g.title
+                session.close()
+                await gw_reply(update, text, kb)
+                await gw_notify_inviter(context.bot, gid, title, inviter, uid, kind)
+                return
+            if entry.locked_until and now_utc() < aware(entry.locked_until):
+                left = int((aware(entry.locked_until) - now_utc()).total_seconds())
+                await q.answer(f'⛔ چون چند بار اشتباه زدی، {format_duration(left)} دیگه صبر کن.', show_alert=True)
+                return
+            await q.answer()
+            await gw_send_captcha(update, session, g, entry)
+            return
+
+        if action == 'ans' and len(parts) >= 4 and parts[3].lstrip('-').isdigit():
+            if entry.status != 'pending' or entry.captcha_answer is None:
+                await q.answer('این سوال دیگه معتبر نیست؛ «عضو شدم» رو دوباره بزن.', show_alert=True)
+                return
+            if entry.locked_until and now_utc() < aware(entry.locked_until):
+                await q.answer('⛔ فعلاً قفلی؛ کمی بعد دوباره امتحان کن.', show_alert=True)
+                return
+            if int(parts[3]) != int(entry.captcha_answer):
+                entry.captcha_fails = int(entry.captcha_fails or 0) + 1
+                if entry.captcha_fails >= GW_CAPTCHA_MAX_FAILS:
+                    entry.locked_until = now_utc() + timedelta(seconds=GW_CAPTCHA_LOCK_SECONDS)
+                    entry.captcha_fails = 0
+                    entry.captcha_answer = None
+                    session.commit()
+                    await q.answer(f'❌ اشتباه بود. {GW_CAPTCHA_LOCK_SECONDS // 60} دقیقه قفل شدی.', show_alert=True)
+                    text, kb = gw_join_view(session, g, '⛔ چند بار اشتباه زدی؛ چند دقیقه دیگه دوباره امتحان کن.')
+                    await gw_reply(update, text, kb)
+                    return
+                session.commit()
+                await q.answer('❌ اشتباه بود؛ یه سوال جدید برات آوردم.', show_alert=True)
+                await gw_send_captcha(update, session, g, entry)
+                return
+            if gw_active_count(session, gid) >= g.max_participants:
+                await q.answer('ظرفیت قرعه‌کشی همین الان تکمیل شد 😔', show_alert=True)
+                return
+            kind = gw_activate(session, g, entry)
+            await q.answer('✅ درسته! ثبت‌نام شدی 🎉')
+            text, kb = gw_ticket_view(session, g, uid, uname)
+            inviter, title = entry.inviter_id, g.title
+            session.close()
+            await gw_reply(update, text, kb)
+            await gw_notify_inviter(context.bot, gid, title, inviter, uid, kind)
+            return
+        await q.answer()
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+async def gw_send_captcha(update, session, g, entry):
+    a, b, ans, opts = gw_make_captcha()
+    entry.captcha_answer = ans
+    session.commit()
+    row1 = [InlineKeyboardButton(to_fa_digits(v), callback_data=f'gwu:ans:{g.id}:{v}') for v in opts[:3]]
+    row2 = [InlineKeyboardButton(to_fa_digits(v), callback_data=f'gwu:ans:{g.id}:{v}') for v in opts[3:]]
+    text = (f"🤖 برای اطمینان از اینکه ربات نیستی، جواب این جمع رو انتخاب کن:\n\n"
+            f"➕  {to_fa_digits(a)} + {to_fa_digits(b)} = ؟")
+    await gw_reply(update, text, InlineKeyboardMarkup([row1, row2]))
+
+
+# ======================================================================
+# جاب‌ها: چک لفت‌دادن و انجام قرعه‌کشی
+# ======================================================================
+async def gw_leave_check_job(context):
+    """هر دقیقه چند شرکت‌کننده‌ی فعال رو چک می‌کنه؛ اگه از کانال‌ها لفت داده باشه تیکتش حذف می‌شه."""
+    try:
+        session = get_session()
+        try:
+            gids = [g.id for g in session.query(Giveaway).filter(Giveaway.status == 'active').all()]
+            if not gids:
+                return
+            batch = (session.query(GiveawayEntry)
+                     .filter(GiveawayEntry.giveaway_id.in_(gids), GiveawayEntry.status == 'active')
+                     .order_by(GiveawayEntry.last_checked_at.asc()).limit(GW_CHECK_BATCH).all())
+            todo = [(e.id, e.giveaway_id, e.user_id) for e in batch]
+        finally:
+            session.close()
+        for eid, gid, uid in todo:
+            session = get_session()
+            try:
+                g = session.get(Giveaway, gid)
+                e = session.get(GiveawayEntry, eid)
+                if not g or not e or e.status != 'active' or g.status != 'active':
+                    continue
+                channels = gw_channels_of(g)
+            finally:
+                session.close()
+            missing, _unknown = await gw_missing_channels(context.bot, channels, uid)
+            await gw_apply_check_result(context.bot, eid, bool(missing))
+            await asyncio.sleep(0.05)
+    except Exception:
+        logger.exception('gw_leave_check_job failed')
+
+
+async def gw_apply_check_result(bot, eid, left_now):
+    session = get_session()
+    try:
+        e = session.query(GiveawayEntry).filter(GiveawayEntry.id == eid).with_for_update().first()
+        if not e or e.status != 'active':
+            return
+        e.last_checked_at = now_utc()
+        if not left_now:
+            session.commit()
+            return
+        e.status = 'left'
+        e.left_at = now_utc()
+        session.commit()
+        g = session.get(Giveaway, e.giveaway_id)
+        title, gid, uid, inviter = g.title, g.id, e.user_id, e.inviter_id
+    finally:
+        session.close()
+    await gw_notify_inviter(bot, gid, title, inviter, uid, 'left')
+    await notify_user_private(
+        bot, uid,
+        f"⚠️ از کانال‌های قرعه‌کشی «{title}» خارج شدی؛ تیکتت (و تیکتی که برای دعوت‌کننده‌ات بود) حذف شد.\n"
+        "برای برگشتن، دوباره عضو شو و «بروزرسانی» رو بزن.")
+
+
+async def gw_draw_job(context):
+    try:
+        session = get_session()
+        try:
+            due = [g.id for g in session.query(Giveaway).filter(Giveaway.status == 'active').all() if gw_seconds_left(g) <= 0]
+        finally:
+            session.close()
+        for gid in due:
+            await gw_finish(context.bot, gid)
+    except Exception:
+        logger.exception('gw_draw_job failed')
+
+
+def gw_weighted_pick(pool, rnd=None):
+    """pool: [(uid, tickets)] → یک uid به احتمال متناسب با تیکت‌ها."""
+    rnd = rnd or random.SystemRandom()
+    total = sum(max(0, t) for _u, t in pool)
+    if total <= 0:
+        return None
+    x = rnd.uniform(0, total)
+    acc = 0.0
+    for uid, t in pool:
+        acc += max(0, t)
+        if x <= acc:
+            return uid
+    return pool[-1][0]
+
+
+async def gw_finish(bot, gid):
+    """قرعه‌کشی رو انجام می‌ده (فقط یک بار). هر برنده‌ی احتمالی قبل از اعلام دوباره از نظر عضویت چک می‌شه."""
+    session = get_session()
+    try:
+        g = session.query(Giveaway).filter(Giveaway.id == gid).with_for_update().first()
+        if not g or g.status != 'active':
+            return None
+        g.status = 'drawing'
+        session.commit()
+        channels = gw_channels_of(g)
+        title, prize, n_win, creator = g.title, g.prize, int(g.winners_count), g.created_by
+        rank = gw_ranking(session, gid)
+    finally:
+        session.close()
+
+    pool = [(r['uid'], r['tickets']) for r in rank]
+    winners = []
+    removed = []
+    while pool and len(winners) < n_win:
+        uid = gw_weighted_pick(pool)
+        if uid is None:
+            break
+        missing, _unk = await gw_missing_channels(bot, channels, uid)
+        if missing:          # وسط راه لفت داده؛ حذفش می‌کنیم و دوباره می‌کشیم
+            removed.append(uid)
+            pool = [(u, t) for u, t in pool if u != uid]
+            continue
+        tickets = next(t for u, t in pool if u == uid)
+        winners.append({'uid': uid, 'tickets': tickets})
+        pool = [(u, t) for u, t in pool if u != uid]
+
+    session = get_session()
+    try:
+        for uid in removed:
+            e = session.query(GiveawayEntry).filter(GiveawayEntry.giveaway_id == gid, GiveawayEntry.user_id == uid).first()
+            if e and e.status == 'active':
+                e.status = 'left'
+                e.left_at = now_utc()
+        for w in winners:
+            w['label'] = gw_user_label(session, w['uid'], admin=False)
+            w['admin_label'] = gw_user_label(session, w['uid'], admin=True)
+        g = session.get(Giveaway, gid)
+        g.status = 'finished'
+        g.finished_at = now_utc()
+        g.winners = json.dumps([{'uid': w['uid'], 'tickets': w['tickets'], 'label': w['label']} for w in winners], ensure_ascii=False)
+        session.commit()
+        participants = [e.user_id for e in session.query(GiveawayEntry).filter(
+            GiveawayEntry.giveaway_id == gid, GiveawayEntry.status == 'active').all()]
+    finally:
+        session.close()
+
+    # اطلاع‌رسانی: برنده‌ها، پشتیبانی، و بقیه‌ی شرکت‌کننده‌ها
+    names = '\n'.join(f"{i}. {w['label']}" for i, w in enumerate(winners, 1)) or 'هیچ شرکت‌کننده‌ی واجد شرایطی نبود.'
+    for w in winners:
+        await notify_user_private(
+            bot, w['uid'],
+            f"🎉🏆 تبریک! تو برنده‌ی قرعه‌کشی «{title}» شدی!\n\n🎁 جایزه: {prize}\n\nپشتیبانی برای تحویل جایزه باهات تماس می‌گیره.")
+    admin_report = (f"🎰 نتیجه‌ی قرعه‌کشی «{title}» (#{gid})\n🎁 جایزه: {prize}\n\n🥇 برنده‌ها:\n" +
+                    ('\n'.join(f"{i}. {w['admin_label']} — 🎟 {w['tickets']}" for i, w in enumerate(winners, 1)) or 'هیچ شرکت‌کننده‌ی واجد شرایطی نبود.'))
+    for aid in sorted(set(ADMIN_IDS) | {creator}):
+        await notify_user_private(bot, aid, admin_report)
+    winner_ids = {w['uid'] for w in winners}
+    others = [u for u in participants if u not in winner_ids]
+    if others:
+        text = f"🏁 قرعه‌کشی «{title}» تموم شد!\n\n🎁 جایزه: {prize}\n\n🥇 برنده‌ها:\n{names}\n\nمرسی که شرکت کردی 🦊"
+        task = asyncio.create_task(broadcast_to_users(bot, others, text, delay=0.05))
+        _GW_TASKS.add(task)
+        task.add_done_callback(_GW_TASKS.discard)
+    return winners
+
+
 def main():
     if not BOT_TOKEN: raise RuntimeError('BOT_TOKEN is missing. Add BOT_TOKEN in Railway Variables.')
     init_db()
@@ -13178,8 +14294,11 @@ def main():
     app.add_handler(CallbackQueryHandler(support_button,pattern=r"^support:(?:open|cancel)(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|backup|back)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|gwcreate|gwmanage|backup|back)$"))
     app.add_handler(CallbackQueryHandler(admin_jailset_callback,pattern=r"^admin:jailset:(?:add|free)$"))
+    app.add_handler(CallbackQueryHandler(gw_create_callback,pattern=r"^gwc:(?:home|cancel|create|chdef|opt:[a-z]+|set:[a-z]+:[A-Za-z0-9]+)$"))
+    app.add_handler(CallbackQueryHandler(gw_admin_callback,pattern=r"^gwa:(?:list|(?:view|top|toggletop|draw|drawyes|cancel|cancelyes):\d+(?::\d+)?|user:\d+:\d+:\d+)$"))
+    app.add_handler(CallbackQueryHandler(gw_user_callback,pattern=r"^gwu:(?:(?:check|me|top):\d+|ans:\d+:-?\d+)$"))
     app.add_handler(CallbackQueryHandler(accept_challenge,pattern=r"^accept:\d+$"))
     app.add_handler(CallbackQueryHandler(throw_dice,pattern=r"^throw:\d+:[12]$"))
     app.add_handler(CallbackQueryHandler(fox_button,pattern=r"^fox:(collect|upgrade|hunt|fridge|rename|renamemenu|renameyes|renameno|gendermenu|genderpick_male|genderpick_female|genderyes_male|genderyes_female|genderno_male|genderno_female|resetask|resetyes|resetno):\d+$"))
@@ -13271,6 +14390,8 @@ def main():
         app.job_queue.run_repeating(update_market_prices_job, interval=FACTORY_MARKET_UPDATE_SECONDS, first=15, name="factory-market")
         app.job_queue.run_repeating(marriage_expire_job, interval=60, first=20, name="marriage-expire")
         app.job_queue.run_repeating(expire_attacks_job, interval=30, first=25, name="attack-owl-expire")
+        app.job_queue.run_repeating(gw_draw_job, interval=20, first=30, name="giveaway-draw")
+        app.job_queue.run_repeating(gw_leave_check_job, interval=60, first=40, name="giveaway-leave-check")
         if ADMIN_IDS:
             app.job_queue.run_repeating(daily_backup_job, interval=BACKUP_INTERVAL_SECONDS, first=60, name="daily-backup")
     db_kind = "PostgreSQL (پایدار ✅)" if DATABASE_URL.startswith("postgres") else "SQLite محلی (⚠️ روی Railway بدون Volume با هر دیپلوی پاک می‌شود)"
