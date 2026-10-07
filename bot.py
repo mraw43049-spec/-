@@ -331,6 +331,11 @@ SMUGGLING_EXTRA_PER_FOX = 20 * 60
 SMUGGLING_FINE = 25000
 SMUGGLING_RISK_STEP_PERCENT = 5.0    # هر روباه ۵٪ ریسک اضافه می‌کند (به کاربر نشان داده نمی‌شود)
 SMUGGLING_MAX_RISK_PERCENT = 75.0    # ۱۵ روباه = ۷۵٪
+SMUGGLING_JAIL_SECONDS = 60 * 60
+SPAM_WINDOW_SECONDS = 10
+SPAM_MESSAGE_LIMIT = 6
+SPAM_JAIL_SECONDS = 15 * 60
+SPAM_FINE = 750
 
 
 def smuggling_risk_percent(count):
