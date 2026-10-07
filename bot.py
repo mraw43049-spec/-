@@ -44,6 +44,64 @@ from game_logic import (
     FACTORY_MARKET_UPDATE_SECONDS, factory_market_roll_price
 )
 
+# ---------- چیدمان دکمه‌ها: افقی ولی همیشه کامل (بدون نصفه‌شدن متن) ----------
+KB_ROW_WIDTH = 28        # عرض تقریبی یک ردیف (به تعداد حرف)؛ هر دکمه‌ی کنار هم سهم برابر از این دارد
+KB_PAIR_MAX_LEN = 10     # دکمه‌های تکی کوتاه‌تر از این، دوتا دوتا کنار هم می‌آیند (مثل کارخونه)
+_KB_SKIP_MERGE_WORDS = ("بازگشت", "برگشت", "انصراف", "لغو")
+
+
+def _kb_btn_len(btn):
+    t = getattr(btn, "text", "") or ""
+    for ch in ("\ufe0f", "\u200d", "\u200c"):
+        t = t.replace(ch, "")
+    return len(t)
+
+
+def _kb_mergeable(btn):
+    if not getattr(btn, "callback_data", None) or getattr(btn, "url", None) or getattr(btn, "web_app", None):
+        return False
+    if _kb_btn_len(btn) > KB_PAIR_MAX_LEN:
+        return False
+    return not any(w in (btn.text or "") for w in _KB_SKIP_MERGE_WORDS)
+
+
+def reflow_keyboard_rows(rows):
+    out = []
+    for row in rows:
+        row = list(row)
+        n = len(row)
+        # ردیفی که متن دکمه‌هایش توی نصف/یک‌سوم عرض جا نمی‌شود: هر دکمه تمام‌عرض می‌شود تا کامل دیده شود
+        if n > 1 and max(_kb_btn_len(b) for b in row) > KB_ROW_WIDTH // n:
+            out.extend([b] for b in row)
+        else:
+            out.append(row)
+    res, i = [], 0
+    while i < len(out):
+        r = out[i]
+        if (len(r) == 1 and _kb_mergeable(r[0]) and i + 1 < len(out)
+                and len(out[i + 1]) == 1 and _kb_mergeable(out[i + 1][0])):
+            res.append([r[0], out[i + 1][0]])
+            i += 2
+        else:
+            res.append(r)
+            i += 1
+    return res
+
+
+_orig_ikm_init = InlineKeyboardMarkup.__init__
+
+
+def _patched_ikm_init(self, inline_keyboard, *args, **kwargs):
+    try:
+        inline_keyboard = reflow_keyboard_rows(inline_keyboard)
+    except Exception:
+        pass
+    _orig_ikm_init(self, inline_keyboard, *args, **kwargs)
+
+
+InlineKeyboardMarkup.__init__ = _patched_ikm_init
+
+
 # ---------- بازار و نوسانت: نوسان واقعی قیمت هر ۲۵ دقیقه ----------
 # (جایگزین نسخه‌ی game_logic؛ قیمت هر محصول مستقل تعیین می‌شود و گاهی تا کمترین قیمت هم می‌افتد)
 FACTORY_MARKET_UPDATE_SECONDS = 25 * 60
@@ -7794,6 +7852,58 @@ async def jail_callback_gate(update, context):
         session.close()
 
 
+async def fox_sick_gate_callback(update, context):
+    """روباه مریض = هیچ دکمه‌ای (بانک، مارکت، لیدربرد، کارخونه و ...) کار نمی‌کند؛ فقط درمان و پرداخت جریمه/زندان."""
+    q = update.callback_query
+    if not q or not q.from_user or q.from_user.id in ADMIN_IDS:
+        return
+    data = q.data or ""
+    if data.startswith(("foxsick:", "fine:", "jail:")) or data == "check_membership":
+        return
+    session = get_session()
+    try:
+        u = session.get(User, q.from_user.id)
+        if not u:
+            return
+        if sync_fox_sickness(u):
+            session.commit()
+        if not u.fox_sick_since:
+            return
+        await q.answer("🤒 روباهت مریضه؛ تا خوب نشه هیچ بخشی کار نمی‌کنه. اول درمانش کن.", show_alert=True)
+        raise ApplicationHandlerStop
+    finally:
+        session.close()
+
+
+async def fox_sick_gate_message(update, context):
+    """روباه مریض = هیچ دستور/بخشی از ربات (بانک، مارکت، لیدربرد، کارخونه و ...) کار نمی‌کند؛ فقط پنل درمان نشان داده می‌شود."""
+    msg = update.message
+    if not msg or not msg.text or not update.effective_user or update.effective_user.id in ADMIN_IDS:
+        return
+    text = msg.text.strip()
+    if text.split("@")[0].split(" ")[0] == "/start":
+        return
+    if not _looks_like_bot_command(text, context, include_flows=True):
+        return
+    session = get_session()
+    try:
+        u = session.get(User, update.effective_user.id)
+        if not u:
+            return
+        if sync_fox_sickness(u):
+            session.commit()
+        if not u.fox_sick_since:
+            return
+        for _k in _JAIL_ACTIVE_FLOW_FLAGS:
+            context.user_data.pop(_k, None)
+        await msg.reply_text(
+            fox_sickness_message(u), reply_markup=fox_sickness_keyboard(update.effective_user.id), **reply_kwargs(msg)
+        )
+        raise ApplicationHandlerStop
+    finally:
+        session.close()
+
+
 # ---------- حمله روبی ----------
 
 ATTACK_KEYWORDS = {"حمله", "اتک", "attack"}
@@ -14946,6 +15056,7 @@ def main():
     app.add_handler(CommandHandler("leaderboard",leaderboard_command))
     app.add_handler(CallbackQueryHandler(jail_callback_gate), group=-20)
     app.add_handler(CallbackQueryHandler(fine_callback_gate), group=-19)
+    app.add_handler(CallbackQueryHandler(fox_sick_gate_callback), group=-18)
     app.add_handler(CallbackQueryHandler(fine_pay_callback, pattern=r"^fine:pay$"))
     app.add_handler(CallbackQueryHandler(fine_bank_callback, pattern=r"^fine:(?:bank|back)$"))
     app.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE & filters.User(user_id=list(ADMIN_IDS)), admin_broadcast_media), group=-5)
@@ -15025,6 +15136,7 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:روباه|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?)(?:@\w+)?$") | filters.Regex(r"^/انتقال(?:@\w+)?(?:\s+روب\s+پوینت)?\s+[0-9,]+$"), persian_slash_router), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_message_router),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
+    app.add_handler(MessageHandler(filters.TEXT,fox_sick_gate_message),group=-9)
     app.add_handler(CallbackQueryHandler(casino_disabled_gate,pattern=r"^(?:rg:cz_|csetup:[a-z]+:cz_|csetup:setcount:cz_|rcreate:cz_|rdicebet:|rjoin:)"),group=-8)
     app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
