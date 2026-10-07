@@ -44,6 +44,27 @@ from game_logic import (
     FACTORY_MARKET_UPDATE_SECONDS, factory_market_roll_price
 )
 
+# ---------- بازار و نوسانت: نوسان واقعی قیمت هر ۲۵ دقیقه ----------
+# (جایگزین نسخه‌ی game_logic؛ قیمت هر محصول مستقل تعیین می‌شود و گاهی تا کمترین قیمت هم می‌افتد)
+FACTORY_MARKET_UPDATE_SECONDS = 25 * 60
+FACTORY_MARKET_MIN_RATIO = 0.5   # کمترین قیمت بازار = ۵۰٪ سقف قیمت محصول؛ برای تغییر کمترین قیمت همین عدد را عوض کن
+
+
+def factory_market_roll_price(ceiling):
+    ceiling = max(1, int(ceiling or 1))
+    lo = max(1, int(ceiling * FACTORY_MARKET_MIN_RATIO))
+    if lo >= ceiling:
+        return ceiling
+    span = ceiling - lo
+    r = random.random()
+    if r < 0.08:       # ۸٪: دقیقاً کمترین قیمت
+        return lo
+    if r < 0.28:       # ۲۰٪: نزدیک کمترین قیمت
+        return lo + int(span * random.uniform(0.0, 0.12))
+    if r < 0.78:       # ۵۰٪: قیمت میانی
+        return lo + int(span * random.uniform(0.12, 0.70))
+    return lo + int(span * random.uniform(0.70, 1.0))   # ۲۲٪: قیمت بالا
+
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -295,6 +316,7 @@ SMUGGLING_PRICE_PER_FOX = 5000
 SMUGGLING_BASE_SECONDS = 60 * 60
 SMUGGLING_EXTRA_PER_FOX = 20 * 60
 SMUGGLING_FINE = 25000
+SMUGGLING_RISK_PERCENT = 50.0   # ریسک گیر افتادن همیشه ثابت و بالا: ۵۰٪
 SMUGGLING_JAIL_SECONDS = 60 * 60
 SPAM_WINDOW_SECONDS = 10
 SPAM_MESSAGE_LIMIT = 6
@@ -1069,11 +1091,13 @@ async def handle_jail_memory_text(update,context):
 
 
 async def complete_smuggling(session, record):
+    """نتیجه‌ی قاچاق فقط وقتی تعیین می‌شود که کاربر خودش «قاچاق روبی» را بنویسد (هیچ پیام یا تسویه‌ی خودکاری نیست).
+    موفق: وضعیت ready می‌شود و کاربر باید دکمه‌ی «دریافت دستمزد» را بزند. ناموفق: همان لحظه زندان."""
     if record.status!='pending' or now_utc() < aware(record.completes_at): return None
     user=session.get(User,record.user_id)
     if not user:
         record.status='success'; record.reward=0; session.commit(); return None
-    if random.random()*100 < float(record.risk_percent):
+    if random.random()*100 < SMUGGLING_RISK_PERCENT:
         record.status='caught'
         record.reward=vip_smuggle_refund(user, int(record.count)*SMUGGLING_PRICE_PER_FOX)   # اسکین خون‌آشامی: ۲۵٪ برمی‌گردد
         if record.reward > 0:
@@ -1084,45 +1108,41 @@ async def complete_smuggling(session, record):
         user.jail_arrested_at=now_utc()
         session.commit()
         return ('caught',user,record)
-    reward=int(record.count)*SMUGGLING_PRICE_PER_FOX
-    record.status='success'; record.reward=reward
-    user.fox_points=int(user.fox_points or 0)+reward
+    record.status='ready'; record.reward=int(record.count)*SMUGGLING_PRICE_PER_FOX
     session.commit()
     return ('success',user,record)
 
 
-async def settle_all_smuggling(context):
-    session=get_session()
-    try:
-        rows=session.query(RubySmuggling).filter(RubySmuggling.status=='pending',RubySmuggling.completes_at<=now_utc()).all()
-        for row in rows:
-            result=await complete_smuggling(session,row)
-            if result:
-                status,user,record=result
-                try:
-                    if status=='success':
-                        await context.bot.send_message(user.telegram_id,f"🦊 قاچاق روباهیو با موفقیت انجام شد!\n\n🥩 {record.count} روباه به کباب تبدیل شدند.\n💰 پاداش: +{record.reward:,} روب‌پوینت 🪙")
-                    else:
-                        await context.bot.send_message(user.telegram_id,"🚨 قاچاق روباهیو لو رفت!\n\n⛓️ توسط گرگ‌های پلیس دستگیر شدی و به زندان روبی افتادی. برای دیدن سلولت بنویس «زندان روبی»." + (f"\n\n🧛🏻‍♀️ اسکین خون‌آشامی: {record.reward:,} روب‌پوینت (۲۵٪ مبلغ قاچاق) به حسابت برگشت." if record.reward else ""))
-                except Exception: pass
-    finally: session.close()
+def smuggling_success_text(rec):
+    return (f"🦊 قاچاق روباهیو با موفقیت انجام شد! 🥷\n\n🥩 {rec.count} روباه قاچاق شد.\n"
+            f"💰 دستمزد: {int(rec.reward):,} روب‌پوینت 🪙\n\n👇 برای گرفتن دستمزد دکمه‌ی زیر رو بزن")
+
+
+def smuggling_success_keyboard(user_id, rec_id):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("💰 دریافت دستمزد", callback_data=f"smuggle:claim:{user_id}:{rec_id}")]])
+
+
+def smuggling_caught_text(rec):
+    refund=int(rec.reward or 0)
+    return ("روباه زرنگ و باهوش فکر کردی با قاچاق هم نوعات موفق میشی؟ تو گیر افتادی🚔⛓️\n\n"
+            "برای دیدن سلولت بنویس «زندان روبی».")+(f"\n\n🧛🏻‍♀️ اسکین خون‌آشامی: {refund:,} روب‌پوینت (۲۵٪ مبلغ قاچاق) به حسابت برگشت." if refund else "")
 
 
 def smuggling_status_text(user,record):
     left=max(0,int((aware(record.completes_at)-now_utc()).total_seconds()))
     return (f"🦊 قاچاق روباهیو 🥷\\n\\n✨ تعداد روباه های قاچاقی : {record.count} / {SMUGGLING_MAX}\\n"
             f"🩹 تعداد کل روباه های زخمی : {int(user.injured_fox_stock or 0)}\\n\\n"
-            f"⏳ زمان باقی‌مانده : {jail_duration_text(left)}\\n\\n🚨 ریسک گیر افتادن : {record.risk_percent:.2f}%\\n"
+            f"⏳ زمان باقی‌مانده : {jail_duration_text(left)}\\n\\n🚨 ریسک گیر افتادن : {SMUGGLING_RISK_PERCENT:.0f}%\\n"
             "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد").replace("\\n", "\n")
 
 
 def smuggling_select_text(user,count):
-    risk=count*5
+    risk=SMUGGLING_RISK_PERCENT
     duration=SMUGGLING_BASE_SECONDS+(count-SMUGGLING_MIN)*SMUGGLING_EXTRA_PER_FOX
     return (f"🦊 قاچاق روباهیو 🥷\\n\\n✨ تعداد روباه های قاچاقی : {count} / {SMUGGLING_MAX}\\n"
             f"🩹 تعداد کل روباه های زخمی : {int(user.injured_fox_stock or 0)}\\n\\n"
             f"⏳ زمان مورد نیاز قاچاق : {jail_duration_text(duration)}\\n\\n"
-            f"🚨 ریسک گیر افتادن : {risk:.2f}%\\n"
+            f"🚨 ریسک گیر افتادن : {risk:.0f}%\\n"
             "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد\\n\\n"
             "➕ جهت افزودن تعداد روباه های قاچاقی\\n➖ جهت کاهش تعداد روباه های قاچاقی\\n➰ جهت افزودن تمامی روباه های قاچاقی").replace("\\n", "\n")
 
@@ -1141,17 +1161,16 @@ async def smuggling_command(update,context):
         user=get_or_create_user(session,update.effective_user)
         if user.level<SMUGGLING_UNLOCK_LEVEL:
             await update.message.reply_text(f"🔒 قاچاق روبی از سطح {SMUGGLING_UNLOCK_LEVEL} باز می‌شود.\\n⭐ سطح فعلی تو: {user.level}".replace("\\n","\n"),**reply_kwargs(update.message)); return
-        pending=session.query(RubySmuggling).filter(RubySmuggling.user_id==user.telegram_id,RubySmuggling.status=='pending').order_by(RubySmuggling.id.desc()).first()
+        pending=session.query(RubySmuggling).filter(RubySmuggling.user_id==user.telegram_id,RubySmuggling.status.in_(('pending','ready'))).order_by(RubySmuggling.id.desc()).first()
         if pending:
-            result=await complete_smuggling(session,pending)
-            if result:
-                status,_,rec=result
-                if status=='success':
-                    await update.message.reply_text(f"🦊 قاچاق روباهیو تمام شد!\\n\\n🥩 {rec.count} روباه قاچاق شد.\\n💰 پاداش: +{rec.reward:,} روب‌پوینت 🪙".replace("\\n","\n"),**reply_kwargs(update.message))
-                else:
-                    await update.message.reply_text(("🚨 گیر افتادی!\\n\\n⛓️ به زندان روبی افتادی. برای دیدن سلولت بنویس «زندان روبی»." + (f"\\n\\n🧛🏻‍♀️ اسکین خون‌آشامی: {rec.reward:,} روب‌پوینت (۲۵٪ مبلغ قاچاق) به حسابت برگشت." if rec.reward else "")).replace("\\n","\n"),**reply_kwargs(update.message))
-                return
-            await update.message.reply_text(smuggling_status_text(user,pending),**reply_kwargs(update.message)); return
+            if pending.status=='pending':
+                result=await complete_smuggling(session,pending)
+                if result is None:
+                    await update.message.reply_text(smuggling_status_text(user,pending),**reply_kwargs(update.message)); return
+                if result[0]=='caught':
+                    await update.message.reply_text(smuggling_caught_text(result[2]),**reply_kwargs(update.message)); return
+            # موفق (و هنوز دستمزد گرفته نشده)
+            await update.message.reply_text(smuggling_success_text(pending),reply_markup=smuggling_success_keyboard(user.telegram_id,pending.id),**reply_kwargs(update.message)); return
         stock=int(user.injured_fox_stock or 0)
         if stock<SMUGGLING_MIN:
             await update.message.reply_text(f"🩹 فقط {stock} روباه زخمی آماده برای قاچاق داری.\\n❌ حداقل {SMUGGLING_MIN} روباه لازم است.".replace("\\n","\n"),**reply_kwargs(update.message)); return
@@ -1172,8 +1191,19 @@ async def smuggling_button(update,context):
         user=get_or_create_user(session,q.from_user)
         if user.level<SMUGGLING_UNLOCK_LEVEL:
             await q.answer("🔒 این بخش از سطح ۸ باز می‌شود.",show_alert=True);return
-        if session.query(RubySmuggling).filter(RubySmuggling.user_id==owner_id,RubySmuggling.status=='pending').first():
-            await q.answer("⏳ یک قاچاق در حال انجام داری.",show_alert=True);return
+        if action=='claim':
+            rec=session.query(RubySmuggling).filter(RubySmuggling.id==count,RubySmuggling.user_id==owner_id).with_for_update().first()
+            if not rec or rec.status!='ready':
+                await q.answer("این دستمزد قبلاً دریافت شده یا در دسترس نیست.",show_alert=True);return
+            reward=int(rec.reward or 0)
+            user.fox_points=int(user.fox_points or 0)+reward
+            rec.status='success'
+            session.commit()
+            await q.answer("💰 دستمزد دریافت شد!")
+            await q.message.edit_text(f"✅ دستمزد قاچاق دریافت شد!\n\n💰 +{reward:,} روب‌پوینت 🪙\n👛 موجودی فعلی: {int(user.fox_points or 0):,} 🦊")
+            return
+        if session.query(RubySmuggling).filter(RubySmuggling.user_id==owner_id,RubySmuggling.status.in_(('pending','ready'))).first():
+            await q.answer("⏳ یک قاچاق در جریان داری؛ برای دیدن وضعیتش بنویس «قاچاق روبی».",show_alert=True);return
         stock=int(user.injured_fox_stock or 0)
         if action in ('plus','minus','all'):
             if action=='plus': count=min(SMUGGLING_MAX,count+1)
@@ -1187,7 +1217,7 @@ async def smuggling_button(update,context):
             duration=SMUGGLING_BASE_SECONDS+(count-SMUGGLING_MIN)*SMUGGLING_EXTRA_PER_FOX
             started=now_utc(); complete=started+timedelta(seconds=duration)
             user.injured_fox_stock=stock-count
-            rec=RubySmuggling(user_id=owner_id,count=count,risk_percent=count*5,duration_seconds=duration,started_at=started,completes_at=complete,status='pending',created_at=started)
+            rec=RubySmuggling(user_id=owner_id,count=count,risk_percent=SMUGGLING_RISK_PERCENT,duration_seconds=duration,started_at=started,completes_at=complete,status='pending',created_at=started)
             session.add(rec);session.commit()
             await q.answer("🥷 قاچاق شروع شد!")
             await q.message.edit_text(smuggling_status_text(user,rec))
@@ -1210,7 +1240,7 @@ GUIDE_TOPICS = [
     ("👤 روبام / روباش", "پروفایل روبی خودت یا کاربری که روی پیامش ریپلای کرده‌ای."),
     ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار، روب روب و بیشترین پاسخ درست درس."),
     ("🎡 گردونه / چرخ شانس", "روزی یک‌بار؛ جایزه به‌صورت تصادفی انتخاب می‌شود."),
-    ("🥷 قاچاق روباهیو", "از لول ۸ فعال است؛ ۳ تا ۱۵ روباه زخمی را قاچاق کن. هر روباه ۵٬۰۰۰ روب‌پوینت ارزش دارد؛ ریسک و زمان با تعداد روباه‌ها بیشتر می‌شود."),
+    ("🥷 قاچاق روباهیو", "از لول ۸ فعال است؛ ۳ تا ۱۵ روباه زخمی را قاچاق کن. هر روباه ۵٬۰۰۰ روب‌پوینت ارزش دارد؛ ریسک گیر افتادن همیشه ۵۰٪ است و زمان با تعداد روباه‌ها بیشتر می‌شود. بعد از پایان زمان باید دوباره بنویسی «قاچاق روبی» تا نتیجه رو ببینی و دستمزدت رو بگیری."),
     ("⛓️ زندان روبی", "اگر در قاچاق گیر بیفتی یا اسپم شدید کنی، موقتاً زندانی می‌شوی. در زندان فقط پنل زندان، خاطره و پرداخت جریمه فعال است."),
     ("➕ افزودن ربات به گروه", f"فقط گروه‌های بالای {MIN_GROUP_MEMBERS} عضو قابل قبولن؛ در غیر این صورت روباهیو خودش از گروه خارج می‌شه."),
 ]
@@ -4376,7 +4406,13 @@ async def handle_bank_text(update, context):
         if action=='deposit':
             amount=parse_amount(update.message.text)
             if amount<=0 or user.fox_points<amount: await update.message.reply_text('❌ روب‌پوینت کافی نیست.',**reply_kwargs(update.message)); return True
-            user.fox_points-=amount; account.balance+=amount; session.add(BankTransaction(account_number=account.account_number,direction='deposit',amount=amount,description='واریز به بانک')); session.commit(); msg='➕ واریز انجام شد.'
+            # مرحله‌ی تایید: تا «بله» نزنه چیزی واریز نمی‌شود
+            context.user_data['pending_bank_deposit']=amount
+            kb=InlineKeyboardMarkup([[
+                InlineKeyboardButton('✅ بله',callback_data=f'bankdep:yes:{user.telegram_id}'),
+                InlineKeyboardButton('❌ خیر',callback_data=f'bankdep:no:{user.telegram_id}')
+            ]])
+            await update.message.reply_text(f'🦊 واریز به بانک 🏦\n\n❓ آیا از واریز {amount:,} روب‌پوینت به حساب بانکی خود مطمئن هستید؟\n\n💳 حساب: {account.account_number}\n💰 موجودی کیف پول: {int(user.fox_points or 0):,} روب‌پوینت',reply_markup=kb,**reply_kwargs(update.message)); return True
         else:
             parts=update.message.text.split()
             if len(parts)!=2: raise ValueError
@@ -4906,6 +4942,8 @@ async def update_market_prices_job(context):
             ceiling = int(info.get("sell") or 1)
             new_price = factory_market_roll_price(ceiling)
             row = session.get(MarketPrice, item_key)
+            if row and row.updated_at and (now_utc() - aware(row.updated_at)).total_seconds() < FACTORY_MARKET_UPDATE_SECONDS - 300:
+                continue   # بعد از ری‌استارت بات، قیمتی که تازه عوض شده دوباره عوض نمی‌شود
             if not row:
                 row = MarketPrice(
                     item_key=item_key, price=new_price, high_price=new_price, low_price=new_price, updated_at=now_utc()
@@ -5095,7 +5133,7 @@ async def factory_button(update, context):
             await q.message.edit_text(factory_item_text(item_key, user), reply_markup=factory_item_keyboard(tier_key, item_key, owner_id))
             return
 
-        if action == "pct":
+        if action in ("pct", "mk"):
             tier_key, item_key, percent_s = parts[2], parts[3], parts[4]
             tier = FACTORY_TIERS_BY_KEY.get(tier_key)
             produced = factory_produced_total_of(user)
@@ -5126,6 +5164,21 @@ async def factory_button(update, context):
                 return
             if (user.fox_points or 0) < plan["cost"]:
                 await q.answer(f"روب‌پوینت کافی نیست. {plan['cost']:,} روب‌پوینت لازم داری.", show_alert=True)
+                return
+            if action == "pct":
+                # مرحله‌ی تایید: هنوز چیزی ساخته یا کم نمی‌شود
+                _info = FACTORY_ITEM_INDEX[item_key]
+                await q.answer()
+                await q.message.edit_text(
+                    f"❓ آیا از ساخت {item_key} {_info['name']} ({int(percent_s)}٪) به قیمت {plan['cost']:,} روب‌پوینت مطمئن هستید؟\n\n"
+                    f"📦 تعداد: {plan['quantity']:,} عدد\n"
+                    f"⏳ زمان تولید: {format_duration(vip_factory_seconds(user, plan['seconds']))}\n"
+                    f"💰 موجودی شما: {int(user.fox_points or 0):,} روب‌پوینت",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("✅ بله", callback_data=f"factory:mk:{tier_key}:{item_key}:{percent_s}:{owner_id}"),
+                        InlineKeyboardButton("❌ خیر", callback_data=f"factory:item:{tier_key}:{item_key}:{owner_id}"),
+                    ]])
+                )
                 return
             user.fox_points -= plan["cost"]
             order = FactoryOrder(
@@ -6287,6 +6340,40 @@ async def bank_change_confirm(update, context):
         await q.edit_message_text(f'✅ شماره کارت روبی با موفقیت تغییر کرد.\n\n💳 شماره کارت جدید (برای کپی لمس کن):\n`{newnum}`\n💸 هزینه: {BANK_CHANGE_COST:,} روب‌پوینت',parse_mode='Markdown')
     except Exception: pass
 
+async def bank_deposit_confirm(update, context):
+    q=update.callback_query
+    try: _,action,uid_s=q.data.split(":"); uid=int(uid_s)
+    except Exception: return
+    if q.from_user.id!=uid:
+        await q.answer("⛔ این تأیید برای کاربر دیگری است.",show_alert=True); return
+    amount=context.user_data.get("pending_bank_deposit")
+    if not amount:
+        await q.answer("این واریز دیگر فعال نیست.",show_alert=True); return
+    if action=="no":
+        context.user_data.pop("pending_bank_deposit",None)
+        await q.answer("لغو شد."); await q.message.edit_text("❌ واریز به بانک لغو شد."); return
+    session=get_session()
+    try:
+        user=session.query(User).filter(User.telegram_id==uid).with_for_update().first()
+        account=session.query(BankAccount).filter(BankAccount.user_id==uid).with_for_update().first()
+        if not user or not account:
+            context.user_data.pop("pending_bank_deposit",None)
+            await q.answer("🏦 حساب بانکی پیدا نشد.",show_alert=True); return
+        amount=int(amount)
+        if amount<=0 or int(user.fox_points or 0)<amount:
+            context.user_data.pop("pending_bank_deposit",None)
+            await q.answer("❌ روب‌پوینت کافی نیست.",show_alert=True); return
+        apply_bank_interest(account,session)
+        user.fox_points=int(user.fox_points or 0)-amount
+        account.balance=int(account.balance or 0)+amount
+        session.add(BankTransaction(account_number=account.account_number,direction='deposit',amount=amount,description='واریز به بانک'))
+        session.commit()
+        context.user_data.pop("pending_bank_deposit",None)
+        _clean,_ents=bank_send_kwargs(user,account,'\n\n➕ واریز انجام شد.')
+        await q.answer("واریز انجام شد.")
+        await q.message.edit_text(_clean,reply_markup=bank_keyboard(account),entities=_ents)
+    finally: session.close()
+
 async def bank_transfer_confirm(update, context):
     q=update.callback_query
     try: _,action,uid_s=q.data.split(":"); uid=int(uid_s)
@@ -7345,7 +7432,7 @@ _JAIL_ACTIVE_FLOW_FLAGS = (
     'gift_code_flow', 'jail_memory_wait', 'marriage_abort_confirm', 'marriage_accept_confirm',
     'marriage_continue_confirm', 'marriage_divorce_confirm', 'marriage_proposal',
     'marriage_proposal_confirm', 'marriage_transfer_confirm', 'marriage_transfer_mid',
-    'marriage_transfer_panel_ref', 'pending_bank_transfer', 'pending_referral', 'ruby_setup',
+    'marriage_transfer_panel_ref', 'pending_bank_transfer', 'pending_bank_deposit', 'pending_referral', 'ruby_setup',
 )
 _JAIL_CLAIM_ALIASES = {'روب روب', 'هور هور', 'عو عو'}
 
@@ -14884,6 +14971,7 @@ def main():
     app.add_handler(CallbackQueryHandler(flag_callback, pattern=r"^flag:(set|clear):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_change_confirm,pattern=r"^bankchange:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_transfer_confirm,pattern=r"^bankconfirm:(yes|no):\d+$"))
+    app.add_handler(CallbackQueryHandler(bank_deposit_confirm,pattern=r"^bankdep:(yes|no):\d+$"))
     app.add_handler(CallbackQueryHandler(bank_withdraw_button,pattern=r"^bank:w:\d+:(?:25|50|75|100)$"))
     app.add_handler(CallbackQueryHandler(bank_button,pattern=r"^bank:(?:withdraw|deposit|transfer|transactions|change|copy|back):\d+$"))
     app.add_handler(CallbackQueryHandler(gift_code_button,pattern=r"^giftcode:(enter|cancel)$"))
@@ -14898,7 +14986,7 @@ def main():
     app.add_handler(CallbackQueryHandler(lucky_bag_button,pattern=r"^luckybag:(?:open|skip):\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|potion|rest):\d+$"))
     app.add_handler(CallbackQueryHandler(jail_button,pattern=r"^jail:(memory|pay|bank|bankcancel):\d+$"))
-    app.add_handler(CallbackQueryHandler(smuggling_button,pattern=r"^smuggle:(plus|minus|all|confirm):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(smuggling_button,pattern=r"^smuggle:(plus|minus|all|confirm|claim):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(friend_decision_button,pattern=r"^friend(?:accept|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(friend_request_button,pattern=r"^friend:(?:home|add|view|points|msg|remove):\d+(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(leaderboard_button,pattern=r"^lb:"))
@@ -14933,7 +15021,7 @@ def main():
     app.add_handler(ChatMemberHandler(mood_channel_member, ChatMemberHandler.MY_CHAT_MEMBER), group=-3)
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POSTS & (filters.AUDIO | filters.Document.ALL), mood_channel_post), group=6)
     if app.job_queue:
-        app.job_queue.run_repeating(settle_all_smuggling, interval=30, first=10, name="ruby-smuggling-settler")
+        # قاچاق دیگه خودکار تسویه نمی‌شه؛ کاربر باید خودش «قاچاق روبی» رو بنویسه تا نتیجه رو ببینه
         schedule_all_injured_fox_jobs(app)  # هر گپ جاب روباه زخمی مخصوص خودش را با فاصلهٔ متناسب با سطح شهرش می‌گیرد
         schedule_all_owl_jobs(app)  # تایمر جغد هر گپ از روی آخرین جغدش ادامه پیدا می‌کنه (دیپلوی ریستش نمی‌کنه)
         app.job_queue.run_repeating(update_market_prices_job, interval=FACTORY_MARKET_UPDATE_SECONDS, first=15, name="factory-market")
