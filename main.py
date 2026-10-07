@@ -436,7 +436,7 @@ def fox_state(session, user, botmod=None):
         "fox_points": int(user.fox_points or 0),
         "fox_storage": int(user.fox_storage or 0),
         "fox_belly": int(user.fox_belly or 0),
-        "fox_belly_capacity": min(20, max(1, int(user.fox_belly_capacity or 3))),
+        "fox_belly_capacity": botmod.fox_belly_cap(user),
         "skin_key": skin_key,
         "skin_title": SKIN_INFO.get(skin_key, ""),
         "skin_image": image,
@@ -648,7 +648,7 @@ def fox_upgrade(tg_user: dict = Depends(current_telegram_user)):
             raise HTTPException(status_code=400, detail=f"روب‌پوینت کافی نیست. {int(cost):,} لازم داری.")
         user.fox_points -= cost
         user.fox_level += 1
-        user.fox_belly_capacity = min(20, int(user.fox_belly_capacity or 3) + 1)
+        user.fox_belly_capacity = botmod.fox_belly_capacity_for(user.fox_level)
         user.fox_last_production_at = botmod.now_utc()
         session.commit()
         return {"message": f"🦊 روباه رفت لول {user.fox_level}! مقام: {botmod.fox_rank(user.fox_level)}"}

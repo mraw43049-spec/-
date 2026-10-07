@@ -308,6 +308,19 @@ FOX_SYRUP_INTERVAL_SECONDS = 60
 FOX_SYRUP_DOSES_NEEDED = 3
 FOX_REST_DURATION_SECONDS = 60 * 60
 
+# ---------- ظرفیت شکم روباه: شروع ۳، با هر ارتقای روباه ۱ تا بالا می‌ره، سقف ۱۵ ----------
+FOX_BELLY_MIN_CAPACITY = 3
+FOX_BELLY_MAX_CAPACITY = 15
+
+
+def fox_belly_capacity_for(fox_level):
+    return max(FOX_BELLY_MIN_CAPACITY, min(FOX_BELLY_MAX_CAPACITY, FOX_BELLY_MIN_CAPACITY + int(fox_level or 1) - 1))
+
+
+def fox_belly_cap(user):
+    return fox_belly_capacity_for(getattr(user, "fox_level", 1))
+
+
 # ---------- قاچاق روباهیو ----------
 SMUGGLING_UNLOCK_LEVEL = 8
 SMUGGLING_MIN = 3
@@ -316,12 +329,15 @@ SMUGGLING_PRICE_PER_FOX = 5000
 SMUGGLING_BASE_SECONDS = 60 * 60
 SMUGGLING_EXTRA_PER_FOX = 20 * 60
 SMUGGLING_FINE = 25000
-SMUGGLING_RISK_PERCENT = 50.0   # ریسک گیر افتادن همیشه ثابت و بالا: ۵۰٪
-SMUGGLING_JAIL_SECONDS = 60 * 60
-SPAM_WINDOW_SECONDS = 10
-SPAM_MESSAGE_LIMIT = 6
-SPAM_JAIL_SECONDS = 15 * 60
-SPAM_FINE = 750
+SMUGGLING_RISK_STEP_PERCENT = 5.0    # هر روباه ۵٪ ریسک اضافه می‌کند (به کاربر نشان داده نمی‌شود)
+SMUGGLING_MAX_RISK_PERCENT = 75.0    # ۱۵ روباه = ۷۵٪
+
+
+def smuggling_risk_percent(count):
+    """۳ روباه = ۱۵٪ ... ۱۰ روباه = ۵۰٪ ... ۱۵ روباه = ۷۵٪. فقط داخلی است و به کاربر نشان داده نمی‌شود."""
+    count = max(1, int(count or 1))
+    return min(SMUGGLING_MAX_RISK_PERCENT, count * SMUGGLING_RISK_STEP_PERCENT)
+
 
 # ---------- کارخونه روبی ----------
 FACTORY_PERCENT_OPTIONS = [25, 50, 75, 100]
@@ -691,8 +707,11 @@ def get_or_create_user(session, tg_user):
             user.fox_level = 1; changed = True
         if user.fox_belly is None:
             user.fox_belly = 3; changed = True
-        if user.fox_belly_capacity is None or user.fox_belly_capacity < 3:
-            user.fox_belly_capacity = max(3, int(user.fox_belly or 3)); changed = True
+        _belly_cap = fox_belly_capacity_for(user.fox_level)
+        if user.fox_belly_capacity != _belly_cap:
+            user.fox_belly_capacity = _belly_cap; changed = True   # ظرفیت همیشه از روی لول روباه محاسبه می‌شود (سقف ۱۵)
+        if int(user.fox_belly or 0) > _belly_cap:
+            user.fox_belly = _belly_cap; changed = True
         if user.fox_points is None:
             user.fox_points = 0; changed = True
         if user.fox_storage is None:
@@ -1097,7 +1116,7 @@ async def complete_smuggling(session, record):
     user=session.get(User,record.user_id)
     if not user:
         record.status='success'; record.reward=0; session.commit(); return None
-    if random.random()*100 < SMUGGLING_RISK_PERCENT:
+    if random.random()*100 < smuggling_risk_percent(record.count):
         record.status='caught'
         record.reward=vip_smuggle_refund(user, int(record.count)*SMUGGLING_PRICE_PER_FOX)   # اسکین خون‌آشامی: ۲۵٪ برمی‌گردد
         if record.reward > 0:
@@ -1132,17 +1151,15 @@ def smuggling_status_text(user,record):
     left=max(0,int((aware(record.completes_at)-now_utc()).total_seconds()))
     return (f"🦊 قاچاق روباهیو 🥷\\n\\n✨ تعداد روباه های قاچاقی : {record.count} / {SMUGGLING_MAX}\\n"
             f"🩹 تعداد کل روباه های زخمی : {int(user.injured_fox_stock or 0)}\\n\\n"
-            f"⏳ زمان باقی‌مانده : {jail_duration_text(left)}\\n\\n🚨 ریسک گیر افتادن : {SMUGGLING_RISK_PERCENT:.0f}%\\n"
+            f"⏳ زمان باقی‌مانده : {jail_duration_text(left)}\\n\\n"
             "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد").replace("\\n", "\n")
 
 
 def smuggling_select_text(user,count):
-    risk=SMUGGLING_RISK_PERCENT
     duration=SMUGGLING_BASE_SECONDS+(count-SMUGGLING_MIN)*SMUGGLING_EXTRA_PER_FOX
     return (f"🦊 قاچاق روباهیو 🥷\\n\\n✨ تعداد روباه های قاچاقی : {count} / {SMUGGLING_MAX}\\n"
             f"🩹 تعداد کل روباه های زخمی : {int(user.injured_fox_stock or 0)}\\n\\n"
             f"⏳ زمان مورد نیاز قاچاق : {jail_duration_text(duration)}\\n\\n"
-            f"🚨 ریسک گیر افتادن : {risk:.0f}%\\n"
             "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد\\n\\n"
             "➕ جهت افزودن تعداد روباه های قاچاقی\\n➖ جهت کاهش تعداد روباه های قاچاقی\\n➰ جهت افزودن تمامی روباه های قاچاقی").replace("\\n", "\n")
 
@@ -1217,7 +1234,7 @@ async def smuggling_button(update,context):
             duration=SMUGGLING_BASE_SECONDS+(count-SMUGGLING_MIN)*SMUGGLING_EXTRA_PER_FOX
             started=now_utc(); complete=started+timedelta(seconds=duration)
             user.injured_fox_stock=stock-count
-            rec=RubySmuggling(user_id=owner_id,count=count,risk_percent=SMUGGLING_RISK_PERCENT,duration_seconds=duration,started_at=started,completes_at=complete,status='pending',created_at=started)
+            rec=RubySmuggling(user_id=owner_id,count=count,risk_percent=smuggling_risk_percent(count),duration_seconds=duration,started_at=started,completes_at=complete,status='pending',created_at=started)
             session.add(rec);session.commit()
             await q.answer("🥷 قاچاق شروع شد!")
             await q.message.edit_text(smuggling_status_text(user,rec))
@@ -1240,7 +1257,7 @@ GUIDE_TOPICS = [
     ("👤 روبام / روباش", "پروفایل روبی خودت یا کاربری که روی پیامش ریپلای کرده‌ای."),
     ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار، روب روب و بیشترین پاسخ درست درس."),
     ("🎡 گردونه / چرخ شانس", "روزی یک‌بار؛ جایزه به‌صورت تصادفی انتخاب می‌شود."),
-    ("🥷 قاچاق روباهیو", "از لول ۸ فعال است؛ ۳ تا ۱۵ روباه زخمی را قاچاق کن. هر روباه ۵٬۰۰۰ روب‌پوینت ارزش دارد؛ ریسک گیر افتادن همیشه ۵۰٪ است و زمان با تعداد روباه‌ها بیشتر می‌شود. بعد از پایان زمان باید دوباره بنویسی «قاچاق روبی» تا نتیجه رو ببینی و دستمزدت رو بگیری."),
+    ("🥷 قاچاق روباهیو", "از لول ۸ فعال است؛ ۳ تا ۱۵ روباه زخمی را قاچاق کن. هر روباه ۵٬۰۰۰ روب‌پوینت ارزش دارد؛ هر چی روباه بیشتری قاچاق کنی ریسک گیر افتادنت بیشتر می‌شه و زمان هم طولانی‌تر می‌شه. بعد از پایان زمان باید دوباره بنویسی «قاچاق روبی» تا نتیجه رو ببینی و دستمزدت رو بگیری."),
     ("⛓️ زندان روبی", "اگر در قاچاق گیر بیفتی یا اسپم شدید کنی، موقتاً زندانی می‌شوی. در زندان فقط پنل زندان، خاطره و پرداخت جریمه فعال است."),
     ("➕ افزودن ربات به گروه", f"فقط گروه‌های بالای {MIN_GROUP_MEMBERS} عضو قابل قبولن؛ در غیر این صورت روباهیو خودش از گروه خارج می‌شه."),
 ]
@@ -3443,7 +3460,7 @@ async def fox_show_panel(message, user, note=None):
 
 def fox_profile_text(user):
     lvl = max(1, min(FOX_MAX_LEVEL, int(user.fox_level or 1)))
-    belly_cap = min(20, max(1, int(user.fox_belly_capacity or 3)))
+    belly_cap = fox_belly_cap(user)
     storage_cap = fox_storage_capacity(lvl)
     storage = min(storage_cap, int(user.fox_storage or 0))
     produced_total = int(user.fox_total_earned or 0)
@@ -3687,8 +3704,8 @@ async def fox_button(update, context):
                 else:
                     user.fox_points -= cost
                     user.fox_level += 1
-                    # با هر ارتقا یک جای غذا به ظرفیت شکم اضافه می‌شود؛ سقف 20 است.
-                    user.fox_belly_capacity = min(20, int(user.fox_belly_capacity or 3) + 1)
+                    # با هر ارتقا یک جای غذا به ظرفیت شکم اضافه می‌شود؛ سقف 15 است.
+                    user.fox_belly_capacity = fox_belly_capacity_for(user.fox_level)
                     user.fox_last_production_at = now_utc()
                     session.commit()
                     await q.answer(f"🦊 روباه رفت لول {user.fox_level}!", show_alert=True)
@@ -3934,7 +3951,7 @@ async def hunt_button(update, context):
             return
         settle_fox_production(user)
         if action == "feed":
-            cap = int(user.fox_belly_capacity or 3)
+            cap = fox_belly_cap(user)
             if int(hunt.nutrition or 0) > cap:
                 # هر لول روباه ۱ جای غذا به شکمش اضافه می‌کنه؛ این شکار برای شکم فعلی روباه خیلی بزرگه.
                 cur_lvl = int(user.fox_level or 1)
@@ -4216,7 +4233,7 @@ async def fridge_button(update, context):
             settle_fox_production(user)
             fed_name = f"{hunt.emoji} {hunt.item_name}"
             old = user.fox_belly
-            cap = int(user.fox_belly_capacity or 3)
+            cap = fox_belly_cap(user)
             user.fox_belly = min(cap, user.fox_belly + hunt.nutrition)
             hunt.status = "fed"
             hunt.cooking_started_at = None
@@ -4342,11 +4359,11 @@ async def ruby_egg_button(update, context):
             return
         if action=="feed":
             settle_fox_production(user)
-            if user.fox_belly >= int(user.fox_belly_capacity or 3):
+            if user.fox_belly >= fox_belly_cap(user):
                 await q.answer("🦊 شکم روباه پر است.",show_alert=True); return
             nutrition=11 if egg.cooked else 5
             old=user.fox_belly
-            cap=int(user.fox_belly_capacity or 3)
+            cap=fox_belly_cap(user)
             user.fox_belly=min(cap,old+nutrition)
             session.delete(egg)
             session.commit()
