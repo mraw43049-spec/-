@@ -29,6 +29,7 @@ header{text-align:center;padding:6px 0 12px}h1{font-size:23px;margin:0;color:#ff
 #rfIcon{display:inline-block}
 .refresh-tab.spin #rfIcon{animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+ .ruby-gift{display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;vertical-align:-7px;margin:0 3px;filter:drop-shadow(0 2px 5px #ff3eaa66);flex:none}.ruby-gift img{width:100%;height:100%;display:block;object-fit:contain}.ruby-gift.sm{width:20px;height:20px;vertical-align:-5px}.ruby-gift.lg{width:32px;height:32px;vertical-align:-9px}.ruby-gift-label{display:inline-flex;align-items:center;gap:3px;direction:rtl;white-space:nowrap}.ruby-gift-label strong{color:#ffd27a}.gift-ruby-name{font-weight:900;color:#ffb7df}
 .avatar{width:40px;height:40px;border-radius:50%;object-fit:cover;background:#1e4a37;flex:none;display:flex;align-items:center;justify-content:center;font-weight:900;color:#ffb347;overflow:hidden}
 .avatar img{width:100%;height:100%;object-fit:cover;display:block}
 .podium{display:grid;grid-template-columns:1fr 1.25fr 1fr;gap:8px;align-items:end;direction:ltr;margin-bottom:12px}
@@ -463,7 +464,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   <div class="card">
     <div class="section-title">📊 وضعیت روباه</div>
     <div class="stats">
-      <div class="stat">💰 موجودی<b id="points">—</b></div>
+      <div class="stat"><span class="ruby-gift-label"><span class="ruby-gift"><img src="assets/ruby_gift.svg" alt="گیفت روبی"></span>گیفت روبی</span><b id="points">—</b></div>
       <div class="stat">🏆 رتبه<b id="rank">—</b></div>
       <div class="stat">💫 تولید در ثانیه<b id="rate">—</b></div>
       <div class="stat">🍖 شکم<b id="belly">—</b></div>
@@ -477,7 +478,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   <div class="card">
     <div class="section-title" id="lbTitle">🏆 لیدربرد روبی</div>
     <div class="filters">
-      <button class="filter active" data-cat="points">💰 روب‌پوینت</button>
+      <button class="filter active" data-cat="points"><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span> گیفت روبی</button>
       <button class="filter" data-cat="referral">👑 رفرال‌ها</button>
       <button class="filter" data-cat="rescued">🎃 روباه‌های زخمی</button>
       <button class="filter" data-cat="hunt">⚔️ شکار</button>
@@ -527,7 +528,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   </div>
   <div id="bombCard" class="card" style="display:none">
     <div class="section-title">💥 بمب</div>
-    <div class="bomb-top"><span>💰 موجودی: <b id="bBal">—</b></span><span id="bCd" class="muted"></span></div>
+    <div class="bomb-top"><span><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span> موجودی گیفت روبی: <b id="bBal">—</b></span><span id="bCd" class="muted"></span></div>
     <div id="bSetup">
       <div class="muted" id="bRule" style="line-height:1.9"></div>
       <div class="bomb-amt"><input id="bAmt" type="number" inputmode="numeric" placeholder="مبلغ ورودی" autocomplete="off"></div>
@@ -537,7 +538,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     <div id="bPlay" style="display:none">
       <div class="bomb-info">
         <div class="stat">🧩 خانه‌های امن<b id="bSafe">۰</b></div>
-        <div class="stat">💰 ورودی<b id="bEntry">۰</b></div>
+        <div class="stat"><span class="ruby-gift-label"><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span>ورودی گیفت روبی</span><b id="bEntry">۰</b></div>
         <div class="stat">💵 دریافتی با «کافیه»<b id="bCash">۰</b></div>
         <div class="stat">⏭ خانه‌ی امن بعدی<b id="bNext">—</b></div>
       </div>
@@ -728,7 +729,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       var c = document.createElement("div"); c.className = "card atk";
       var h = document.createElement("h3"); h.textContent = "⚔️ " + a.attacker + " بهت حمله کرد!";
       var p = document.createElement("div"); p.className = "muted";
-      p.textContent = "۲٪ دارایی‌ت (" + fa(a.amount) + " روب‌پوینت) در خطره. با یکی از جغدهات می‌تونی جلوشو بگیری.";
+      p.textContent = "۲٪ دارایی‌ت (" + fa(a.amount) + " گیفت روبی) در خطره. با یکی از جغدهات می‌تونی جلوشو بگیری.";
       var t = document.createElement("div"); t.style.marginTop = "6px";
       t.appendChild(document.createTextNode("⏳ زمان تصمیم‌گیری: "));
       var tt = document.createElement("span"); tt.className = "timer"; tt.dataset.t = a.id; tt.textContent = fmtLeft(leftOf(a));
@@ -834,7 +835,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 
     var up = $("upgradeInfo");
     if (d.upgrade_cost == null) up.textContent = d.max_level ? "🏆 روباه به آخرین سطح رسیده!" : "";
-    else up.textContent = "⭐ هزینه‌ی ارتقای بعدی: " + fa(d.upgrade_cost) + " روب‌پوینت";
+    else up.textContent = "⭐ هزینه‌ی ارتقای بعدی: " + fa(d.upgrade_cost) + " گیفت روبی";
 
     if (d.locked) banner("🔒 روباه از سطح " + fa(d.unlock_level) + " باز می‌شه.", false);
     else if (d.sick) banner("🤒 روباهت مریضه؛ اول توی بات درمانش کن.", false);
@@ -920,7 +921,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       d.className = "pod p" + (i+1) + (e.me ? " me" : "");
       var m = document.createElement("div"); m.className = "medal"; m.textContent = medals[i];
       var nm = document.createElement("div"); nm.className = "pname"; nm.textContent = e.name + (e.skin ? " " + e.skin.split(" ")[0] : "");
-      var v = document.createElement("div"); v.className = "pval"; v.textContent = fa(e.value) + " " + (data.emoji || "");
+      var v = document.createElement("div"); v.className = "pval"; if(cat === "points"){ v.innerHTML = giftValueHTML(e.value); } else { v.textContent = fa(e.value) + " " + (data.emoji || ""); }
       d.appendChild(m); d.appendChild(avatarEl(e.avatar, e.name, "lb")); d.appendChild(nm);
       if (e.title) { var tt = document.createElement("div"); tt.className = "ptitle"; tt.textContent = String(e.title).replace(/^[^\u0600-\u06FF]+/, ""); d.appendChild(tt); }
       d.appendChild(v);
@@ -932,7 +933,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       var li = document.createElement("li"); if (e.me) li.className = "me";
       var r = document.createElement("span"); r.className = "rank"; r.textContent = fa(e.rank);
       var n = document.createElement("span"); n.className = "name"; n.textContent = e.name + (e.skin ? " " + e.skin.split(" ")[0] : "");
-      var v = document.createElement("span"); v.className = "value"; v.textContent = fa(e.value) + " " + (data.emoji || "");
+      var v = document.createElement("span"); v.className = "value"; if(cat === "points"){ v.innerHTML = giftValueHTML(e.value); } else { v.textContent = fa(e.value) + " " + (data.emoji || ""); }
       li.appendChild(r); li.appendChild(avatarEl(e.avatar, e.name, "lb")); li.appendChild(n); li.appendChild(v); lf.appendChild(li);
     });
     list.appendChild(lf);
@@ -1083,7 +1084,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     var left = wheelLeftNow(), b = $("spinBtn");
     if (wheelBusy) return;
     if (left > 0) { b.disabled = true; $("wheelInfo").textContent = "⏱ گردونه‌ی بعدی: " + fmtHMS(left); }
-    else { b.disabled = false; $("wheelInfo").textContent = "💰 موجودی: " + fa(wheelData.balance) + " روب‌پوینت"; }
+    else { b.disabled = false; $("wheelInfo").textContent = "🎁 موجودی گیفت روبی: " + fa(wheelData.balance); }
   }
   function loadWheel(){
     return api("/api/wheel").then(function(d){
