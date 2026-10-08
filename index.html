@@ -231,6 +231,16 @@ button:disabled::after,.lb-close::after{display:none}
 .seg button.on{background:linear-gradient(180deg,#ffc46b,#ff9a3c);color:#2a1204;border-color:#ffd27a}
 .bomb-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
 .bomb-top b{color:#ffc46b}
+/* بمب واقعیِ CSS؛ بدون ایموجی، سبک و بدون فایل خارجی */
+.bomb-art{position:relative;width:38px;height:38px;display:block;margin:auto;border-radius:50%;background:radial-gradient(circle at 32% 28%,#5a5a5a 0 8%,#252525 24%,#070707 72%);box-shadow:inset -6px -7px 10px #0008,0 5px 10px #0008}
+.bomb-art:before{content:"";position:absolute;width:12px;height:8px;right:3px;top:-3px;border-radius:50%;background:#151515;transform:rotate(-25deg)}
+.bomb-art i{position:absolute;width:10px;height:3px;right:-7px;top:-8px;background:#9b6b32;transform:rotate(-42deg);border-radius:3px}
+.bomb-art b{position:absolute;width:7px;height:7px;right:-9px;top:-12px;border-radius:50%;background:#ffb000;box-shadow:0 0 8px #ff5a00,0 0 15px #ffcf33;animation:fuse .45s infinite alternate}
+.safe-mark{display:grid;place-items:center;width:34px;height:34px;border:2px solid #55d68a;border-radius:9px;color:#55d68a;font-size:25px;font-weight:900;line-height:1;background:#0c2b1d;box-shadow:0 0 12px #37d77a33}
+.cell-question{font-size:26px;font-weight:900;opacity:.7}
+@keyframes fuse{to{transform:scale(1.3);filter:brightness(1.5)}}
+.bcell.boom .bomb-art{animation:bombPop .45s ease-out both;box-shadow:0 0 22px #ff4b00,0 0 50px #ffb000}
+@keyframes bombPop{0%{transform:scale(.65);opacity:.4}65%{transform:scale(1.2)}100%{transform:scale(1)}}
 .bomb-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0 12px;direction:ltr}
 .bcell{aspect-ratio:1/1;border-radius:14px;border:1px solid #3b7a5a;background:linear-gradient(180deg,#1b4a37,#0f2c20);color:#eafff3;font-size:26px;font-weight:900;display:flex;align-items:center;justify-content:center;font-family:inherit;padding:0;transition:transform .1s}
 .bcell:active:not(:disabled){transform:scale(.93)}
@@ -526,10 +536,10 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     </div>
     <div id="bPlay" style="display:none">
       <div class="bomb-info">
-        <div class="stat">🧩 خانه‌ی سالم<b id="bSafe">۰</b></div>
+        <div class="stat">🧩 خانه‌های امن<b id="bSafe">۰</b></div>
         <div class="stat">💰 ورودی<b id="bEntry">۰</b></div>
         <div class="stat">💵 دریافتی با «کافیه»<b id="bCash">۰</b></div>
-        <div class="stat">⏭ خانه‌ی سالم بعدی<b id="bNext">—</b></div>
+        <div class="stat">⏭ خانه‌ی امن بعدی<b id="bNext">—</b></div>
       </div>
       <div id="bGrid" class="bomb-grid"></div>
       <button id="bCashBtn" class="action" style="width:100%">✅ کافیه</button>
@@ -779,7 +789,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     var cav = $("cAvatar");
     if (!src || cav.dataset.src === src) return;
     var im = new Image(); im.alt = ""; im.decoding = "async";
-    im.onload = function(){ cav.dataset.src = src; cav.textContent = ""; cav.appendChild(im); };
+    im.decoding = "async"; im.loading = "eager"; im.onload = function(){ cav.dataset.src = src; cav.textContent = ""; cav.appendChild(im); };
     im.src = src;
   }
   function render(d){
@@ -794,12 +804,13 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     var sc = $("skinChip");
     if (d.skin_title) { sc.style.display = ""; sc.textContent = "✨ اسکین " + d.skin_title; } else { sc.style.display = "none"; }
 
+    try { if (d.skin_image) localStorage.setItem("ruby_cached_skin", d.skin_image); else localStorage.removeItem("ruby_cached_skin"); } catch(e){}
     var box = $("foxImg"), skinSig = d.skin_image || "";
     if (box.dataset.sig !== skinSig || !box.dataset.ready) {
     box.dataset.sig = skinSig; box.dataset.ready = "1";
     box.innerHTML = ""; box.classList.remove("has-img"); box.onclick = null;
     if (d.skin_image) {
-      var im = new Image(); im.alt = "روباه";
+      var im = new Image(); im.alt = "روباه"; im.decoding = "async"; im.fetchPriority = "high";
       im.onerror = function(){ box.classList.remove("has-img"); box.onclick = null; box.textContent = "🦊"; };
       im.onload = function(){
         box.classList.add("has-img");
@@ -834,6 +845,22 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     var off = d.locked || d.sick;
     $("btnCollect").disabled = off; $("btnUpgrade").disabled = off || d.upgrade_cost == null;
     $("btnRename").disabled = off; $("btnGender").disabled = off;
+  }
+
+  // اسکین قبلی را بلافاصله از کش مرورگر نشان می‌دهیم؛ منتظر پاسخ API نمی‌مانیم.
+  function paintCachedSkinInstant(){
+    try {
+      var src = localStorage.getItem("ruby_cached_skin");
+      if (!src) return;
+      var box = $("foxImg");
+      var im = new Image();
+      im.decoding = "async"; im.fetchPriority = "high";
+      im.onload = function(){
+        box.innerHTML = ""; box.classList.add("has-img"); box.dataset.sig = src; box.dataset.ready = "1";
+        box.appendChild(im);
+      };
+      im.src = src;
+    } catch(e){}
   }
 
   function loadProfile(silent){
@@ -1151,12 +1178,12 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     var bombs = {}; (g.bombs || []).forEach(function(i){ bombs[i] = 1; });
     for (var i = 0; i < g.cells; i++) {
       var b = document.createElement("button"); b.className = "bcell"; b.dataset.i = i;
-      if (rev[i]) { b.classList.add("safe"); b.textContent = "✅"; b.disabled = true; }
+      if (rev[i]) { b.classList.add("safe"); b.innerHTML = "<span class=\"safe-mark\" aria-label=\"خانه امن\">✓</span>"; b.disabled = true; }
       else if (final) {
         b.disabled = true;
-        if (bombs[i]) { b.textContent = "💣"; b.classList.add(g.bomb_hit === i ? "boom" : "ghost"); }
+        if (bombs[i]) { b.innerHTML = "<span class=\"bomb-art\" aria-hidden=\"true\"><i></i><b></b></span>"; b.classList.add(g.bomb_hit === i ? "boom" : "ghost"); }
         else { b.textContent = "❔"; b.classList.add("ghost"); }
-      } else b.textContent = "❔";
+      } else b.innerHTML = "<span class=\"cell-question\">?</span>";
       grid.appendChild(b);
     }
   }
@@ -1404,6 +1431,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     }, 1200);
   }
 
+  paintCachedSkinInstant();
   loadProfile();
 })();
 </script>

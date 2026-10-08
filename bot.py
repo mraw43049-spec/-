@@ -5,6 +5,8 @@ import logging
 import os
 import random
 import re
+import secrets
+import hmac
 from datetime import datetime, timezone, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto, MessageEntity, User as TgUser, BotCommand, BotCommandScopeAllPrivateChats, MenuButtonCommands
@@ -276,12 +278,14 @@ def vip_active_skins(user):
         k = k.strip()
         if k in owned and k not in out:
             out.append(k)
-    return out
+    # فقط یک اسکین می‌تواند هم‌زمان فعال باشد؛ آخرین مورد معتبر، اسکین فعال است.
+    return out[-1:] if out else []
 
 
 def vip_set_skins(user, owned, active):
     owned = [k for k in owned if k not in VIP_FREE_SKINS]   # اسکین رایگان در دیتابیس ذخیره نمی‌شود؛ همیشه در دسترس است
     user.fox_skin = ','.join(owned)
+    active = list(dict.fromkeys(k for k in active if k in owned))[-1:] if active else []
     user.fox_skins_active = ','.join(active)
     user.fox_skin_active = 1 if active else 0
 
@@ -6558,9 +6562,8 @@ def gift_shop_text():
 
 def gift_shop_keyboard():
     rows = [
-        [InlineKeyboardButton("🦊 خرید روب پوینت", callback_data="points:shop:0:0")],
         [InlineKeyboardButton("🎁 خرید گیفت استارزی", callback_data="gift:tiers:0:0")],
-        [InlineKeyboardButton("VIP🪄", callback_data="vip:home")],
+        [InlineKeyboardButton("کمد VIP 🪄", callback_data="vip:home")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -6684,7 +6687,7 @@ def vip_confirm_keyboard(key, gender):
 
 def vip_home_text():
     lines = [
-        "✨ VIP🪄 فروشگاه روبی", "",
+        "✨ کمد VIP 🪄 روبی", "",
         "اسکین‌های ویژه روباه اینجاست!",
         "اسکین‌ها ظاهر روباه رو عوض می‌کنن و توانایی‌های ویژه بهش اضافه می‌کنن.",
         "یکی رو انتخاب کن تا عکس و توضیحاتش رو ببینی ⬇️", "",
@@ -13547,6 +13550,7 @@ async def feature_toggle_command(update, context):
 
 
 async def text_router(update, context):
+    if await handle_recovery_text(update, context): return
     if await handle_fine_bank_text(update, context): return
     if await support_admin_reply(update, context): return
     if await support_text(update, context): return
@@ -13678,7 +13682,7 @@ async def persian_slash_router(update, context):
         return
     text = update.message.text.strip()
     # @BotUsername در انتهای command در گروه‌ها مجاز است.
-    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?|رفرال|زیرمجموعه(?:\s+گیری)?|پرچم)(?:@\w+)?", text)
+    m = re.fullmatch(r"/(روباه(?:\s+روباه)?|روبی|روباهیو|شکار|یخچال|کارخونه(?:\s+روبی)?|روبام|روباش|لیدربرد|گردونه|چرخ|بازی(?:\s+روبی)?|کازینو(?:\s+روبی)?|شهر(?:\s+روبی)?|مارکت(?:\s+روبی)?|شهردار(?:\s+روبی)?|دوست(?:\s+روبی)?|فرند(?:\s+روب)?|قاچاق(?:\s+روبی|\s+روباهیو)?|زندان(?:\s+روبی|\s+روباهیو)?|رفرال|زیرمجموعه(?:\s+گیری)?|پرچم|بازیابی(?:\s+اکانت)?|قرعه(?:‌|\s)?کشی)(?:@\w+)?", text)
     if m:
         cmd = m.group(1)
         _slash_feat = _feature_key_for_text(cmd)
@@ -13700,6 +13704,8 @@ async def persian_slash_router(update, context):
         elif cmd in {"کد هدیه","کد جایزه","giftcode"}: await gift_code_command(update,context)
         elif cmd in {"شهردار روبی","شهردار"}: await city_mayor_command(update,context)
         elif cmd == "پرچم": await flag_command(update,context)
+        elif cmd in {"بازیابی اکانت","بازیابی"}: await recovery_command(update,context)
+        elif cmd in {"قرعه‌کشی","قرعه کشی"}: await giveaway_command(update,context)
         elif cmd in {"شهر روبی","شهر"}: await city_command(update,context)
         else: await leaderboard_command(update,context)
         return
@@ -13711,6 +13717,174 @@ async def persian_slash_router(update, context):
         await transfer_command(update, context)
 
 
+
+# ---------- بازیابی امن اکانت ----------
+RECOVERY_TTL_SECONDS = 3 * 60 * 60
+RECOVERY_CODE_LENGTH = 16
+
+def _recovery_hash(code: str) -> str:
+    secret = os.environ.get("RECOVERY_SECRET", BOT_TOKEN).encode("utf-8")
+    return hmac.new(secret, code.encode("ascii"), hashlib.sha256).hexdigest()
+
+def _new_recovery_code() -> str:
+    # فقط اعداد، دقیقاً ۱۶ رقم و مناسب کپی‌کردن در پیام تلگرام.
+    return ''.join(secrets.choice("0123456789") for _ in range(RECOVERY_CODE_LENGTH))
+
+def recovery_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔐 دریافت کد", callback_data="recovery:get")],
+        [InlineKeyboardButton("⌨️ وارد کردن کد", callback_data="recovery:enter")],
+    ])
+
+def recovery_text():
+    return (
+        "🔐 بازیابی اکانت\n\n"
+        "از این بخش می‌تونی یک کد بازیابی موقت بگیری یا کدی که قبلاً گرفتی وارد کنی.\n\n"
+        "⚠️ <b>هشدار خیلی مهم:</b> کد بازیابی را به هیچ‌کس نده و برای هیچ‌کس ارسال نکن. "
+        "هرکس کد معتبر را داشته باشد می‌تواند فرایند بازیابی اکانت را انجام دهد.\n\n"
+        "⏳ اعتبار هر کد: ۳ ساعت و هر کد فقط یک‌بار قابل استفاده است."
+    )
+
+async def recovery_command(update, context):
+    if not update.message or update.effective_chat.type != "private":
+        return
+    await update.message.reply_text(recovery_text(), reply_markup=recovery_keyboard(), parse_mode="HTML", **reply_kwargs(update.message))
+
+async def recovery_callback(update, context):
+    q = update.callback_query
+    if not q or update.effective_chat.type != "private":
+        await q.answer()
+        return
+    action = q.data.split(":", 1)[1] if ":" in q.data else ""
+    if action == "get":
+        session = get_session()
+        try:
+            user = get_or_create_user(session, update.effective_user)
+            now = now_utc()
+            session.query(RecoveryCode).filter(
+                RecoveryCode.owner_id == user.telegram_id,
+                RecoveryCode.used_at.is_(None)
+            ).update({"used_at": now}, synchronize_session=False)
+            code = _new_recovery_code()
+            row = RecoveryCode(
+                owner_id=user.telegram_id,
+                code_hash=_recovery_hash(code),
+                expires_at=now + timedelta(seconds=RECOVERY_TTL_SECONDS),
+            )
+            session.add(row)
+            session.commit()
+        finally:
+            session.close()
+        await q.answer("کد جدید ساخته شد.")
+        await q.message.reply_text(
+            "🔐 کد بازیابی اکانت شما:\n\n"
+            f"<code>{code}</code>\n\n"
+            "⏳ این کد تا ۳ ساعت معتبر است و فقط یک‌بار قابل استفاده است.\n\n"
+            "⚠️ <b>این کد را به هیچ‌کس ندهید و برای هیچ‌کس ارسال نکنید.</b>",
+            parse_mode="HTML"
+        )
+        return
+    if action == "enter":
+        context.user_data["recovery_stage"] = "await_code"
+        await q.answer()
+        await q.message.reply_text(
+            "⌨️ کد ۱۶ رقمی بازیابی را بفرست.\n\n"
+            "⚠️ <b>کد را فقط همین‌جا برای ربات بفرست و به هیچ‌کس نده.</b>",
+            parse_mode="HTML"
+        )
+        return
+    await q.answer()
+
+async def handle_recovery_text(update, context):
+    if not update.message or update.effective_chat.type != "private":
+        return False
+    if context.user_data.get("recovery_stage") != "await_code":
+        return False
+    text = (update.message.text or "").strip().replace(" ", "").replace("۰","0").replace("۱","1").replace("۲","2").replace("۳","3").replace("۴","4").replace("۵","5").replace("۶","6").replace("۷","7").replace("۸","8").replace("۹","9")
+    context.user_data.pop("recovery_stage", None)
+    if not re.fullmatch(r"\d{16}", text):
+        await update.message.reply_text("❌ کد باید دقیقاً ۱۶ رقمی باشد. دوباره از «بازیابی اکانت» شروع کن.", **reply_kwargs(update.message))
+        return True
+    session = get_session()
+    try:
+        now = now_utc()
+        row = session.query(RecoveryCode).filter(
+            RecoveryCode.code_hash == _recovery_hash(text),
+            RecoveryCode.used_at.is_(None),
+            RecoveryCode.expires_at > now,
+        ).first()
+        if not row:
+            await update.message.reply_text("❌ کد نامعتبر، منقضی یا قبلاً استفاده‌شده است.", **reply_kwargs(update.message))
+            return True
+        owner = session.get(User, row.owner_id)
+        current = session.get(User, update.effective_user.id)
+        if owner is None:
+            row.used_at = now
+            session.commit()
+            await update.message.reply_text("❌ اکانت مربوط به این کد دیگر در دیتابیس وجود ندارد.", **reply_kwargs(update.message))
+            return True
+        if current is not None and current.telegram_id != owner.telegram_id:
+            await update.message.reply_text(
+                "⚠️ این تلگرام از قبل یک اکانت فعال دارد. برای جلوگیری از ادغام یا از بین رفتن اطلاعات، بازیابی روی این حساب انجام نشد.",
+                **reply_kwargs(update.message)
+            )
+            return True
+        if current is None:
+            # Telegram ID جدید: فقط داده‌های اصلی User منتقل می‌شود؛ رکوردهای وابسته دست‌نخورده می‌مانند تا کلیدهای خارجی خراب نشوند.
+            current = User(
+                telegram_id=update.effective_user.id,
+                username=update.effective_user.username,
+                first_name=update.effective_user.first_name,
+            )
+            session.add(current)
+        # انتقال امن ستون‌های حساب بدون تغییر شناسه‌ی تلگرام صاحب قبلی.
+        for col in User.__table__.columns:
+            name = col.name
+            if name in {"telegram_id", "username", "first_name", "created_at"}:
+                continue
+            if hasattr(owner, name):
+                setattr(current, name, getattr(owner, name))
+        current.username = update.effective_user.username
+        current.first_name = update.effective_user.first_name
+        row.used_at = now
+        session.commit()
+        await update.message.reply_text(
+            "✅ بازیابی انجام شد. اطلاعات اصلی اکانتت روی این حساب تلگرام بازیابی شد.\n"
+            "🔒 کد هم بلافاصله یک‌بارمصرف و باطل شد.",
+            **reply_kwargs(update.message)
+        )
+    except Exception:
+        session.rollback()
+        logger.exception("account recovery failed")
+        await update.message.reply_text("❌ بازیابی انجام نشد؛ اطلاعات اکانت تغییری نکرد.", **reply_kwargs(update.message))
+    finally:
+        session.close()
+    return True
+
+
+
+async def giveaway_command(update, context):
+    if not update.message or update.effective_chat.type != "private":
+        return
+    if not await require_membership(update, context):
+        return
+    session = get_session()
+    try:
+        rows = session.query(Giveaway).filter(Giveaway.status == "active").order_by(Giveaway.ends_at.asc()).limit(10).all()
+        if not rows:
+            await update.message.reply_text("🎰 در حال حاضر قرعه‌کشی فعالی وجود ندارد.", **reply_kwargs(update.message))
+            return
+        lines = ["🎰 قرعه‌کشی‌های فعال", ""]
+        buttons = []
+        uname = await gw_bot_username(context.bot)
+        for g in rows:
+            lines.append(f"• {g.title}")
+            buttons.append([InlineKeyboardButton(f"🎟 {g.title}", url=f"https://t.me/{uname}?start=gw_{g.id}")])
+        await update.message.reply_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons), **reply_kwargs(update.message))
+    finally:
+        session.close()
+
+
 async def post_init(application):
     """منوی دستورهای کنار کادر پیام را مثل منوی ربات‌های تلگرام فعال می‌کند."""
     # فقط دستورهای درخواستی کاربر در منوی سه‌خطی نمایش داده می‌شوند.
@@ -13720,6 +13894,8 @@ async def post_init(application):
         BotCommand("shop", "فروشگاه"),
         BotCommand("referral", "رفرال جمع کن"),
         BotCommand("fox", "پنل روباه"),
+        BotCommand("giveaway", "قرعه‌کشی"),
+        BotCommand("account_recovery", "بازیابی اکانت"),
     ]
     try:
         # ثبت در حالت پیش‌فرض و همچنین برای همهٔ چت‌های خصوصی؛
@@ -15050,6 +15226,8 @@ def main():
     app.add_handler(CommandHandler("transfer",transfer_command))
     app.add_handler(CommandHandler("hunt",hunt_command))
     app.add_handler(CommandHandler("fox",fox_command))
+    app.add_handler(CommandHandler("account_recovery", recovery_command))
+    app.add_handler(CommandHandler("giveaway", giveaway_command))
     app.add_handler(CommandHandler("factory",factory_command))
     app.add_handler(CommandHandler("referral",referral_command))
     app.add_handler(CommandHandler("roobam",roobam_command))
@@ -15062,6 +15240,7 @@ def main():
     app.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE & filters.User(user_id=list(ADMIN_IDS)), admin_broadcast_media), group=-5)
     app.add_handler(CallbackQueryHandler(support_button,pattern=r"^support:(?:open|cancel)(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
+    app.add_handler(CallbackQueryHandler(recovery_callback, pattern=r"^recovery:(?:get|enter)$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
     app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|addowls|fineadd|finefree|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|gwcreate|gwmanage|backup|back)$"))
     app.add_handler(CallbackQueryHandler(admin_jailset_callback,pattern=r"^admin:jailset:(?:add|free)$"))

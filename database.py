@@ -126,6 +126,16 @@ class User(Base):
     spam_count = Column(Integer, nullable=False, default=0)
 
 
+class RecoveryCode(Base):
+    __tablename__ = 'account_recovery_codes'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False, index=True)
+    code_hash = Column(String, nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class RubyMarriage(Base):
     __tablename__ = 'ruby_marriages'
     id = Column(Integer, primary_key=True, autoincrement=True)

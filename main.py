@@ -118,7 +118,7 @@ def active_skins(user):
         k = k.strip()
         if k in owned and k not in out:
             out.append(k)
-    return out
+    return out[-1:] if out else []
 
 
 @app.get("/skin/{key}/{gender}")
