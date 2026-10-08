@@ -478,7 +478,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   <div class="card">
     <div class="section-title" id="lbTitle">🏆 لیدربرد روبی</div>
     <div class="filters">
-      <button class="filter active" data-cat="points"><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span> گیفت روبی</button>
+      <button class="filter active" data-cat="points"><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span> روب‌پوینت</button>
       <button class="filter" data-cat="referral">👑 رفرال‌ها</button>
       <button class="filter" data-cat="rescued">🎃 روباه‌های زخمی</button>
       <button class="filter" data-cat="hunt">⚔️ شکار</button>
@@ -528,7 +528,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   </div>
   <div id="bombCard" class="card" style="display:none">
     <div class="section-title">💥 بمب</div>
-    <div class="bomb-top"><span><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span> موجودی گیفت روبی: <b id="bBal">—</b></span><span id="bCd" class="muted"></span></div>
+    <div class="bomb-top"><span><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span> موجودی روب‌پوینت: <b id="bBal">—</b></span><span id="bCd" class="muted"></span></div>
     <div id="bSetup">
       <div class="muted" id="bRule" style="line-height:1.9"></div>
       <div class="bomb-amt"><input id="bAmt" type="number" inputmode="numeric" placeholder="مبلغ ورودی" autocomplete="off"></div>
@@ -538,7 +538,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     <div id="bPlay" style="display:none">
       <div class="bomb-info">
         <div class="stat">🧩 خانه‌های امن<b id="bSafe">۰</b></div>
-        <div class="stat"><span class="ruby-gift-label"><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span>ورودی گیفت روبی</span><b id="bEntry">۰</b></div>
+        <div class="stat"><span class="ruby-gift-label"><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span>ورودی روب‌پوینت</span><b id="bEntry">۰</b></div>
         <div class="stat">💵 دریافتی با «کافیه»<b id="bCash">۰</b></div>
         <div class="stat">⏭ خانه‌ی امن بعدی<b id="bNext">—</b></div>
       </div>
@@ -729,7 +729,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       var c = document.createElement("div"); c.className = "card atk";
       var h = document.createElement("h3"); h.textContent = "⚔️ " + a.attacker + " بهت حمله کرد!";
       var p = document.createElement("div"); p.className = "muted";
-      p.textContent = "۲٪ دارایی‌ت (" + fa(a.amount) + " گیفت روبی) در خطره. با یکی از جغدهات می‌تونی جلوشو بگیری.";
+      p.textContent = "۲٪ دارایی‌ت (" + fa(a.amount) + " روب‌پوینت) در خطره. با یکی از جغدهات می‌تونی جلوشو بگیری.";
       var t = document.createElement("div"); t.style.marginTop = "6px";
       t.appendChild(document.createTextNode("⏳ زمان تصمیم‌گیری: "));
       var tt = document.createElement("span"); tt.className = "timer"; tt.dataset.t = a.id; tt.textContent = fmtLeft(leftOf(a));
@@ -1084,7 +1084,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     var left = wheelLeftNow(), b = $("spinBtn");
     if (wheelBusy) return;
     if (left > 0) { b.disabled = true; $("wheelInfo").textContent = "⏱ گردونه‌ی بعدی: " + fmtHMS(left); }
-    else { b.disabled = false; $("wheelInfo").textContent = "🎁 موجودی گیفت روبی: " + fa(wheelData.balance); }
+    else { b.disabled = false; $("wheelInfo").textContent = "🎁 موجودی روب‌پوینت: " + fa(wheelData.balance); }
   }
   function loadWheel(){
     return api("/api/wheel").then(function(d){

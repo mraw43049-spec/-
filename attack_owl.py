@@ -86,15 +86,15 @@ def tg_call(method: str, **params):
 
 def decision_keyboard(att_id: int):
     return {"inline_keyboard": [
-        [{"text": "🦉 بله، از من محافظت کن", "callback_data": f"atk:protect:{att_id}"}],
-        [{"text": "⚔️ نه، بذار حمله بشه", "callback_data": f"atk:allow:{att_id}"}],
+        [{"text": "🛡️ بله، از من محافظت کن", "callback_data": f"atk:protect:{att_id}"}],
+        [{"text": "💣 نه، بذار حمله بشه", "callback_data": f"atk:allow:{att_id}"}],
         [{"text": "🔄 بروزرسانی", "callback_data": f"atk:refresh:{att_id}"}],
     ]}
 
 
 def decision_text(att, attacker, target, owls: int) -> str:
     return (
-        f"⚔️ {mention_html(attacker)} به {mention_html(target)} حمله کرد!\n\n"
+        f"💣 {mention_html(attacker)} به {mention_html(target)} حمله کرد!\n\n"
         f"💰 مبلغ حمله: {att.amount:,} روب‌پوینت (۲٪ دارایی)\n"
         f"🦉 {mention_html(target)} تو {owls:,} جغد داری و می‌تونی یکی‌شونو خرج محافظت کنی.\n\n"
         f"⏳ زمان تصمیم‌گیری: {fmt_left(left_seconds(att))}\n"
@@ -205,7 +205,7 @@ def resolve(att_id: int, decision: str, by_user_id=None):
             if stolen > 0:
                 target.fox_points = int(target.fox_points) - stolen
                 attacker.fox_points = int(attacker.fox_points or 0) + stolen
-            why = "⏰ مهلت تصمیم‌گیری تموم شد" if decision == "timeout" else "⚔️ تصمیم گرفته شد که حمله انجام بشه"
+            why = "⏰ مهلت تصمیم‌گیری تموم شد" if decision == "timeout" else "💣 تصمیم گرفته شد که حمله انجام بشه"
             pre = text_prefix
             if stolen > 0:
                 text = (f"{pre}{why}.\n\n⚔️ {a_m} به {t_m} حمله کرد!\n\n"

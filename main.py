@@ -776,11 +776,14 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
             users_by_id = {u.telegram_id: u for u in session.query(User).filter(User.telegram_id.in_(ids or [0])).all()}
             pairs = [(users_by_id[uid], cnt) for uid, cnt in rows if uid in users_by_id]
         elif category == "edu":
+            # LEFT JOIN تا کاربرهایی که هنوز رکورد EducationProgress ندارند هم
+            # از لیدربرد حذف نشوند و جدول «درس» هیچ‌وقت خالیِ کاذب نشان داده نشود.
+            edu = _edu()
             rows = (
-                session.query(User, education.EducationProgress.correct_answers)
-                .join(education.EducationProgress, education.EducationProgress.user_id == User.telegram_id)
-                .filter(education.EducationProgress.correct_answers > 0, ~User.telegram_id.in_(admin_ids))
-                .order_by(education.EducationProgress.correct_answers.desc(), User.telegram_id.asc())
+                session.query(User, func.coalesce(edu.EducationProgress.correct_answers, 0).label("correct_answers"))
+                .outerjoin(edu.EducationProgress, edu.EducationProgress.user_id == User.telegram_id)
+                .filter(~User.telegram_id.in_(admin_ids))
+                .order_by(func.coalesce(edu.EducationProgress.correct_answers, 0).desc(), User.telegram_id.asc())
                 .limit(50).all()
             )
             pairs = [(u, c) for u, c in rows]

@@ -5870,6 +5870,9 @@ def owl_text(equation):
     )
 
 
+OWL_STICKER_PATH = os.path.join(os.path.dirname(__file__), "assets", "owl_sticker.webm")
+
+
 async def post_owl_job(context):
     chat_id = context.job.chat_id
     if is_feature_disabled(chat_id, 'owl'):
@@ -5884,9 +5887,14 @@ async def post_owl_job(context):
             owl_id = owl.id
         finally:
             session.close()
-        # اول فقط ایموجی جغد می‌آید (مثل شکار)، چند ثانیه بعد همان پیامی که قراره کاربرها
-        # رمزش رو ریپلای کنن، خودش به‌عنوان ریپلای روی همون ایموجی ارسال می‌شود.
-        emoji_msg = await context.bot.send_message(chat_id=chat_id, text="🦉")
+        # جغد جدید به‌صورت استیکر متحرک WebM ارسال می‌شود؛ اگر فایل روی دیپلوی موجود نبود
+        # برای جلوگیری از خراب‌شدن جاب، همان ایموجی قدیمی به‌عنوان fallback فرستاده می‌شود.
+        try:
+            with open(OWL_STICKER_PATH, "rb") as sticker_file:
+                emoji_msg = await context.bot.send_sticker(chat_id=chat_id, sticker=InputFile(sticker_file, filename="owl_sticker.webm"))
+        except Exception as sticker_exc:
+            logger.warning("owl sticker send failed: %s", sticker_exc)
+            emoji_msg = await context.bot.send_message(chat_id=chat_id, text="🦉")
         await asyncio.sleep(3)
         msg = await emoji_msg.reply_text(owl_text(equation), parse_mode="HTML")
         session = get_session()
@@ -7927,10 +7935,10 @@ async def fox_sick_gate_message(update, context):
 
 ATTACK_KEYWORDS = {"حمله", "اتک", "attack"}
 
-ATTACK_EMOJIS = ("💉", "🧨", "💣", "🚀", "💥", "⚡")
+ATTACK_EMOJIS = ("💣",)
 
 async def _attack_reply(msg, text):
-    """مثل شکار: اول یک ایموجی تصادفی (انیمیشن) می‌آید، ۳ ثانیه بعد نتیجه‌ی حمله به‌صورت ریپلای روی همان ایموجی."""
+    """برای همه‌ی حمله‌ها فقط از 💣 استفاده می‌کنیم؛ سپس نتیجه روی همان پیام ریپلای می‌شود."""
     try:
         emoji_msg = await msg.reply_text(random.choice(ATTACK_EMOJIS), **reply_kwargs(msg))
     except Exception as e:
@@ -13572,6 +13580,12 @@ async def text_router(update, context):
     if await support_text(update, context): return
     if await emoji_transfer_text(update, context): return
     if not update.message or not update.message.text: return
+    # «روباهیو درس» را قبل از بقیه‌ی جریان‌های متنی بررسی می‌کنیم تا در گروه یا پیوی
+    # توسط یک handler دیگر مصرف نشود.
+    _direct_text = re.sub(r"[!؟?،,:؛\u200c\u200d\ufe0f]+$", "", update.message.text.strip()).strip()
+    if _direct_text in {"روباهیو درس", "درس", "آموزش روباهیو"}:
+        await education_command(update, context)
+        return
     if await handle_owl_catch_text(update, context): return
     if await bridge.handle_text(update, context): return
     if await feature_toggle_command(update, context): return
@@ -13596,7 +13610,8 @@ async def text_router(update, context):
         await emoji_command(update, context); return
     if text in {"ازدواج روبی", "ازدواج روبی!", "💕 ازدواج روبی 💍"}: await marriage_command(update,context); return
     if text in {"نینی روبی", "نینی روباه", "🍼 نینی روبی"}: await baby_command(update,context); return
-    if text in {"روباهیو درس", "روباهیو درس!"}:
+    _edu_cmd_text = re.sub(r"[!؟?،,:؛\u200c\u200d\ufe0f]+$", "", text).strip()
+    if _edu_cmd_text in {"روباهیو درس", "درس", "آموزش روباهیو"}:
         await education_command(update, context); return
     if text in {"طراحی سوال", "طراحی سؤال", "طرح سوال", "طرح سؤال", "✍️ طراحی سوال", "✍️ طراحی سؤال"}:
         if update.effective_chat and update.effective_chat.type != "private":
@@ -13759,33 +13774,118 @@ async def recovery_command(update, context):
     await update.message.reply_text(recovery_text(), reply_markup=recovery_keyboard(), parse_mode="HTML", **reply_kwargs(update.message))
 
 async def _get_or_rotate_recovery_code(session, user):
-    now=now_utc(); exp=aware(user.recovery_code_expires_at)
-    if user.recovery_code and exp and exp > now: return user.recovery_code, exp
-    code=_new_recovery_code(); exp=now+timedelta(seconds=RECOVERY_TTL_SECONDS)
-    user.recovery_code=code; user.recovery_code_expires_at=exp
-    session.query(RecoveryCode).filter(RecoveryCode.owner_id==user.telegram_id, RecoveryCode.used_at.is_(None)).update({"used_at":now}, synchronize_session=False)
-    session.add(RecoveryCode(owner_id=user.telegram_id, code_hash=_recovery_hash(code), expires_at=exp)); session.commit()
+    """Return a valid recovery code and make sure its hashed DB row also exists."""
+    now = now_utc()
+    exp = aware(user.recovery_code_expires_at)
+
+    # Older deployments could have users.recovery_code populated while the
+    # account_recovery_codes row was missing. In that case the displayed code
+    # looked valid but could never be accepted. Repair that state here.
+    if user.recovery_code and exp and exp > now:
+        row = (session.query(RecoveryCode)
+               .filter(RecoveryCode.owner_id == user.telegram_id,
+                       RecoveryCode.code_hash == _recovery_hash(user.recovery_code),
+                       RecoveryCode.used_at.is_(None),
+                       RecoveryCode.expires_at > now)
+               .first())
+        if row is None:
+            session.query(RecoveryCode).filter(
+                RecoveryCode.owner_id == user.telegram_id,
+                RecoveryCode.used_at.is_(None)
+            ).update({"used_at": now}, synchronize_session=False)
+            session.add(RecoveryCode(
+                owner_id=user.telegram_id,
+                code_hash=_recovery_hash(user.recovery_code),
+                expires_at=exp
+            ))
+            session.commit()
+        return user.recovery_code, exp
+
+    code = _new_recovery_code()
+    exp = now + timedelta(seconds=RECOVERY_TTL_SECONDS)
+    user.recovery_code = code
+    user.recovery_code_expires_at = exp
+    session.query(RecoveryCode).filter(
+        RecoveryCode.owner_id == user.telegram_id,
+        RecoveryCode.used_at.is_(None)
+    ).update({"used_at": now}, synchronize_session=False)
+    session.add(RecoveryCode(
+        owner_id=user.telegram_id,
+        code_hash=_recovery_hash(code),
+        expires_at=exp
+    ))
+    session.commit()
     return code, exp
 
 async def recovery_callback(update, context):
-    q=update.callback_query
-    if not q or update.effective_chat.type!="private":
-        if q: await q.answer()
+    q = update.callback_query
+    if not q:
         return
-    action=q.data.split(":",1)[1] if ":" in q.data else ""
-    if action=="get":
-        session=get_session()
+
+    # Acknowledge the Telegram callback immediately so the button cannot sit
+    # on the loading spinner while the database work is happening.
+    try:
+        await q.answer()
+    except Exception:
+        logger.exception("Failed to answer account recovery callback")
+
+    if update.effective_chat is None or update.effective_chat.type != "private":
+        return
+
+    action = q.data.split(":", 1)[1] if q.data and ":" in q.data else ""
+    if action == "get":
+        session = get_session()
         try:
-            user=get_or_create_user(session, update.effective_user); code,exp=await _get_or_rotate_recovery_code(session,user)
-        finally: session.close()
-        await q.answer("کد فعال بازیابی آماده شد.")
-        total=max(60,int((exp-now_utc()).total_seconds())); hours=total//3600; mins=(total%3600)//60
-        await q.message.reply_text(f"🔐 کد بازیابی اکانت شما:\n\n<code>{code}</code>\n\n⏳ اعتبار: حدود {hours} ساعت و {mins} دقیقه\n\n⚠️ <b>این کد را به هیچ‌کس ندهید و برای هیچ‌کس ارسال نکنید.</b>\nبا این کد همه اطلاعات اکانت به حسابی که کد را وارد کند منتقل می‌شود.", parse_mode="HTML")
+            user = get_or_create_user(session, update.effective_user)
+            code, exp = await _get_or_rotate_recovery_code(session, user)
+        except Exception:
+            session.rollback()
+            logger.exception("Account recovery: failed to create/read recovery code")
+            try:
+                await context.bot.send_message(
+                    chat_id=q.from_user.id,
+                    text="❌ نتونستم کد بازیابی رو بسازم. لطفاً دوباره روی «دریافت کد» بزن."
+                )
+            except Exception:
+                logger.exception("Account recovery: failed to send error message")
+        finally:
+            session.close()
+        if not code:
+            return
+
+        total = max(60, int((exp - now_utc()).total_seconds()))
+        hours = total // 3600
+        mins = (total % 3600) // 60
+        text = (
+            f"🔐 <b>کد بازیابی اکانت شما</b>\n\n"
+            f"<code>{code}</code>\n\n"
+            f"⏳ اعتبار: حدود {hours} ساعت و {mins} دقیقه\n\n"
+            f"⚠️ <b>این کد را به هیچ‌کس ندهید و برای هیچ‌کس ارسال نکنید.</b>\n"
+            f"با این کد همه اطلاعات اکانت به حسابی که کد را وارد کند منتقل می‌شود."
+        )
+        try:
+            # Use the bot directly instead of q.message.reply_text. This also
+            # works if Telegram supplies an unusual callback message object.
+            await context.bot.send_message(chat_id=q.from_user.id, text=text, parse_mode="HTML")
+        except Exception:
+            logger.exception("Account recovery: failed to send recovery code")
+            try:
+                await q.message.reply_text(text, parse_mode="HTML")
+            except Exception:
+                logger.exception("Account recovery: fallback send also failed")
         return
-    if action=="enter":
-        context.user_data["recovery_stage"]="await_code"; await q.answer()
-        await q.message.reply_text("⌨️ کد ۱۶ رقمی بازیابی را بفرست.\n\n⚠️ <b>کد را فقط برای ربات بفرست و به هیچ‌کس نده.</b>",parse_mode="HTML"); return
-    await q.answer()
+
+    if action == "enter":
+        context.user_data["recovery_stage"] = "await_code"
+        try:
+            await context.bot.send_message(
+                chat_id=q.from_user.id,
+                text="⌨️ کد ۱۶ رقمی بازیابی را بفرست.\n\n⚠️ <b>کد را فقط برای ربات بفرست و به هیچ‌کس نده.</b>",
+                parse_mode="HTML"
+            )
+        except Exception:
+            logger.exception("Account recovery: failed to request code input")
+        return
 
 def _transfer_all_user_data(session, source_id, target_id, recovery_row):
     if source_id==target_id: raise ValueError("source and target are identical")

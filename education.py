@@ -3,7 +3,7 @@
 import json, random, logging, re
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import Column, BigInteger, Integer, String, DateTime, Text
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from database import Base, User, get_session
 from config import ADMIN_IDS
 
@@ -167,7 +167,8 @@ async def education_command(update, context):
         rows = [[InlineKeyboardButton("📚 ورود به پنل درس", url=url)]]
         mini_url = os.environ.get("MINI_APP_URL", "https://web-production-a8598.up.railway.app").strip().rstrip("/")
         if mini_url:
-            rows.append([InlineKeyboardButton("🚀 ورود به مینی اپ — درس", url=mini_url + "?view=education")])
+            # لینک مستقیم به تب درس مینی‌اپ؛ در کنار لینک پیوی بات هر دو مسیر در دسترس‌اند.
+            rows.append([InlineKeyboardButton("🚀 ورود به مینی اپ — درس", web_app=WebAppInfo(url=mini_url + "?view=education"))])
         await update.message.reply_text(
             "📚 پنل درس فقط در پیوی ربات فعال است.",
             reply_markup=InlineKeyboardMarkup(rows),
