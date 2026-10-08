@@ -714,53 +714,81 @@ def fox_gender(body: GenderBody, tg_user: dict = Depends(current_telegram_user))
 # ---------------------------------------------------------------------------
 LEADERBOARD_FIELDS = {
     "points": ("fox_points", "روب‌پوینت", "💰"),
+    "referral": (None, "رفرال‌ها", "👑"),
+    "rescued": ("fox_rescued_count", "روباه‌های زخمی", "🎃"),
     "hunt": ("hunt_count", "شکار", "⚔️"),
-    "owl": ("owl_catch_count", "جغد", "🦉"),
-    "rescued": ("fox_rescued_count", "نجات روباه", "🦊"),
+    "claim": ("fox_claim_count", "روب روب", "🐾"),
+    "edu": (None, "پاسخ درست درس", "🎓"),
+    "owl": ("owl_catch_count", "جغد روبی", "🦉"),
 }
+# نگاشت دسته‌ی مینی‌اپ → کلید لیدربرد بات (برای لقب نفرات اول تا سوم)
+_LB_BOT_KEYS = {"points": "fox_points", "referral": "referral_count", "rescued": "fox_rescued_count",
+                "hunt": "hunt_count", "claim": "fox_claim_count", "edu": "edu_correct"}
+
+
+@app.get("/api/ping")
+def ping():
+    """سبک‌ترین endpoint ممکن؛ مینی‌اپ باهاش پینگ (رفت‌وبرگشت) رو اندازه می‌گیره. بدون احراز هویت و بدون دیتابیس."""
+    return Response("ok", media_type="text/plain", headers={"Cache-Control": "no-store"})
+
+
+def _lb_titles(category):
+    try:
+        key = _LB_BOT_KEYS.get(category)
+        if not key:
+            return {}
+        return dict(getattr(load_botmod(), "LEADERBOARD_TITLES", {}).get(key, {}) or {})
+    except Exception:
+        return {}
 
 
 @app.get("/api/leaderboard")
 def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_telegram_user)):
+    if category not in LEADERBOARD_FIELDS:
+        raise HTTPException(status_code=400, detail="دسته‌ی لیدربرد نامعتبره.")
+    field, label, emoji = LEADERBOARD_FIELDS[category]
+    titles = _lb_titles(category)
     session = get_session()
     try:
+        def base_entry(rank, u, value):
+            skins = active_skins(u)
+            return {
+                "rank": rank,
+                "name": display_name(u),
+                "value": int(value or 0),
+                "me": u.telegram_id == tg_user["id"],
+                "avatar": avatar_url(u.telegram_id),
+                "skin": SKIN_INFO.get(skins[-1], "") if skins else "",
+                "title": titles.get(rank, "") if rank <= 3 else "",
+            }
+
+        admin_ids = list(ADMIN_ID_SET) or [0]
         if category == "referral":
             rows = (
                 session.query(Referral.referrer_id, func.count(Referral.id).label("cnt"))
-                .filter(Referral.status == "approved", ~Referral.referrer_id.in_(list(ADMIN_ID_SET) or [0]))
+                .filter(Referral.status == "approved", ~Referral.referrer_id.in_(admin_ids))
                 .group_by(Referral.referrer_id)
                 .order_by(func.count(Referral.id).desc())
                 .limit(50).all()
             )
             ids = [r[0] for r in rows]
-            users_by_id = {
-                u.telegram_id: u
-                for u in session.query(User).filter(User.telegram_id.in_(ids or [0])).all()
-            }
-            entries = [
-                {"rank": i + 1, "name": display_name(users_by_id[uid]), "value": int(cnt),
-                 "me": uid == tg_user["id"], "avatar": avatar_url(uid)}
-                for i, (uid, cnt) in enumerate(rows) if uid in users_by_id
-            ]
-            return {"category": "referral", "label": "رفرال", "emoji": "👑", "entries": entries}
-
-        if category not in LEADERBOARD_FIELDS:
-            raise HTTPException(status_code=400, detail="دسته‌ی لیدربرد نامعتبره.")
-        field, label, emoji = LEADERBOARD_FIELDS[category]
-        col = getattr(User, field)
-        users = (session.query(User).filter(~User.telegram_id.in_(list(ADMIN_ID_SET) or [0]))
-                 .order_by(col.desc(), User.telegram_id.asc()).limit(50).all())
-        entries = []
-        for i, u in enumerate(users):
-            skins = active_skins(u)
-            entries.append({
-                "rank": i + 1,
-                "name": display_name(u),
-                "value": int(getattr(u, field) or 0),
-                "me": u.telegram_id == tg_user["id"],
-                "avatar": avatar_url(u.telegram_id),
-                "skin": SKIN_INFO.get(skins[-1], "") if skins else "",
-            })
+            users_by_id = {u.telegram_id: u for u in session.query(User).filter(User.telegram_id.in_(ids or [0])).all()}
+            pairs = [(users_by_id[uid], cnt) for uid, cnt in rows if uid in users_by_id]
+        elif category == "edu":
+            rows = (
+                session.query(User, education.EducationProgress.correct_answers)
+                .join(education.EducationProgress, education.EducationProgress.user_id == User.telegram_id)
+                .filter(education.EducationProgress.correct_answers > 0, ~User.telegram_id.in_(admin_ids))
+                .order_by(education.EducationProgress.correct_answers.desc(), User.telegram_id.asc())
+                .limit(50).all()
+            )
+            pairs = [(u, c) for u, c in rows]
+        else:
+            col = getattr(User, field)
+            users = (session.query(User).filter(~User.telegram_id.in_(admin_ids))
+                     .order_by(col.desc(), User.telegram_id.asc()).limit(50).all())
+            pairs = [(u, getattr(u, field)) for u in users]
+        entries = [base_entry(i + 1, u, v) for i, (u, v) in enumerate(pairs)]
         return {"category": category, "label": label, "emoji": emoji, "entries": entries}
     finally:
         session.close()
