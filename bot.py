@@ -9,7 +9,7 @@ import secrets
 import hmac
 from datetime import datetime, timezone, timedelta
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto, MessageEntity, User as TgUser, BotCommand, BotCommandScopeAllPrivateChats, MenuButtonCommands
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto, MessageEntity, User as TgUser, BotCommand, BotCommandScopeAllPrivateChats, MenuButtonCommands, WebAppInfo
 from telegram.error import RetryAfter, Forbidden, BadRequest, TimedOut, NetworkError
 from telegram.ext import (
     ApplicationBuilder, ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, ChatMemberHandler,
@@ -24,7 +24,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, RubyOwl, Giveaway, GiveawayEntry, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, RubyOwl, Giveaway, GiveawayEntry, RecoveryCode, Base, get_session, init_db
 )
 import ai_service as ai
 import attack_owl
@@ -1338,6 +1338,15 @@ if ai.AI_ENABLED or brain.ENABLED:
     ]
 
 
+MINI_APP_URL = os.environ.get("MINI_APP_URL", "https://web-production-a8598.up.railway.app").strip().rstrip("/")
+
+def miniapp_url(view=None):
+    return MINI_APP_URL + (("?view=" + view) if view else "") if MINI_APP_URL else ""
+
+def miniapp_button(view=None, text="🚀 ورود به مینی اپ"):
+    url = miniapp_url(view)
+    return InlineKeyboardButton(text, web_app=WebAppInfo(url=url)) if url else None
+
 def welcome_text():
     return (
         "به دنیای روباهیو خوش اومدی 🦊\n\n"
@@ -1362,6 +1371,8 @@ def welcome_keyboard(context):
     username = getattr(context.bot, "username", None)
     if username:
         rows.append([InlineKeyboardButton("➕ افزودن من به گروه", url=f"https://t.me/{username}?startgroup=true")])
+    wb = miniapp_button(text="🚀 ورود به مینی اپ")
+    if wb: rows.append([wb])
     rows.append([InlineKeyboardButton("📖 راهنمای کامل ❓", callback_data="guide:main")])
     return InlineKeyboardMarkup(rows)
 
@@ -6879,9 +6890,12 @@ async def vip_button(update, context):
                 if int(user.fox_points or 0) < skin['price']:
                     await q.answer(f"❌ روب‌پوینت کافی نداری. {skin['price']:,} روب‌پوینت لازم داری.", show_alert=True)
                     return
+                if active:
+                    await q.answer("⛔ اول اسکین فعال قبلی رو غیرفعال کن تا این اسکین فعال بشه.", show_alert=True)
+                    return
                 vip_settle_production(user)
                 user.fox_points = int(user.fox_points or 0) - skin['price']
-                vip_set_skins(user, owned + [key], active + [key])   # بعد از خرید خودکار فعال می‌شود
+                vip_set_skins(user, owned + [key], [key])
                 session.commit()
                 await q.answer(f"🎉 {skin['title']} خریداری و فعال شد!", show_alert=True)
                 await vip_show(q, vip_skin_text(key, gender, user), vip_skin_keyboard(user, key, gender), photo_path=photo, same_photo=True)
@@ -6894,9 +6908,11 @@ async def vip_button(update, context):
             if action == 'on':
                 if key in active:
                     await q.answer("این اسکین الان فعاله.", show_alert=True)
+                elif active:
+                    await q.answer("⛔ اول اسکین فعال قبلی رو غیرفعال کن تا بتونی این اسکین رو فعال کنی.", show_alert=True)
                 else:
                     vip_settle_production(user)
-                    vip_set_skins(user, owned, active + [key])
+                    vip_set_skins(user, owned, [key])
                     session.commit()
                     await q.answer("🟢 اسکین فعال شد.")
             else:
@@ -13727,140 +13743,138 @@ def _recovery_hash(code: str) -> str:
     return hmac.new(secret, code.encode("ascii"), hashlib.sha256).hexdigest()
 
 def _new_recovery_code() -> str:
-    # فقط اعداد، دقیقاً ۱۶ رقم و مناسب کپی‌کردن در پیام تلگرام.
     return ''.join(secrets.choice("0123456789") for _ in range(RECOVERY_CODE_LENGTH))
 
 def recovery_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔐 دریافت کد", callback_data="recovery:get")],
-        [InlineKeyboardButton("⌨️ وارد کردن کد", callback_data="recovery:enter")],
-    ])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔐 دریافت کد", callback_data="recovery:get")], [InlineKeyboardButton("⌨️ وارد کردن کد", callback_data="recovery:enter")]])
 
 def recovery_text():
-    return (
-        "🔐 بازیابی اکانت\n\n"
-        "از این بخش می‌تونی یک کد بازیابی موقت بگیری یا کدی که قبلاً گرفتی وارد کنی.\n\n"
-        "⚠️ <b>هشدار خیلی مهم:</b> کد بازیابی را به هیچ‌کس نده و برای هیچ‌کس ارسال نکن. "
-        "هرکس کد معتبر را داشته باشد می‌تواند فرایند بازیابی اکانت را انجام دهد.\n\n"
-        "⏳ اعتبار هر کد: ۳ ساعت و هر کد فقط یک‌بار قابل استفاده است."
-    )
+    return ("🔐 بازیابی اکانت\n\n"
+            "هر کاربر یک کد بازیابی تصادفی دارد که فقط ۳ ساعت معتبر است. بعد از پایان ۳ ساعت، کد قبلی منقضی و یک کد تصادفی جدید برای همان کاربر ساخته می‌شود.\n\n"
+            "⚠️ <b>هشدار خیلی مهم: کد بازیابی را به هیچ‌کس نده و برای هیچ‌کس ارسال نکن.</b>\n"
+            "هرکس کد معتبر را داشته باشد می‌تواند همه اطلاعات اکانت را به حساب تلگرام خودش منتقل کند.\n\n⏳ اعتبار: ۳ ساعت")
 
 async def recovery_command(update, context):
-    if not update.message or update.effective_chat.type != "private":
-        return
+    if not update.message or update.effective_chat.type != "private": return
     await update.message.reply_text(recovery_text(), reply_markup=recovery_keyboard(), parse_mode="HTML", **reply_kwargs(update.message))
 
+async def _get_or_rotate_recovery_code(session, user):
+    now=now_utc(); exp=aware(user.recovery_code_expires_at)
+    if user.recovery_code and exp and exp > now: return user.recovery_code, exp
+    code=_new_recovery_code(); exp=now+timedelta(seconds=RECOVERY_TTL_SECONDS)
+    user.recovery_code=code; user.recovery_code_expires_at=exp
+    session.query(RecoveryCode).filter(RecoveryCode.owner_id==user.telegram_id, RecoveryCode.used_at.is_(None)).update({"used_at":now}, synchronize_session=False)
+    session.add(RecoveryCode(owner_id=user.telegram_id, code_hash=_recovery_hash(code), expires_at=exp)); session.commit()
+    return code, exp
+
 async def recovery_callback(update, context):
-    q = update.callback_query
-    if not q or update.effective_chat.type != "private":
-        await q.answer()
+    q=update.callback_query
+    if not q or update.effective_chat.type!="private":
+        if q: await q.answer()
         return
-    action = q.data.split(":", 1)[1] if ":" in q.data else ""
-    if action == "get":
-        session = get_session()
+    action=q.data.split(":",1)[1] if ":" in q.data else ""
+    if action=="get":
+        session=get_session()
         try:
-            user = get_or_create_user(session, update.effective_user)
-            now = now_utc()
-            session.query(RecoveryCode).filter(
-                RecoveryCode.owner_id == user.telegram_id,
-                RecoveryCode.used_at.is_(None)
-            ).update({"used_at": now}, synchronize_session=False)
-            code = _new_recovery_code()
-            row = RecoveryCode(
-                owner_id=user.telegram_id,
-                code_hash=_recovery_hash(code),
-                expires_at=now + timedelta(seconds=RECOVERY_TTL_SECONDS),
-            )
-            session.add(row)
-            session.commit()
-        finally:
-            session.close()
-        await q.answer("کد جدید ساخته شد.")
-        await q.message.reply_text(
-            "🔐 کد بازیابی اکانت شما:\n\n"
-            f"<code>{code}</code>\n\n"
-            "⏳ این کد تا ۳ ساعت معتبر است و فقط یک‌بار قابل استفاده است.\n\n"
-            "⚠️ <b>این کد را به هیچ‌کس ندهید و برای هیچ‌کس ارسال نکنید.</b>",
-            parse_mode="HTML"
-        )
+            user=get_or_create_user(session, update.effective_user); code,exp=await _get_or_rotate_recovery_code(session,user)
+        finally: session.close()
+        await q.answer("کد فعال بازیابی آماده شد.")
+        total=max(60,int((exp-now_utc()).total_seconds())); hours=total//3600; mins=(total%3600)//60
+        await q.message.reply_text(f"🔐 کد بازیابی اکانت شما:\n\n<code>{code}</code>\n\n⏳ اعتبار: حدود {hours} ساعت و {mins} دقیقه\n\n⚠️ <b>این کد را به هیچ‌کس ندهید و برای هیچ‌کس ارسال نکنید.</b>\nبا این کد همه اطلاعات اکانت به حسابی که کد را وارد کند منتقل می‌شود.", parse_mode="HTML")
         return
-    if action == "enter":
-        context.user_data["recovery_stage"] = "await_code"
-        await q.answer()
-        await q.message.reply_text(
-            "⌨️ کد ۱۶ رقمی بازیابی را بفرست.\n\n"
-            "⚠️ <b>کد را فقط همین‌جا برای ربات بفرست و به هیچ‌کس نده.</b>",
-            parse_mode="HTML"
-        )
-        return
+    if action=="enter":
+        context.user_data["recovery_stage"]="await_code"; await q.answer()
+        await q.message.reply_text("⌨️ کد ۱۶ رقمی بازیابی را بفرست.\n\n⚠️ <b>کد را فقط برای ربات بفرست و به هیچ‌کس نده.</b>",parse_mode="HTML"); return
     await q.answer()
 
-async def handle_recovery_text(update, context):
-    if not update.message or update.effective_chat.type != "private":
-        return False
-    if context.user_data.get("recovery_stage") != "await_code":
-        return False
-    text = (update.message.text or "").strip().replace(" ", "").replace("۰","0").replace("۱","1").replace("۲","2").replace("۳","3").replace("۴","4").replace("۵","5").replace("۶","6").replace("۷","7").replace("۸","8").replace("۹","9")
-    context.user_data.pop("recovery_stage", None)
-    if not re.fullmatch(r"\d{16}", text):
-        await update.message.reply_text("❌ کد باید دقیقاً ۱۶ رقمی باشد. دوباره از «بازیابی اکانت» شروع کن.", **reply_kwargs(update.message))
-        return True
-    session = get_session()
+def _transfer_all_user_data(session, source_id, target_id, recovery_row):
+    if source_id==target_id: raise ValueError("source and target are identical")
+    tables=[]
+    for table in Base.metadata.sorted_tables:
+        cols=[]
+        for col in table.columns:
+            for fk in col.foreign_keys:
+                try:
+                    if fk.column.table.name=="users" and fk.column.name=="telegram_id": cols.append(col.name); break
+                except Exception: pass
+        if cols and table.name!="users": tables.append((table,cols))
     try:
-        now = now_utc()
-        row = session.query(RecoveryCode).filter(
-            RecoveryCode.code_hash == _recovery_hash(text),
-            RecoveryCode.used_at.is_(None),
-            RecoveryCode.expires_at > now,
-        ).first()
-        if not row:
-            await update.message.reply_text("❌ کد نامعتبر، منقضی یا قبلاً استفاده‌شده است.", **reply_kwargs(update.message))
-            return True
-        owner = session.get(User, row.owner_id)
-        current = session.get(User, update.effective_user.id)
-        if owner is None:
-            row.used_at = now
-            session.commit()
-            await update.message.reply_text("❌ اکانت مربوط به این کد دیگر در دیتابیس وجود ندارد.", **reply_kwargs(update.message))
-            return True
-        if current is not None and current.telegram_id != owner.telegram_id:
-            await update.message.reply_text(
-                "⚠️ این تلگرام از قبل یک اکانت فعال دارد. برای جلوگیری از ادغام یا از بین رفتن اطلاعات، بازیابی روی این حساب انجام نشد.",
-                **reply_kwargs(update.message)
-            )
-            return True
-        if current is None:
-            # Telegram ID جدید: فقط داده‌های اصلی User منتقل می‌شود؛ رکوردهای وابسته دست‌نخورده می‌مانند تا کلیدهای خارجی خراب نشوند.
-            current = User(
-                telegram_id=update.effective_user.id,
-                username=update.effective_user.username,
-                first_name=update.effective_user.first_name,
-            )
-            session.add(current)
-        # انتقال امن ستون‌های حساب بدون تغییر شناسه‌ی تلگرام صاحب قبلی.
-        for col in User.__table__.columns:
-            name = col.name
-            if name in {"telegram_id", "username", "first_name", "created_at"}:
-                continue
-            if hasattr(owner, name):
-                setattr(current, name, getattr(owner, name))
-        current.username = update.effective_user.username
-        current.first_name = update.effective_user.first_name
-        row.used_at = now
-        session.commit()
-        await update.message.reply_text(
-            "✅ بازیابی انجام شد. اطلاعات اصلی اکانتت روی این حساب تلگرام بازیابی شد.\n"
-            "🔒 کد هم بلافاصله یک‌بارمصرف و باطل شد.",
-            **reply_kwargs(update.message)
-        )
-    except Exception:
-        session.rollback()
-        logger.exception("account recovery failed")
-        await update.message.reply_text("❌ بازیابی انجام نشد؛ اطلاعات اکانت تغییری نکرد.", **reply_kwargs(update.message))
-    finally:
-        session.close()
-    return True
+        from education import EducationProgress,EduUserQuestion
+        tables += [(EducationProgress.__table__,["user_id"]),(EduUserQuestion.__table__,["author_id"])]
+    except Exception: pass
+    # هدف باید جای خود را به حساب بازیابی‌شده بدهد؛ داده‌های مالکیتی قبلی هدف حذف می‌شوند.
+    seen=set()
+    for table,cols in tables:
+        if table.name in seen: continue
+        seen.add(table.name)
+        for col in cols: session.execute(table.delete().where(table.c[col]==target_id))
+    # تمام داده‌های وابسته به حساب قدیمی به شناسه‌ی جدید منتقل می‌شوند.
+    for table,cols in tables:
+        for col in cols: session.execute(table.update().where(table.c[col]==source_id).values({col:target_id}))
+    # شناسه‌های کاربر که در بعضی جدول‌ها FK رسمی ندارند اما به هویت کاربر مربوط‌اند.
+    # این‌ها هم باید با بازیابی حساب به شناسه‌ی جدید منتقل شوند.
+    extra_refs = {
+        "group_chats": ("city_owner_id", "city_mayor_id"),
+        "gift_codes": ("created_by",),
+        "giveaways": ("created_by",),
+        "giveaway_entries": ("inviter_id",),
+        "fox_knowledge": ("created_by",),
+        "fox_mood_songs": ("created_by",),
+        "fox_mood_channels": ("added_by",),
+        "bank_transactions": ("counterparty_user_id",),
+        "football_matches": ("created_by",),
+        "gift_orders": ("recipient_id",),
+        "points_purchases": ("recipient_id", "decided_by"),
+        "referrals": ("decided_by",),
+        "chat_bridges": ("requester_id", "partner_user_id", "ended_by"),
+        "chat_bridge_messages": ("sender_id",),
+        "bridge_bans": ("user_id", "banned_by"),
+    }
+    for table_name, cols in extra_refs.items():
+        table = Base.metadata.tables.get(table_name)
+        if table is None: continue
+        for col in cols:
+            if col in table.c:
+                session.execute(table.update().where(table.c[col] == source_id).values({col: target_id}))
+    source=session.get(User,source_id); target=session.get(User,target_id)
+    if not source or not target: raise ValueError("account not found")
+    for col in User.__table__.columns:
+        n=col.name
+        if n in {"telegram_id","username","first_name","recovery_code","recovery_code_expires_at"}: continue
+        setattr(target,n,getattr(source,n))
+    target.username=target.username or source.username; target.first_name=target.first_name or source.first_name
+    target.recovery_code=None; target.recovery_code_expires_at=None
+    if recovery_row: recovery_row.used_at=now_utc(); recovery_row.expires_at=now_utc()
+    session.delete(source)
 
+async def handle_recovery_text(update, context):
+    if not update.message or update.effective_chat.type!="private" or context.user_data.get("recovery_stage")!="await_code": return False
+    text=(update.message.text or "").strip().replace(" ","")
+    for a,b in zip("۰۱۲۳۴۵۶۷۸۹","0123456789"): text=text.replace(a,b)
+    context.user_data.pop("recovery_stage",None)
+    if not re.fullmatch(r"\d{16}",text):
+        await update.message.reply_text("❌ کد باید دقیقاً ۱۶ رقمی باشد. دوباره از «بازیابی اکانت» شروع کن.",**reply_kwargs(update.message)); return True
+    session=get_session()
+    try:
+        now=now_utc(); row=session.query(RecoveryCode).filter(RecoveryCode.code_hash==_recovery_hash(text),RecoveryCode.used_at.is_(None),RecoveryCode.expires_at>now).first()
+        if not row:
+            await update.message.reply_text("❌ کد نامعتبر یا منقضی شده است.",**reply_kwargs(update.message)); return True
+        owner=session.get(User,row.owner_id); current=session.get(User,update.effective_user.id)
+        if not owner:
+            row.used_at=now; session.commit(); await update.message.reply_text("❌ اکانت مربوط به این کد پیدا نشد.",**reply_kwargs(update.message)); return True
+        if current and current.telegram_id==owner.telegram_id:
+            row.used_at=now; session.commit(); await update.message.reply_text("ℹ️ این کد مربوط به همین اکانت است.",**reply_kwargs(update.message)); return True
+        if not current:
+            current=User(telegram_id=update.effective_user.id,username=update.effective_user.username,first_name=update.effective_user.first_name); session.add(current); session.flush()
+        _transfer_all_user_data(session,owner.telegram_id,current.telegram_id,row)
+        current.username=update.effective_user.username; current.first_name=update.effective_user.first_name
+        session.commit()
+        await update.message.reply_text("✅ <b>بازیابی کامل انجام شد.</b>\n\nهمه اطلاعات اکانت قبلی شامل موجودی‌ها، روباه، اسکین‌ها، بانک، موجودی‌ها، پیشرفت درس و داده‌های وابسته به حساب منتقل شد.\n\n🔒 کد بلافاصله باطل شد.",parse_mode="HTML",**reply_kwargs(update.message))
+    except Exception:
+        session.rollback(); logger.exception("account recovery failed")
+        await update.message.reply_text("❌ بازیابی انجام نشد؛ چون انتقال اتمیک است، در صورت خطا اطلاعات حساب‌ها تغییر نکرده است.",**reply_kwargs(update.message))
+    finally: session.close()
+    return True
 
 
 async def giveaway_command(update, context):

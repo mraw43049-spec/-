@@ -118,6 +118,7 @@ def active_skins(user):
         k = k.strip()
         if k in owned and k not in out:
             out.append(k)
+    # فقط یک اسکین فعال؛ اگر داده قدیمی خراب باشد آخرین مقدار معتبر برنده است.
     return out[-1:] if out else []
 
 

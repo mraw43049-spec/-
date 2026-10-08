@@ -125,6 +125,10 @@ class User(Base):
     spam_window_at = Column(DateTime(timezone=True), nullable=True)
     spam_count = Column(Integer, nullable=False, default=0)
 
+    # کد بازیابی چرخشی: هر کاربر در هر بازه‌ی ۳ ساعته یک کد ثابت و تصادفی دارد.
+    recovery_code = Column(String, nullable=True)
+    recovery_code_expires_at = Column(DateTime(timezone=True), nullable=True)
+
 
 class RecoveryCode(Base):
     __tablename__ = 'account_recovery_codes'
@@ -744,6 +748,8 @@ def init_db():
         'injured_fox_stock': 'INTEGER NOT NULL DEFAULT 0',
         'spam_window_at': DT_SQL_TYPE,
         'spam_count': 'INTEGER NOT NULL DEFAULT 0',
+        'recovery_code': 'VARCHAR',
+        'recovery_code_expires_at': DT_SQL_TYPE,
         'fox_gender': "VARCHAR NOT NULL DEFAULT ''",
         'fox_skin': "VARCHAR NOT NULL DEFAULT ''",
         'fox_skin_active': 'INTEGER NOT NULL DEFAULT 0',

@@ -164,9 +164,13 @@ async def education_command(update, context):
     if update.effective_chat and update.effective_chat.type != "private":
         me = await context.bot.get_me()
         url = f"https://t.me/{me.username}?start=edu_panel"  # با این لینک، پنل درس خودش در پیوی باز می‌شود؛ لازم نیست کاربر دوباره «روباهیو درس» را تایپ کند.
+        rows = [[InlineKeyboardButton("📚 ورود به پنل درس", url=url)]]
+        mini_url = os.environ.get("MINI_APP_URL", "https://web-production-a8598.up.railway.app").strip().rstrip("/")
+        if mini_url:
+            rows.append([InlineKeyboardButton("🚀 ورود به مینی اپ — درس", url=mini_url + "?view=education")])
         await update.message.reply_text(
             "📚 پنل درس فقط در پیوی ربات فعال است.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📚 ورود به پنل درس", url=url)]]),
+            reply_markup=InlineKeyboardMarkup(rows),
             **({"reply_to_message_id": update.message.message_id} if update.message else {})
         )
         return

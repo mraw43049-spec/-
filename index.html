@@ -1307,11 +1307,8 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     }).catch(function(e){ toast(e.message, false); loadEdu(); }).then(function(){ eduBusy = false; drawEdu(false); });
   }
   function startEdu(topic){
-    // بازخورد فوری: قبل از اینکه جواب سرور بیاد کاربر ببینه سؤال داره آماده می‌شه
-    var qb = $("eduQ"); qb.innerHTML = "";
-    var c = document.createElement("div"); c.className = "card q-card"; c.style.textAlign = "center";
-    c.textContent = "⏳ در حال آماده‌سازی سؤال...";
-    qb.appendChild(c);
+    // بدون صفحه‌ی مکث؛ درخواست شروع بلافاصله ارسال می‌شود و سؤال مستقیماً جایگزین موضوع‌ها می‌شود.
+    if (eduBusy) return;
     document.querySelectorAll("#eduTopics .go").forEach(function(b){ b.disabled = true; });
     eduCall("/api/edu/start", { topic: topic });
   }
@@ -1432,7 +1429,14 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   }
 
   paintCachedSkinInstant();
-  loadProfile();
+  // لینک «ورود به مینی اپ — درس» مستقیماً پنل درس را باز می‌کند.
+  var initialView = "fox";
+  try {
+    var qp = new URLSearchParams(location.search);
+    if (qp.get("view") === "education" || qp.get("view") === "edu") initialView = "edu";
+    else if (qp.get("view") === "wheel" || qp.get("view") === "bomb") initialView = "wheel";
+  } catch(e){}
+  show(initialView);
 })();
 </script>
 </body>
