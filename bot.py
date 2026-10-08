@@ -13901,6 +13901,11 @@ async def giveaway_command(update, context):
 
 async def post_init(application):
     """منوی دستورهای کنار کادر پیام را مثل منوی ربات‌های تلگرام فعال می‌کند."""
+    try:
+        from ruby_emojis import ensure_ruby_gift_pack
+        await ensure_ruby_gift_pack(application.bot)
+    except Exception:
+        logger.exception("Ruby Gift custom emoji setup failed")
     # فقط دستورهای درخواستی کاربر در منوی سه‌خطی نمایش داده می‌شوند.
     commands = [
         BotCommand("start", "شروع بازی"),
