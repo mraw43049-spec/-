@@ -50,8 +50,6 @@ class User(Base):
     username = Column(String, nullable=True)
     name_flag = Column(String, nullable=False, default='')
     name_emoji = Column(String, nullable=False, default='')
-    name_emoji_item_key = Column(String, nullable=True, default=None)
-    name_emoji_custom_id = Column(String, nullable=True, default=None)
     emoji_storage_capacity = Column(Integer, nullable=False, default=3)
     first_name = Column(String, nullable=True)
     points = Column(Integer, nullable=False, default=0)
@@ -178,17 +176,6 @@ class RubyBaby(Base):
     last_milk_at = Column(DateTime(timezone=True), nullable=True)  # آخرین باری که مادر به نینی شیر داده
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-class RubyEmojiCatalog(Base):
-    __tablename__ = 'ruby_emoji_catalog'
-    item_key = Column(String, primary_key=True)
-    title = Column(String, nullable=False)
-    price = Column(Integer, nullable=False, default=2500)
-    fallback_emoji = Column(String, nullable=False, default='🎁')
-    custom_emoji_id = Column(String, nullable=True)
-    pack_name = Column(String, nullable=True)
-    active = Column(Integer, nullable=False, default=1)
-
-
 class RubyEmojiItem(Base):
     __tablename__ = 'ruby_emoji_items'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -196,7 +183,6 @@ class RubyEmojiItem(Base):
     item_key = Column(String, nullable=False)
     emoji = Column(String, nullable=False)
     category = Column(String, nullable=False)
-    custom_emoji_id = Column(String, nullable=True)
     purchased_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class Challenge(Base):
@@ -716,8 +702,6 @@ def init_db():
         'total_earned': 'INTEGER NOT NULL DEFAULT 0',
         'name_flag': "VARCHAR NOT NULL DEFAULT ''",
         'name_emoji': "VARCHAR NOT NULL DEFAULT ''",
-        'name_emoji_item_key': 'VARCHAR',
-        'name_emoji_custom_id': 'VARCHAR',
         'emoji_storage_capacity': 'INTEGER NOT NULL DEFAULT 3',
         'fox_name': "VARCHAR DEFAULT 'مکار'",
         'fox_level': 'INTEGER NOT NULL DEFAULT 1',
@@ -818,18 +802,6 @@ def init_db():
             gcode_cols = {c['name'] for c in inspector.get_columns('gift_codes')}
             if 'expires_at' not in gcode_cols:
                 conn.execute(text(f'ALTER TABLE gift_codes ADD COLUMN expires_at {DT_SQL_TYPE}'))
-        if 'ruby_emoji_items' in inspector.get_table_names():
-            emoji_cols = {c['name'] for c in inspector.get_columns('ruby_emoji_items')}
-            if 'custom_emoji_id' not in emoji_cols:
-                conn.execute(text('ALTER TABLE ruby_emoji_items ADD COLUMN custom_emoji_id VARCHAR'))
-        if 'ruby_emoji_catalog' in inspector.get_table_names():
-            catalog_cols = {c['name'] for c in inspector.get_columns('ruby_emoji_catalog')}
-            if 'custom_emoji_id' not in catalog_cols:
-                conn.execute(text('ALTER TABLE ruby_emoji_catalog ADD COLUMN custom_emoji_id VARCHAR'))
-            if 'pack_name' not in catalog_cols:
-                conn.execute(text('ALTER TABLE ruby_emoji_catalog ADD COLUMN pack_name VARCHAR'))
-            if 'active' not in catalog_cols:
-                conn.execute(text('ALTER TABLE ruby_emoji_catalog ADD COLUMN active INTEGER NOT NULL DEFAULT 1'))
         if 'gift_orders' in inspector.get_table_names():
             gift_cols = {c['name'] for c in inspector.get_columns('gift_orders')}
             gift_additions = {

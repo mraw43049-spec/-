@@ -30,7 +30,7 @@ import attack_owl
 from auth import extract_telegram_user, validate_init_data
 
 try:
-    from database import ChatMessage, PendingAttack, Referral, User, RubyEmojiItem, RubyEmojiCatalog, engine, get_session
+    from database import ChatMessage, PendingAttack, Referral, User, engine, get_session
 except ImportError as e:
     raise RuntimeError("نتونستم database.py رو پیدا کنم؛ main.py باید کنار bot.py باشه.") from e
 
@@ -564,8 +564,6 @@ def get_profile(tg_user: dict = Depends(current_telegram_user)):
             or 0
         )
         data = fox_state(session, user, botmod)
-        gift_catalog = _ruby_gift_catalog(session)
-        gift_owned = {x.item_key for x in session.query(RubyEmojiItem).filter_by(owner_id=user.telegram_id).all()}
         data.update({
             "telegram_id": user.telegram_id,
             "avatar": avatar_url(user.telegram_id),
@@ -579,10 +577,6 @@ def get_profile(tg_user: dict = Depends(current_telegram_user)):
             "total_earned": int(user.fox_total_earned or 0),
             "user_level": user_level_info(user, botmod),
             "attacks": _attacks_payload(session, user.telegram_id),
-            "ruby_gift": {"item_key": getattr(user, "name_emoji_item_key", None), "custom_emoji_id": getattr(user, "name_emoji_custom_id", None), "fallback_emoji": getattr(user, "name_emoji", "") or ""},
-            "ruby_gifts": {"balance": int(user.fox_points or 0), "active_key": getattr(user, "name_emoji_item_key", None),
-                           "active_custom_emoji_id": getattr(user, "name_emoji_custom_id", None),
-                           "catalog": [dict(x, owned=(x["key"] in gift_owned), active=(x["key"] == getattr(user, "name_emoji_item_key", None))) for x in gift_catalog]},
         })
         return data
     finally:
@@ -731,110 +725,6 @@ LEADERBOARD_FIELDS = {
 # نگاشت دسته‌ی مینی‌اپ → کلید لیدربرد بات (برای لقب نفرات اول تا سوم)
 _LB_BOT_KEYS = {"points": "fox_points", "referral": "referral_count", "rescued": "fox_rescued_count",
                 "hunt": "hunt_count", "claim": "fox_claim_count", "edu": "edu_correct"}
-
-
-
-# ---------------------------------------------------------------------------
-# گیفت‌های روبی: خرید، مالکیت و انتخاب Custom Emoji تلگرام
-# ---------------------------------------------------------------------------
-def _ruby_gift_catalog(session):
-    try:
-        from ruby_emojis import catalog_json, GIFT_CATALOG, _catalog_sync
-        _catalog_sync(session)
-        return catalog_json(session)
-    except Exception:
-        return []
-
-
-@app.get("/api/ruby-gifts")
-def ruby_gifts(tg_user: dict = Depends(current_telegram_user)):
-    session = get_session()
-    try:
-        user = session.get(User, tg_user["id"])
-        if not user:
-            raise HTTPException(status_code=404, detail="ابتدا /start را بزن.")
-        catalog = _ruby_gift_catalog(session)
-        owned = {x.item_key: x for x in session.query(RubyEmojiItem).filter_by(owner_id=user.telegram_id).all()}
-        return {
-            "balance": int(user.fox_points or 0),
-            "active_key": getattr(user, "name_emoji_item_key", None),
-            "active_custom_emoji_id": getattr(user, "name_emoji_custom_id", None),
-            "catalog": [dict(x, owned=(k in owned), active=(k == getattr(user, "name_emoji_item_key", None)))
-                        for k, x in ((c["key"], c) for c in catalog)],
-        }
-    finally:
-        session.close()
-
-
-class RubyGiftBody(BaseModel):
-    key: str
-
-
-@app.post("/api/ruby-gifts/buy")
-def ruby_gift_buy(body: RubyGiftBody, tg_user: dict = Depends(current_telegram_user)):
-    from ruby_emojis import GIFT_CATALOG
-    if body.key not in GIFT_CATALOG:
-        raise HTTPException(status_code=400, detail="گیفت نامعتبره.")
-    session = get_session()
-    try:
-        user = session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first()
-        if not user:
-            raise HTTPException(status_code=404, detail="ابتدا /start را بزن.")
-        row = session.get(RubyEmojiCatalog, body.key)
-        if not row or not row.active:
-            raise HTTPException(status_code=404, detail="این گیفت فعلاً موجود نیست.")
-        if session.query(RubyEmojiItem).filter_by(owner_id=user.telegram_id, item_key=body.key).first():
-            raise HTTPException(status_code=409, detail="این گیفت رو قبلاً خریدی.")
-        price = int(row.price or 0)
-        if int(user.fox_points or 0) < price:
-            raise HTTPException(status_code=400, detail=f"گیفت روبی کافی نداری؛ {price:,} لازمه.")
-        user.fox_points = int(user.fox_points or 0) - price
-        session.add(RubyEmojiItem(owner_id=user.telegram_id, item_key=body.key,
-                                  emoji=row.fallback_emoji, category="gifts", custom_emoji_id=row.custom_emoji_id))
-        session.commit()
-        return {"message": "🎁 خرید گیفت روبی انجام شد!", "balance": int(user.fox_points or 0)}
-    except HTTPException:
-        session.rollback(); raise
-    except Exception:
-        session.rollback(); raise
-    finally:
-        session.close()
-
-
-@app.post("/api/ruby-gifts/select")
-def ruby_gift_select(body: RubyGiftBody, tg_user: dict = Depends(current_telegram_user)):
-    from ruby_emojis import GIFT_CATALOG
-    if body.key not in GIFT_CATALOG:
-        raise HTTPException(status_code=400, detail="گیفت نامعتبره.")
-    session = get_session()
-    try:
-        user = session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first()
-        if not user: raise HTTPException(status_code=404, detail="ابتدا /start را بزن.")
-        if not session.query(RubyEmojiItem).filter_by(owner_id=user.telegram_id, item_key=body.key).first():
-            raise HTTPException(status_code=403, detail="اول این گیفت رو بخر.")
-        row=session.get(RubyEmojiCatalog,body.key)
-        user.name_emoji_item_key=body.key
-        user.name_emoji_custom_id=str(row.custom_emoji_id) if row and row.custom_emoji_id else None
-        user.name_emoji=row.fallback_emoji if row else "🎁"
-        session.commit()
-        return {"message":"🟢 گیفت برای نامت فعال شد.","active_key":body.key,"custom_emoji_id":user.name_emoji_custom_id}
-    except HTTPException:
-        session.rollback(); raise
-    finally:
-        session.close()
-
-
-@app.post("/api/ruby-gifts/clear")
-def ruby_gift_clear(tg_user: dict = Depends(current_telegram_user)):
-    session=get_session()
-    try:
-        user=session.query(User).filter(User.telegram_id==tg_user["id"]).with_for_update().first()
-        if not user: raise HTTPException(status_code=404, detail="ابتدا /start را بزن.")
-        user.name_emoji_item_key=None; user.name_emoji_custom_id=None; user.name_emoji=''
-        session.commit()
-        return {"message":"🔴 گیفت کنار نامت غیرفعال شد."}
-    finally:
-        session.close()
 
 
 @app.get("/api/ping")

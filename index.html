@@ -30,8 +30,6 @@ header{text-align:center;padding:6px 0 12px}h1{font-size:23px;margin:0;color:#ff
 .refresh-tab.spin #rfIcon{animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
  .ruby-gift{display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;vertical-align:-7px;margin:0 3px;filter:drop-shadow(0 2px 5px #ff3eaa66);flex:none}.ruby-gift img{width:100%;height:100%;display:block;object-fit:contain}.ruby-gift.sm{width:20px;height:20px;vertical-align:-5px}.ruby-gift.lg{width:32px;height:32px;vertical-align:-9px}.ruby-gift-label{display:inline-flex;align-items:center;gap:3px;direction:rtl;white-space:nowrap}.ruby-gift-label strong{color:#ffd27a}.gift-ruby-name{font-weight:900;color:#ffb7df}
-
-.ruby-gifts-card{overflow:hidden}.ruby-gift-list{display:grid;grid-template-columns:1fr 1fr;gap:8px}.ruby-gift-item{border:1px solid #3fae83;background:linear-gradient(180deg,#153f2f,#0b2419);border-radius:15px;padding:10px;text-align:center}.ruby-gift-item .rg-title{font-weight:900;font-size:12px;line-height:1.6}.ruby-gift-item .rg-price{font-size:11px;color:#ffd27a;margin:4px 0}.ruby-gift-item button{width:100%;padding:8px;border-radius:11px;border:0;background:linear-gradient(180deg,#ffc46b,#ff9a3c);color:#2a1204;font-weight:900;font-family:inherit}.ruby-gift-item button.owned{background:linear-gradient(180deg,#43e0a8,#0f9d6e);color:#032015}.ruby-gift-item button.active{background:linear-gradient(180deg,#8be7ff,#3a9bd8);color:#031421}.rg-native{font-size:25px;line-height:1.1;margin-bottom:3px}.rg-status{font-size:11px;color:#cdeedb;margin-top:5px}@media(max-width:390px){.ruby-gift-list{grid-template-columns:1fr}}
 .avatar{width:40px;height:40px;border-radius:50%;object-fit:cover;background:#1e4a37;flex:none;display:flex;align-items:center;justify-content:center;font-weight:900;color:#ffb347;overflow:hidden}
 .avatar img{width:100%;height:100%;object-fit:cover;display:block}
 .podium{display:grid;grid-template-columns:1fr 1.25fr 1fr;gap:8px;align-items:end;direction:ltr;margin-bottom:12px}
@@ -453,13 +451,6 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     </div>
   </div>
 
-  <div class="card ruby-gifts-card">
-    <div class="section-title">🎁 گیفت روبی کنار نام</div>
-    <div id="rubyGiftActive" class="muted" style="text-align:center;margin-bottom:10px">در حال بررسی...</div>
-    <div id="rubyGiftList" class="ruby-gift-list"></div>
-    <div id="rubyGiftHint" class="muted" style="text-align:center;margin-top:10px">بعد از خرید، فقط یک گیفت می‌تونه کنار نامت فعال باشه.</div>
-  </div>
-
   <div class="card">
     <div class="section-title">🦊 دکمه‌های روباه</div>
     <div class="buttons">
@@ -871,70 +862,6 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       };
       im.src = src;
     } catch(e){}
-  }
-
-  function renderRubyGifts(g){
-    if (!g) return;
-    var box=$('rubyGiftList'), active=$('rubyGiftActive');
-    box.innerHTML='';
-    var activeItem=(g.catalog||[]).find(function(x){ return x.active; });
-    active.textContent = activeItem ? ('🟢 فعال: '+activeItem.title+' — برای اعمال به‌عنوان وضعیت تلگرام روی «فعال» بزن.') : '⚪ هیچ گیفتی کنار نامت فعال نیست.';
-    (g.catalog||[]).forEach(function(item){
-      var c=document.createElement('div'); c.className='ruby-gift-item';
-      var icon=document.createElement('div'); icon.className='rg-native'; icon.textContent=item.fallback_emoji||'🎁';
-      var title=document.createElement('div'); title.className='rg-title'; title.textContent=item.title;
-      var price=document.createElement('div'); price.className='rg-price'; price.textContent=fa(item.price)+' گیفت روبی';
-      var b=document.createElement('button');
-      if(item.active){ b.textContent='🟢 فعال کنار نام'; b.className='active'; }
-      else if(item.owned){ b.textContent='✨ فعال کردن'; b.className='owned'; }
-      else { b.textContent='🛒 خرید'; }
-      b.onclick=function(){
-        if(item.active){ clearRubyGift(); return; }
-        if(!item.owned){
-          if(!confirm('خرید «'+item.title+'» با '+fa(item.price)+' گیفت روبی؟')) return;
-          rubyGiftAction('/api/ruby-gifts/buy',{key:item.key});
-        } else rubyGiftAction('/api/ruby-gifts/select',{key:item.key});
-      };
-      c.appendChild(icon);c.appendChild(title);c.appendChild(price);c.appendChild(b);
-      var st=document.createElement('div');st.className='rg-status';st.textContent=item.active?'فعال':' ';
-      c.appendChild(st);box.appendChild(c);
-    });
-  }
-  function setTelegramGiftStatus(customId){
-    if(!customId || !tg) return Promise.resolve(false);
-    try{
-      if(typeof tg.requestEmojiStatusAccess==='function'){
-        return new Promise(function(resolve){
-          var done=false;
-          var ok=function(){if(done)return;done=true;resolve(true)};
-          var bad=function(){if(done)return;done=true;resolve(false)};
-          tg.onEvent && tg.onEvent('emojiStatusSet',ok);
-          tg.onEvent && tg.onEvent('emojiStatusFailed',bad);
-          Promise.resolve(tg.requestEmojiStatusAccess()).then(function(){
-            try{ var r=tg.setEmojiStatus(customId,{duration:0}); if(r && typeof r.then==='function') r.then(ok).catch(bad); }catch(e){bad();}
-          }).catch(bad);
-          setTimeout(function(){if(!done){done=true;resolve(false)}},8000);
-        });
-      }
-      if(typeof tg.setEmojiStatus==='function') return Promise.resolve(tg.setEmojiStatus(customId,{duration:0})).then(function(){return true}).catch(function(){return false});
-    }catch(e){}
-    return Promise.resolve(false);
-  }
-  function rubyGiftAction(path,body){
-    if(busy)return; busy=true;
-    api(path,'POST',body).then(function(r){
-      toast(r.message||'انجام شد.',true);
-      return loadProfile(true).then(function(){
-        if(path.indexOf('/select')>=0 && r.custom_emoji_id) return setTelegramGiftStatus(r.custom_emoji_id).then(function(ok){
-          if(ok) toast('✨ گیفت به وضعیت تلگرام و کنار نامت اضافه شد.',true);
-          else toast('گیفت فعال شد؛ اگر وضعیت تلگرام تغییر نکرد، دوباره دکمه «فعال کردن» را بزن.',false);
-        });
-      });
-    }).catch(function(e){toast(e.message,false)}).then(function(){busy=false;});
-  }
-  function clearRubyGift(){
-    if(!confirm('گیفت کنار نامت غیرفعال بشه؟'))return;
-    rubyGiftAction('/api/ruby-gifts/clear');
   }
 
   function loadProfile(silent){
