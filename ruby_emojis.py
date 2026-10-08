@@ -122,7 +122,7 @@ async def emoji_command(update, context):
         if not u:
             return await update.message.reply_text("اول /start رو بزن.")
         _catalog_sync(s)
-        await update.message.reply_text("🎁 <bگیفت روبی</b>\n\nیکی از گیفت‌ها رو انتخاب کن:",
+        await update.message.reply_text("🎁 <b>گیفت روبی</b>\n\nیکی از گیفت‌ها رو انتخاب کن:",
             reply_markup=_home_keyboard(s,u.telegram_id), parse_mode="HTML", **({} if update.message.chat_id else {}))
     finally: s.close()
 
@@ -135,7 +135,7 @@ async def emoji_callback(update, context):
         if not u: return await q.answer("ابتدا /start را بزن.",show_alert=True)
         _catalog_sync(s)
         if parts[1] == "home":
-            await q.edit_message_text("🎁 <bگیفت روبی</b>\n\nانتخاب کن:",reply_markup=_home_keyboard(s,u.telegram_id),parse_mode="HTML"); return
+            await q.edit_message_text("🎁 <b>گیفت روبی</b>\n\nانتخاب کن:",reply_markup=_home_keyboard(s,u.telegram_id),parse_mode="HTML"); return
         if parts[1] == "storage":
             items=s.query(RubyEmojiItem).filter_by(owner_id=u.telegram_id).all()
             if not items:

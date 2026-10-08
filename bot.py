@@ -13592,7 +13592,7 @@ async def text_router(update, context):
     if _feat_key and feature_blocked(update, _feat_key):
         return
     if await handle_named_fox_text(update, context): return
-    if text in {"ایموجی روبی", "شکلک روبی"}:
+    if text in {"ایموجی روبی", "شکلک روبی", "گیفت روبی", "گیفت‌های روبی", "گیفت های روبی", "گیفت روبی 🎁", "🎁 گیفت روبی"}:
         await emoji_command(update, context); return
     if text in {"ازدواج روبی", "ازدواج روبی!", "💕 ازدواج روبی 💍"}: await marriage_command(update,context); return
     if text in {"نینی روبی", "نینی روباه", "🍼 نینی روبی"}: await baby_command(update,context); return
@@ -15250,6 +15250,11 @@ def main():
     app.add_handler(CommandHandler("factory",factory_command))
     app.add_handler(CommandHandler("referral",referral_command))
     app.add_handler(CommandHandler("roobam",roobam_command))
+    # دستورات مستقیم سیستم گیفت/ایموجی روبی
+    app.add_handler(CommandHandler("emoji", emoji_command))
+    app.add_handler(CommandHandler("rubyemoji", emoji_command))
+    app.add_handler(CommandHandler("ruby", emoji_command))
+    app.add_handler(CommandHandler("gifts", emoji_command))
     app.add_handler(CommandHandler("leaderboard",leaderboard_command))
     app.add_handler(CallbackQueryHandler(jail_callback_gate), group=-20)
     app.add_handler(CallbackQueryHandler(fine_callback_gate), group=-19)
