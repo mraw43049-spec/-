@@ -13595,6 +13595,21 @@ def _cmd_norm(text):
 
 _EDU_TRIGGERS_NORM = {"روباهیو درس", "روباهیو درسی", "درس روباهیو", "آموزش روباهیو", "روباهیو آموزش"}
 
+async def edu_early_handler(update, context):
+    """مسیر مستقل «روباهیو درس» (گروه -7)؛ حتی اگر text_router به هر دلیل به آن نرسد."""
+    m = update.message
+    if not m or not m.text or _cmd_norm(m.text) not in _EDU_TRIGGERS_NORM: return
+    if context.user_data.get("recovery_stage"): return
+    try:
+        if feature_blocked(update, "education"):
+            return
+        await education_command(update, context)
+    except Exception:
+        logger.exception("education early handler failed")
+        try: await m.reply_text("❌ پنل درس الان باز نشد؛ چند لحظه بعد دوباره «روباهیو درس» را بنویس.", **reply_kwargs(m))
+        except Exception: pass
+    raise ApplicationHandlerStop
+
 async def text_router(update, context):
     # «روباهیو درس» اول از همه بررسی می‌شود تا هیچ هندلر دیگری جلوی آن را نگیرد؛
     # در گروه لینک ورود به پیوی/مینی‌اپ می‌آید و در پیوی خود پنل درس باز می‌شود.
@@ -13605,6 +13620,8 @@ async def text_router(update, context):
                 return
             await education_command(update, context)
             return
+    except ApplicationHandlerStop:
+        raise
     except Exception:
         logger.exception("education trigger failed")
     if await handle_recovery_text(update, context): return
@@ -13809,12 +13826,39 @@ async def recovery_command(update, context):
 
 async def _get_or_rotate_recovery_code(session, user):
     now=now_utc(); exp=aware(user.recovery_code_expires_at)
-    if user.recovery_code and exp and exp > now: return user.recovery_code, exp
+    if user.recovery_code and exp and exp > now:
+        # کد فعلی هنوز معتبر است؛ مطمئن می‌شویم ردیف تأییدش هم در جدول هست و باطل‌شده/منقضی نیست
+        # (قبلاً کدِ نمایش‌داده‌شده با ردیف جدول هماهنگ نبود و موقع وارد کردن «منقضی» می‌شد).
+        h=_recovery_hash(user.recovery_code)
+        row=session.query(RecoveryCode).filter(RecoveryCode.code_hash==h).first()
+        if row is None:
+            session.add(RecoveryCode(owner_id=user.telegram_id, code_hash=h, expires_at=exp)); session.commit()
+        elif row.used_at is not None or aware(row.expires_at) is None or aware(row.expires_at) <= now or row.owner_id != user.telegram_id:
+            row.used_at=None; row.expires_at=exp; row.owner_id=user.telegram_id; session.commit()
+        return user.recovery_code, exp
     code=_new_recovery_code(); exp=now+timedelta(seconds=RECOVERY_TTL_SECONDS)
     user.recovery_code=code; user.recovery_code_expires_at=exp
     session.query(RecoveryCode).filter(RecoveryCode.owner_id==user.telegram_id, RecoveryCode.used_at.is_(None)).update({"used_at":now}, synchronize_session=False)
     session.add(RecoveryCode(owner_id=user.telegram_id, code_hash=_recovery_hash(code), expires_at=exp)); session.commit()
     return code, exp
+
+async def _recovery_show(q, context, text, parse_mode="HTML"):
+    """پنل بازیابی را در همان پیام ویرایش می‌کند (دکمه‌های دریافت کد و وارد کردن کد همیشه کنار هم می‌مانند)."""
+    kb=recovery_keyboard()
+    try:
+        await q.message.edit_text(text, reply_markup=kb, parse_mode=parse_mode)
+        return True
+    except BadRequest as e:
+        if "not modified" in str(e).lower(): return True
+        logger.warning("recovery panel edit failed: %s", e)
+    except Exception:
+        logger.exception("recovery panel edit failed")
+    try:
+        await context.bot.send_message(chat_id=q.from_user.id, text=text, reply_markup=kb, parse_mode=parse_mode)
+        return True
+    except Exception:
+        logger.exception("recovery panel send failed")
+    return False
 
 async def recovery_callback(update, context):
     q=update.callback_query
@@ -13834,28 +13878,24 @@ async def recovery_callback(update, context):
         if not code:
             await q.answer("❌ ساخت کد انجام نشد؛ چند لحظه بعد دوباره امتحان کن.", show_alert=True)
             return
+        context.user_data.pop("recovery_stage", None)
         total=max(60,int((exp-now_utc()).total_seconds())); hours=total//3600; mins=(total%3600)//60
-        body=(f"🔐 کد بازیابی اکانت شما:\n\n<code>{code}</code>\n\n⏳ اعتبار: حدود {hours} ساعت و {mins} دقیقه\n\n"
-              "⚠️ <b>این کد را به هیچ‌کس ندهید و برای هیچ‌کس ارسال نکنید.</b>\nبا این کد همه اطلاعات اکانت به حسابی که کد را وارد کند منتقل می‌شود.")
-        plain=(f"🔐 کد بازیابی اکانت شما:\n\n{code}\n\n⏳ اعتبار: حدود {hours} ساعت و {mins} دقیقه\n\n"
-               "⚠️ این کد را به هیچ‌کس ندهید و برای هیچ‌کس ارسال نکنید.")
-        sent=False
-        for kwargs in ({"text":body,"parse_mode":"HTML"}, {"text":plain}):
-            try:
-                await context.bot.send_message(chat_id=q.from_user.id, **kwargs); sent=True; break
-            except Exception:
-                logger.exception("recovery: sending code failed (%s)", "html" if "parse_mode" in kwargs else "plain")
-        if sent:
+        body=("🔐 بازیابی اکانت\n\n"
+              f"🔑 کد بازیابی این اکانت:\n<code>{code}</code>\n\n⏳ اعتبار: حدود {hours} ساعت و {mins} دقیقه\n\n"
+              "⚠️ <b>این کد را به هیچ‌کس ندهید.</b> هرکس آن را داشته باشد می‌تواند اطلاعات این اکانت را به حساب خودش منتقل کند.\n\n"
+              "👤 اگر می‌خواهی اطلاعات یک اکانت دیگر را به همین حساب بیاوری، دکمه‌ی «وارد کردن کد» را بزن.")
+        if await _recovery_show(q, context, body):
             await q.answer("کد فعال بازیابی آماده شد.")
         else:
             await q.answer(f"کد بازیابی: {code}", show_alert=True)
         return
     if action=="enter":
-        context.user_data["recovery_stage"]="await_code"; await q.answer()
-        try:
-            await context.bot.send_message(chat_id=q.from_user.id, text="⌨️ کد ۱۶ رقمی بازیابی را بفرست.\n\n⚠️ <b>کد را فقط برای ربات بفرست و به هیچ‌کس نده.</b>", parse_mode="HTML")
-        except Exception:
-            logger.exception("recovery: enter prompt failed")
+        context.user_data["recovery_stage"]="await_code"
+        body=("⌨️ کد ۱۶ رقمی بازیابی را همین‌جا برای ربات بفرست.\n\n"
+              "⚠️ <b>کد را فقط برای ربات بفرست و به هیچ‌کس نده.</b>\n"
+              "با وارد کردن کد، اطلاعات اکانتِ صاحب کد به این حساب منتقل می‌شود.")
+        await q.answer()
+        await _recovery_show(q, context, body)
         return
     await q.answer()
 
@@ -13921,30 +13961,48 @@ def _transfer_all_user_data(session, source_id, target_id, recovery_row):
 
 async def handle_recovery_text(update, context):
     if not update.message or update.effective_chat.type!="private" or context.user_data.get("recovery_stage")!="await_code": return False
-    text=(update.message.text or "").strip().replace(" ","")
-    for a,b in zip("۰۱۲۳۴۵۶۷۸۹","0123456789"): text=text.replace(a,b)
-    context.user_data.pop("recovery_stage",None)
+    text=(update.message.text or "").strip()
+    for a,b_ in zip("۰۱۲۳۴۵۶۷۸۹","0123456789"): text=text.replace(a,b_)
+    for a,b_ in zip("٠١٢٣٤٥٦٧٨٩","0123456789"): text=text.replace(a,b_)
+    text=re.sub(r"[\s\u200c\u200d\u200e\u200f\-–_]","",text)
     if not re.fullmatch(r"\d{16}",text):
-        await update.message.reply_text("❌ کد باید دقیقاً ۱۶ رقمی باشد. دوباره از «بازیابی اکانت» شروع کن.",**reply_kwargs(update.message)); return True
+        await update.message.reply_text("❌ کد باید دقیقاً ۱۶ رقم باشد. دوباره کد را بفرست (یا از پنل «بازیابی اکانت» دکمه‌ی وارد کردن کد را بزن).",**reply_kwargs(update.message)); return True
     session=get_session()
     try:
-        now=now_utc(); row=session.query(RecoveryCode).filter(RecoveryCode.code_hash==_recovery_hash(text),RecoveryCode.used_at.is_(None),RecoveryCode.expires_at>now).first()
-        if not row:
-            await update.message.reply_text("❌ کد نامعتبر یا منقضی شده است.",**reply_kwargs(update.message)); return True
-        owner=session.get(User,row.owner_id); current=session.get(User,update.effective_user.id)
-        if not owner:
-            row.used_at=now; session.commit(); await update.message.reply_text("❌ اکانت مربوط به این کد پیدا نشد.",**reply_kwargs(update.message)); return True
+        now=now_utc(); row=None; owner=None; expired=False
+        cand=session.query(RecoveryCode).filter(RecoveryCode.code_hash==_recovery_hash(text)).first()
+        if cand is not None:
+            ce=aware(cand.expires_at)
+            if cand.used_at is None and ce is not None and ce>now:
+                row=cand; owner=session.get(User,cand.owner_id)
+            else: expired=True
+        if owner is None:
+            # راه دوم: خود کدِ ذخیره‌شده‌ی کاربر (اگر ردیف جدول با کد نمایش‌داده‌شده هماهنگ نباشد)
+            u2=session.query(User).filter(User.recovery_code==text).first()
+            if u2 is not None:
+                e2=aware(u2.recovery_code_expires_at)
+                if e2 is not None and e2>now: owner=u2; expired=False; row=cand if (cand is not None and cand.owner_id==u2.telegram_id) else None
+                else: expired=True
+        if owner is None:
+            context.user_data.pop("recovery_stage",None)
+            msg="❌ این کد منقضی یا باطل شده است. از اکانت قبلی دوباره «دریافت کد» را بزن." if expired else "❌ کد نامعتبر است. مطمئن شو همین ۱۶ رقم را از «دریافت کد» اکانت قبلی گرفته‌ای."
+            await update.message.reply_text(msg,**reply_kwargs(update.message)); return True
+        current=session.get(User,update.effective_user.id)
         if current and current.telegram_id==owner.telegram_id:
-            row.used_at=now; session.commit(); await update.message.reply_text("ℹ️ این کد مربوط به همین اکانت است.",**reply_kwargs(update.message)); return True
+            context.user_data.pop("recovery_stage",None)
+            await update.message.reply_text("ℹ️ این کد مربوط به همین اکانتی است که الان داخلش هستی. کد را باید از اکانت قبلی بگیری و اینجا وارد کنی.",**reply_kwargs(update.message)); return True
+        context.user_data.pop("recovery_stage",None)
         if not current:
             current=User(telegram_id=update.effective_user.id,username=update.effective_user.username,first_name=update.effective_user.first_name); session.add(current); session.flush()
-        _transfer_all_user_data(session,owner.telegram_id,current.telegram_id,row)
+        source_id=owner.telegram_id
+        _transfer_all_user_data(session,source_id,current.telegram_id,row)
         current.username=update.effective_user.username; current.first_name=update.effective_user.first_name
         session.commit()
-        await update.message.reply_text("✅ <b>بازیابی کامل انجام شد.</b>\n\nهمه اطلاعات اکانت قبلی شامل موجودی‌ها، روباه، اسکین‌ها، بانک، موجودی‌ها، پیشرفت درس و داده‌های وابسته به حساب منتقل شد.\n\n🔒 کد بلافاصله باطل شد.",parse_mode="HTML",**reply_kwargs(update.message))
+        await update.message.reply_text("✅ <b>بازیابی کامل انجام شد.</b>\n\nهمه اطلاعات اکانت قبلی شامل موجودی‌ها، روباه، اسکین‌ها، بانک، پیشرفت درس و داده‌های وابسته به حساب منتقل شد.\n\n🔒 کد بلافاصله باطل شد.",parse_mode="HTML",**reply_kwargs(update.message))
     except Exception:
         session.rollback(); logger.exception("account recovery failed")
-        await update.message.reply_text("❌ بازیابی انجام نشد؛ چون انتقال اتمیک است، در صورت خطا اطلاعات حساب‌ها تغییر نکرده است.",**reply_kwargs(update.message))
+        context.user_data.pop("recovery_stage",None)
+        await update.message.reply_text("❌ بازیابی انجام نشد؛ چون انتقال اتمیک است، اطلاعات هیچ‌کدام از حساب‌ها تغییر نکرده. دوباره امتحان کن.",**reply_kwargs(update.message))
     finally: session.close()
     return True
 
@@ -15408,6 +15466,7 @@ def main():
     app.add_handler(ChatMemberHandler(bot_joined_group, ChatMemberHandler.MY_CHAT_MEMBER), group=-2)
     app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, register_group_chat), group=-1)
     app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, track_city_member_presence), group=-2)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,edu_early_handler),group=-7)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text_router),group=2)
     # ادمین تو پیوی فایل (آهنگ/ویدیو/گیف/استیکر/...) رو با کپشن «یاد بگیر ...» می‌فرسته → به روباه یاد داده می‌شه
     app.add_handler(MessageHandler(
