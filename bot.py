@@ -22,24 +22,28 @@ from telegram.request import HTTPXRequest
 # Telegram inline-button color policy (Bot API button styles).
 # Keep this wrapper local to each module so existing button callbacks stay unchanged.
 def InlineKeyboardButton(text, *args, **kwargs):
+    """Apply consistent Telegram Bot API button colors without changing callbacks.
+
+    Confirm/accept = green; negative/back/cancel = red; fox/factory = red;
+    all other callback buttons = blue. Explicit caller styles always win.
+    """
     _text = str(text or '').strip().lower()
     _callback = kwargs.get('callback_data')
-    # Respect an explicit style supplied by a caller.
     if _callback is not None and 'style' not in kwargs:
         _cb = str(_callback).lower()
-        _negative = any(word in _text for word in ('❌', '🚫', '✖', 'رد', 'خیر', 'لغو', 'بازگشت', 'انصراف', 'حذف', 'نه'))
-        _positive = any(word in _text for word in ('✅', 'تأیید', 'تایید', 'بله', 'قبول', 'تأیید', 'تایید', 'approve', 'confirm'))
-        if _negative or any(word in _cb for word in (':no:', ':reject:', ':cancel', ':back:', ':dismiss:')):
+        _negative = any(word in _text for word in ('❌', '🚫', '✖', 'رد', 'خیر', 'لغو', 'بازگشت', 'برگشت', 'انصراف', 'حذف', 'نه'))
+        _positive = any(word in _text for word in ('✅', 'تأیید', 'تایید', 'بله', 'قبول', 'approve', 'confirm'))
+        _negative_cb = any(token in _cb for token in (':no:', ':reject:', ':cancel', ':back:', ':dismiss:', 'renameno', 'genderno', 'resetno'))
+        _positive_cb = any(token in _cb for token in (':yes:', ':confirm:', ':approve:', ':accept:', 'renameyes', 'genderyes', 'resetyes'))
+        if _negative or _negative_cb:
             kwargs['style'] = 'danger'
-        elif _positive or any(word in _cb for word in (':yes:', ':confirm:', ':approve:', ':accept:')):
+        elif _positive or _positive_cb:
             kwargs['style'] = 'success'
-        elif _cb.startswith('bank:'):
-            # Bank actions are blue except withdraw/back/cancel.
-            if ':withdraw:' in _cb or _cb.startswith('bank:w:') or ':back:' in _cb or ':cancel' in _cb:
-                kwargs['style'] = 'danger'
-            else:
-                kwargs['style'] = 'primary'
-        elif _cb.startswith(('rg:', 'csetup:', 'rcreate:', 'rdicebet:', 'rbomb:')):
+        elif _cb.startswith(('fox:', 'factory:')):
+            kwargs['style'] = 'danger'
+        elif _cb.startswith('bank:') and (':withdraw:' in _cb or _cb.startswith('bank:w:') or ':cancel' in _cb):
+            kwargs['style'] = 'danger'
+        else:
             kwargs['style'] = 'primary'
     return _TelegramInlineKeyboardButton(text, *args, **kwargs)
 
