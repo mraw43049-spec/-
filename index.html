@@ -261,10 +261,16 @@ button:disabled::after,.lb-close::after{display:none}
 .bsteps div.cur{border-color:#ffc46b;background:#2a2a12}
 .bres{text-align:center;font-weight:900;margin:8px 0;min-height:22px}
 /* پلینکو 🔴 */
-.plinko-canvas{width:100%;display:block;border-radius:16px;background:radial-gradient(circle at 50% 0%,#12372a,#07140f 72%);border:1px solid #2c6a50;margin:6px 0 10px;direction:ltr}
-.prisk{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:6px 0}
-.prisk button{border:1px solid #3b7a5a;background:#0f2c20;color:#eafff3;border-radius:12px;padding:9px 2px;font-weight:800;font-size:12.5px;font-family:inherit}
-.prisk button.on{background:linear-gradient(180deg,#ffc46b,#ff9a3c);color:#2a1204;border-color:#ffd27a}
+.plinko-canvas{width:100%;display:block;border-radius:20px;background:radial-gradient(ellipse at 50% 0%,#194f61 0%,#111b3d 48%,#080d1b 100%);border:1px solid #3e8ca7;margin:10px 0 12px;direction:ltr;box-shadow:0 12px 32px #0008,inset 0 0 30px #40d9ff12}
+#plinkoCard{background:linear-gradient(155deg,#101d32,#0b1325 60%,#12251f);border:1px solid #2e6880;box-shadow:0 10px 35px #0005}
+#plinkoCard .section-title{font-size:19px;color:#a5f3fc;text-shadow:0 0 18px #22d3ee40}
+.prisk{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0}
+.prisk button{border:1px solid #38516e;background:linear-gradient(145deg,#1a2b45,#111c30);color:#eaf7ff;border-radius:14px;padding:11px 3px;font-weight:900;font-size:12.5px;font-family:inherit;box-shadow:0 4px 10px #0003;transition:transform .15s,border-color .15s}
+.prisk button:active{transform:scale(.97)}
+.prisk button.on{background:linear-gradient(135deg,#67e8f9,#60a5fa);color:#071426;border-color:#d6fbff;box-shadow:0 0 18px #38bdf855}
+#pDrop{background:linear-gradient(135deg,#22d3ee,#3b82f6)!important;color:#071426!important;border:0;box-shadow:0 8px 22px #2563eb55;font-weight:950}
+#pRes{white-space:pre-line;text-align:right;line-height:1.9;padding:12px;border:1px solid #2e6880;border-radius:14px;background:#0a1727;color:#e7faff;min-height:0}
+#pRule{background:#102338;border-radius:12px;padding:9px;color:#bceeff}
 
 /* ===== دروازه‌ی عضویت اجباری ===== */
 .gate{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;padding:20px;background:#03090ff2;overflow:auto}
@@ -567,23 +573,13 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   </div>
 </section>
 
-<section id="chatView" class="view">
-  <div class="card">
-    <div class="section-title">💬 چت‌روم همه‌ی بازیکن‌ها</div>
-    <div id="chatBox" class="chat-box"><div id="chatEmpty" class="muted" style="text-align:center;margin:auto">🦊 در حال بارگذاری...</div></div>
-    <div class="chat-form">
-      <input id="chatInput" maxlength="300" placeholder="یه پیام بنویس..." autocomplete="off">
-      <button id="chatSend" class="action">ارسال</button>
-    </div>
-  </div>
-</section>
+
 
 <nav class="tabs">
   <button id="eduTab" class="tab"><svg class="ico"><use href="#i-edu"/></svg>درس</button>
   <button id="wheelTab" class="tab"><svg class="ico"><use href="#i-game"/></svg>بازی‌ها</button>
   <button id="foxTab" class="tab center active"><span class="cav" id="cAvatar">🦊</span><span id="cName">روباه</span></button>
   <button id="leaderTab" class="tab"><svg class="ico"><use href="#i-trophy"/></svg>لیدربرد</button>
-  <button id="chatTab" class="tab"><svg class="ico"><use href="#i-chat"/></svg>چت</button>
 </nav>
 
 <div id="renameModal" class="modal"><div class="sheet">
@@ -1161,7 +1157,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     return api("/api/bomb").then(function(d){
       bomb = d; bombCdAt = Date.now();
       $("bBal").textContent = fa(d.balance);
-      $("bRule").textContent = d.unlocked ? ("حداقل " + fa(d.min_entry) + " و حداکثر " + fa(d.max_entry) + " روب‌پوینت.") : ("🔒 کازینو از سطح " + fa(d.unlock_level) + " باز می‌شه. (سطح تو: " + fa(d.level) + ")");
+      $("bRule").textContent = d.unlocked ? ("حداقل " + fa(d.min_entry) + " و حداکثر " + fa(d.max_entry) + " روب‌پوینت. سهمیه روزانه: کم‌ریسک ۷، متوسط ۵، پرریسک ۱۰ بار؛ هر سطح جداگانه و هر روز از نو.") : ("🔒 کازینو از سطح " + fa(d.unlock_level) + " باز می‌شه. (سطح تو: " + fa(d.level) + ")");
       $("bStart").disabled = !d.unlocked;
       var chips = $("bChips"); chips.innerHTML = "";
       [5000, 10000, 50000, 100000].forEach(function(v){
@@ -1316,7 +1312,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     var box = $("pRisk"); box.innerHTML = "";
     if (!plinko) return;
     Object.keys(plinko.risks).forEach(function(key){
-      var b = document.createElement("button"); b.textContent = plinko.risks[key].title;
+      var b = document.createElement("button"); var used = (plinko.daily_plays && plinko.daily_plays[key]) || 0; var lim = plinko.risks[key].daily_limit || ({low:7,mid:5,high:10}[key]); b.textContent = plinko.risks[key].title + "\n" + used + "/" + lim + " امروز"; b.style.whiteSpace = "pre-line";
       if (key === plinkoRisk) b.className = "on";
       b.onclick = function(){ if (plinkoBusy) return; plinkoRisk = key; plinkoLanded = -1; drawPlinkoRisk(); plinkoDraw(); };
       box.appendChild(b);
@@ -1329,7 +1325,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       if (!d.risks[plinkoRisk]) plinkoRisk = Object.keys(d.risks)[0];
       $("pBal").textContent = fa(d.balance);
       $("pRule").textContent = d.disabled ? "🛠 کازینو فعلاً غیرفعاله." :
-        d.unlocked ? ("حداقل " + fa(d.min_entry) + " و حداکثر " + fa(d.max_entry) + " روب‌پوینت.") :
+        d.unlocked ? ("حداقل " + fa(d.min_entry) + " و حداکثر " + fa(d.max_entry) + " روب‌پوینت. سهمیه روزانه: کم‌ریسک ۷، متوسط ۵، پرریسک ۱۰ بار؛ هر سطح جداگانه و هر روز از نو.") :
         ("🔒 کازینو از سطح " + fa(d.unlock_level) + " باز می‌شه. (سطح تو: " + fa(d.level) + ")");
       $("pDrop").disabled = !d.unlocked || d.disabled;
       var chips = $("pChips"); chips.innerHTML = "";
@@ -1351,7 +1347,8 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       $("pBal").textContent = fa(r.balance - r.payout);          // ورودی همون لحظه کم می‌شه
       plinkoAnimate(r.path, r.slot, function(){
         plinko.balance = r.balance; $("pBal").textContent = fa(r.balance);
-        $("pRes").textContent = r.message; toast(r.message, r.profit >= 0);
+        if (!plinko.daily_plays) plinko.daily_plays = {}; plinko.daily_plays[plinkoRisk] = r.daily_used;
+        $("pRes").textContent = r.message; drawPlinkoRisk(); toast(r.message, r.profit >= 0);
         try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(r.profit > 0 ? "medium" : "light"); } catch(e){}
         plinkoBusy = false; $("pDrop").disabled = false;
       });
@@ -1494,7 +1491,6 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   $("eduTab").onclick = function(){ show("edu"); };
   $("wheelTab").onclick = function(){ show("wheel"); };
   $("leaderTab").onclick = function(){ show("leader"); };
-  $("chatTab").onclick = function(){ show("chat"); };
 
   function refreshNow(){
     var b = $("btnRefresh");

@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, text
 import httpx
 
 import attack_owl
@@ -1109,6 +1109,14 @@ PLINKO_RISKS = {
 }
 _plinko_rng = _plinko_random_mod.SystemRandom()
 _plinko_last: dict = {}      # uid -> زمان آخرین پرتاب
+PLINKO_DAILY_LIMITS = {"low": 7, "mid": 5, "high": 10}
+# جدول جداگانه؛ شمارنده‌ها بعد از restart/redeploy هم باقی می‌مانند.
+try:
+    with engine.begin() as _conn:
+        _conn.execute(text("CREATE TABLE IF NOT EXISTS plinko_daily_plays (user_id BIGINT NOT NULL, risk VARCHAR(8) NOT NULL, play_day VARCHAR(10) NOT NULL, plays INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, risk, play_day))"))
+except Exception as _plinko_table_error:
+    print(f"[plinko] daily counter table init failed: {_plinko_table_error}")
+
 
 
 def _plinko_roll(rows=PLINKO_ROWS):
@@ -1136,7 +1144,8 @@ def plinko_state(tg_user: dict = Depends(current_telegram_user)):
             "min_entry": PLINKO_MIN_ENTRY, "max_entry": PLINKO_MAX_ENTRY,
             "balance": int(user.fox_points or 0),
             "rows": PLINKO_ROWS,
-            "risks": {k: {"title": v["title"], "mult": v["mult"]} for k, v in PLINKO_RISKS.items()},
+            "risks": {k: {"title": v["title"], "mult": v["mult"], "daily_limit": PLINKO_DAILY_LIMITS[k]} for k, v in PLINKO_RISKS.items()},
+            "daily_plays": {k: int((session.execute(text("SELECT plays FROM plinko_daily_plays WHERE user_id=:uid AND risk=:risk AND play_day=:day"), {"uid": int(user.telegram_id), "risk": k, "day": datetime.now(timezone.utc).date().isoformat()}).scalar() or 0)) for k in PLINKO_DAILY_LIMITS},
         }
     finally:
         session.close()
@@ -1165,6 +1174,11 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
         if amount > PLINKO_MAX_ENTRY:
             raise HTTPException(status_code=400, detail=f"❌ سقف مبلغ ورودی پلینکو {PLINKO_MAX_ENTRY:,} روب‌پوینته.")
         uid = int(user.telegram_id)
+        today = datetime.now(timezone.utc).date().isoformat()
+        used = int(session.execute(text("SELECT plays FROM plinko_daily_plays WHERE user_id=:uid AND risk=:risk AND play_day=:day"), {"uid": uid, "risk": str(body.risk or "mid"), "day": today}).scalar() or 0)
+        daily_limit = PLINKO_DAILY_LIMITS[str(body.risk or "mid")]
+        if used >= daily_limit:
+            raise HTTPException(status_code=429, detail=f"⏰ سهمیهٔ امروز این سطح ریسک تموم شده ({daily_limit} بار در روز). فردا دوباره بیا.")
         now = time.time()
         if now - _plinko_last.get(uid, 0) < PLINKO_COOLDOWN:
             raise HTTPException(status_code=429, detail="⏳ یه لحظه صبر کن تا توپ قبلی بیفته.")
@@ -1174,6 +1188,7 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
         mult = float(risk["mult"][slot])
         payout = _plinko_payout(amount, mult)
         user.fox_points = int(user.fox_points or 0) - amount + payout
+        session.execute(text("INSERT INTO plinko_daily_plays (user_id, risk, play_day, plays) VALUES (:uid, :risk, :day, 1) ON CONFLICT (user_id, risk, play_day) DO UPDATE SET plays = plinko_daily_plays.plays + 1"), {"uid": uid, "risk": str(body.risk or "mid"), "day": today})
         session.commit()
         if len(_plinko_last) > 50000:
             _plinko_last.clear()
@@ -1185,8 +1200,12 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
             msg = f"😐 ضریب ×{mult:g}؛ پولت برگشت."
         else:
             msg = f"😢 ضریب ×{mult:g}؛ {abs(profit):,} روب‌پوینت باختی."
+        used_after = used + 1
+        total_assets = int(user.fox_points or 0)
+        breakdown = f"🧮 محاسبه: {amount:,} × {mult:g} = {payout:,} روب‌پوینت دریافتی\n" + (f"📈 سود خالص: {profit:,}" if profit > 0 else (f"📉 زیان خالص: {abs(profit):,}" if profit < 0 else "➖ سود و زیان: صفر")) + f"\n💼 دارایی کل کیف پول: {total_assets:,} روب‌پوینت\n🎯 سهمیهٔ امروزِ این ریسک: {used_after}/{daily_limit}"
         return {"path": path, "slot": slot, "mult": mult, "payout": payout, "profit": profit,
-                "balance": int(user.fox_points or 0), "message": msg}
+                "balance": total_assets, "daily_used": used_after, "daily_limit": daily_limit,
+                "message": msg + "\n" + breakdown}
     except HTTPException:
         session.rollback()
         raise
