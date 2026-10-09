@@ -225,10 +225,6 @@ class GroupChat(Base):
     city_election_votes = Column(String, nullable=True, default='')           # "رای‌دهنده:کاندید" با کاما جدا شده
     city_election_candidacy_ends_at = Column(DateTime(timezone=True), nullable=True)  # مهلت ثبت‌نام کاندیدها
     city_election_voting_ends_at = Column(DateTime(timezone=True), nullable=True)     # مهلت رای‌گیری (حداکثر 5 ساعت)
-    # ---------- ناظر هوشمند گروه (پیش‌فرض خاموش؛ ادمین گروه روشنش می‌کند) ----------
-    ai_mod = Column(Integer, nullable=False, default=0)
-    # غلط‌گیر املایی: -1 = طبق پیش‌فرض ربات (FOX_SPELL_DEFAULT)، 0 = خاموش، 1 = روشن
-    spell_mod = Column(Integer, nullable=False, default=-1)
     # بخش‌های غیرفعال‌شده‌ی این گپ توسط پشتیبانی؛ کلیدها با کاما جدا می‌شوند (مثلاً "injured_fox,casino")
     disabled_features = Column(String, nullable=False, default='')
 
@@ -319,19 +315,6 @@ class GiveawayEntry(Base):
     left_at = Column(DateTime(timezone=True), nullable=True)
     last_checked_at = Column(DateTime(timezone=True), nullable=True)
 
-
-class FoxKnowledge(Base):
-    """پاسخ‌های دستی که ادمین به روباه یاد می‌دهد («یاد بگیر: کلید | جواب»)."""
-    __tablename__ = 'fox_knowledge'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    keywords = Column(String, nullable=False)     # کلیدها؛ هر خط یک کلید
-    answer = Column(String, nullable=False)       # برای مدیا: کپشن (می‌تواند خالی باشد)
-    created_by = Column(BigInteger, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    # مدیا (آهنگ/ویدیو/گیف/استیکر/...): اگه file_id پر باشه، روباه به‌جای متن این فایل را می‌فرستد
-    media_type = Column(String, nullable=True)     # audio | video | animation | sticker | voice | photo | document
-    file_id = Column(String, nullable=True)
-    file_unique_id = Column(String, nullable=True)
 
 class FoxMoodSong(Base):
     """آهنگ‌هایی که پشتیبانی برای «روباهیو حال» اضافه می‌کنه؛ هر آهنگ یک یا چند حال (happy,calm,sad,energy,love,rage) داره."""
@@ -869,8 +852,6 @@ def init_db():
                 'city_hunt_total': 'INTEGER NOT NULL DEFAULT 0',
                 'city_treasury': 'INTEGER NOT NULL DEFAULT 0',
                 'city_donors': "VARCHAR DEFAULT ''",
-                'ai_mod': 'INTEGER NOT NULL DEFAULT 0',
-                'spell_mod': 'INTEGER NOT NULL DEFAULT -1',
                 'disabled_features': "VARCHAR DEFAULT ''",
             }
             for name, definition in gc_additions.items():
@@ -911,11 +892,6 @@ def init_db():
             gw_cols = {c['name'] for c in inspector.get_columns('giveaways')}
             if 'prizes' not in gw_cols:
                 conn.execute(text('ALTER TABLE giveaways ADD COLUMN prizes VARCHAR'))
-        if 'fox_knowledge' in inspector.get_table_names():
-            fk_cols = {c['name'] for c in inspector.get_columns('fox_knowledge')}
-            for name, definition in {'media_type': 'VARCHAR', 'file_id': 'VARCHAR', 'file_unique_id': 'VARCHAR'}.items():
-                if name not in fk_cols:
-                    conn.execute(text(f'ALTER TABLE fox_knowledge ADD COLUMN {name} {definition}'))
 
 
 def get_session():

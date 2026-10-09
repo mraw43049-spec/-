@@ -54,13 +54,10 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxKnowledge, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, RubyOwl, Giveaway, GiveawayEntry, RecoveryCode, Base, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, RubyOwl, Giveaway, GiveawayEntry, RecoveryCode, Base, get_session, init_db
 )
-import ai_service as ai
 import attack_owl
 import bridge
-import fox_brain as brain
-import fox_spell as spell
 import education as education_module
 from education import education_command, education_topic, education_answer, education_unlock, education_certificate, education_profile_line, eduq_button, eduq_admin_button, handle_edu_question_text, start_design_question, EducationProgress, EduUserQuestion, TOPICS
 from ruby_emojis import emoji_command, emoji_callback, emoji_action, emoji_transfer_text, CATEGORIES as RUBY_EMOJI_CATEGORIES
@@ -1360,12 +1357,6 @@ GUIDE_TOPICS = [
 ]
 
 
-if ai.AI_ENABLED or brain.ENABLED:
-    GUIDE_TOPICS += [
-        ("🤖 گفتگو با روباه", "تو پیوی ربات هر چی خواستی بنویس تا روباه جواب بده. تو گروه با «روباهیو ...»، منشن ربات یا ریپلای روی جواب‌های روباه باهاش حرف بزن. «راهنما <سوالت>» جواب سوال درباره‌ی ربات رو از راهنما پیدا می‌کنه."),
-        ("🛡 مدیریت هوشمند گروه", "ادمین گروه با «مدیریت هوشمند روشن» فعالش می‌کنه؛ فحش و توهین واضح، تبلیغ لینک دعوت/کانال و پیام‌های تکراری حذف می‌شن. بررسی کاملاً روی خود ربات انجام می‌شه. ربات باید ادمین با دسترسی حذف پیام باشه."),
-        ("📰 اخبار شهر", "تو گروه بنویس «اخبار شهر» تا یه خبر بامزه از وضعیت شهر روبی گروهت بگیری."),
-    ]
 
 
 MINI_APP_URL = os.environ.get("MINI_APP_URL", "https://web-production-a8598.up.railway.app").strip().rstrip("/")
@@ -10953,7 +10944,6 @@ async def maybe_level_up_city(context, chat_id):
         )
     except Exception:
         pass
-    context.application.create_task(ai_city_levelup_news(context, chat_id, chat_title, new_level))
     for did in donor_ids:
         try:
             await context.bot.send_message(
@@ -11891,167 +11881,12 @@ async def handle_gift_code_text(update, context):
     await update.message.reply_text(f'🎉 کد هدیه با موفقیت ثبت شد!\n\n🎁 جایزه: {reward:,} روب‌پوینت\n💰 موجودی جدید: {new_balance:,} روب‌پوینت\n👥 ظرفیت باقی‌مانده کد: {remaining:,}',**reply_kwargs(update.message))
     return True
 
-# ---------- هوش مصنوعی روباهیو 🤖 ----------
-# چت با روباه، راهنمای هوشمند، ناظر هوشمند گروه (opt-in) و اخبار شهر.
-# نکته‌ی مهم: PTB به‌صورت پیش‌فرض آپدیت‌ها را پشت‌سرهم پردازش می‌کند؛ پس هر کار طولانی (تماس با API)
-# با application.create_task در پس‌زمینه اجرا می‌شود تا کل ربات منتظر جواب هوش مصنوعی نماند.
+# ---------- ابزارهای مشترک ----------
 import time as _time
 from collections import OrderedDict
 from telegram import ChatPermissions
 
-AI_REPLY_IDS = OrderedDict()      # (chat_id, message_id) پیام‌هایی که جواب هوش مصنوعی بودند (برای ادامه‌ی گفتگو با ریپلای)
-AI_PREFIX_RE = re.compile(r'^(?:روباهیو|روباه\s*جون|روباه\s*جان|روبی\s*جون|روبی\s*جان)[\s،,:؛!؟]+(.+)$', re.S)
-AI_GUIDE_RE = re.compile(r'^راهنما(?:[\s،,:؛]+(.+))?$', re.S)
-AI_MAX_PROMPT_CHARS = 800
-
-
-def build_ai_knowledge():
-    """دانشنامه‌ای که هوش مصنوعی برای جواب دادن درباره‌ی ربات ازش استفاده می‌کند (فقط حقایق تأییدشده‌ی همین کد)."""
-    lines = [
-        "روباهیو یه ربات بازی تلگرامیه که تو گروه‌ها کار می‌کنه. بچه‌های گروه با نوشتن «روب روب» روب‌پوینت جمع می‌کنن، لول می‌گیرن، شکار می‌رن، روباه شخصی دارن و بازی می‌کنن.",
-        "",
-        "بخش‌ها (هر کدوم با لول لازمش):",
-    ]
-    lines += [f"- {title}: {desc}" for title, desc in GUIDE_TOPICS if not title.startswith(("🤖", "🛡", "📰"))]
-    lines += [
-        f"- 🧊 یخچال روبی: از لول {FRIDGE_UNLOCK_LEVEL} فعال می‌شه.",
-        f"- 🏭 کارخونه روبی: از لول {FACTORY_UNLOCK_LEVEL} فعال می‌شه.",
-        f"- 🦁 شهر روبی: تو گروه «شهر روبی» رو بنویس. شهر تا سطح {CITY_MAX_LEVEL} بالا می‌ره (با روب‌روب، نجات روباه زخمی، شکار و دونیت به خزانه). از سطح {CITY_MAYOR_UNLOCK_LEVEL} شهردار روبی فعال می‌شه؛ شهردار اولیه مالک گپ است و می‌تونه شهرداری را واگذار کنه. «اخبار شهر» یه خبر بامزه از وضعیت شهر می‌ده.",
-        f"- 👥 دوست روبی: بنویس «دوست روبی» و ➕ افزودن دوست رو بزن، بعد آیدی عددی یا @یوزرنیم دوستت رو بفرست. حداکثر {FRIEND_LIMIT} دوست؛ درخواست به پیوی ربات دوستت می‌ره و اون قبول یا رد می‌کنه؛ نتیجه هم تو پیوی ربات به تو خبر داده می‌شه. با دوستات می‌تونی روب‌پوینت و پیام بفرستی و رتبه‌شون رو ببینی.",
-        "- 🎁 کد هدیه: «کد هدیه» رو بنویس، 🎟 ورود کد رو بزن و کد رو روی همون پنل ریپلای کن. هر کد برای هر حساب فقط یک‌بار قابل استفاده‌ست؛ ظرفیت و مهلت داره.",
-        f"- 🃏 کازینو (از لول {CASINO_UNLOCK_LEVEL}؛ مبلغ ورودی هر نفر در کازینو حداقل {CASINO_MIN_ENTRY:,} و حداکثر ۵٬۰۰۰٬۰۰۰ روب‌پوینت، در بازی روبی حداکثر ۲٬۵۰۰٬۰۰۰؛ میز ۶۰ ثانیه برای پیوستن فرصت داره؛ هر کاربر هر ۹۰ ثانیه در بازی روبی و هر ۴ دقیقه در کازینو می‌سازه یا وارد میز می‌شه):",
-        "   • 🎰 اسلات: ۱ تا ۳ نفر. تک‌نفره مقابل خانه‌ست (امتیاز بالا جایزه می‌گیره، 7️⃣7️⃣7️⃣ جکپاته). دو نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ی میزه؛ اگه امتیازها برابر بشه قرعه‌کشی می‌شه.",
-        "   • 🎲 تاس: ۱ یا ۲ نفر. تک‌نفره شرط فرد/زوج (ضریب ۱٫۹). دونفره سازنده‌ی میز قانون «بزرگ‌ترین عدد برنده» یا «کوچک‌ترین عدد برنده» رو انتخاب می‌کنه و برای هر دو نفر یکسانه؛ اگه دو عدد برابر بشه مبلغ ورودی برمی‌گرده.",
-        "   • 🐇 خرگوش‌خور: ۲ نفر، ۲۰ خونه؛ هر نفر مخفیانه یه خونه رو پنجه‌ش انتخاب می‌کنه و هرکس خونه‌ی پنجه 🐾 رو باز کنه می‌بازه.",
-        f"   • 🃏 دوتایی‌ها: ۲ نفر، ۱۶ خونه (۸ جفت)؛ هر نوبت {PAIRS_TURN_SECONDS} ثانیه؛ هرکس جفت بیشتری پیدا کنه برنده‌ست.",
-        f"- 🏦 بانک روبی (از لول ۴): افتتاح حساب {BANK_OPEN_COST:,} روب‌پوینت، سود {int(BANK_INTEREST_RATE * 100)}٪ هر ۱۲ ساعت؛ کارت‌به‌کارت {int(BANK_CARD_TRANSFER_FEE_RATE * 100)}٪ کارمزد داره و هر {BANK_CARD_TRANSFER_COOLDOWN // 60} دقیقه یک‌بار ممکنه.",
-        "- 💸 انتقال روب‌پوینت: روی پیام گیرنده ریپلای کن و بنویس «انتقال روب پوینت 50».",
-        "- 🔗 رفرال («رفرال»): با لینک اختصاصی دوست دعوت کن و پاداش بگیر.",
-        "- 🎁 شاپ روبی («شاپ روبی») و ⚽ پیش‌بینی فوتبال («پیش بینی») هم هست.",
-        f"- ⛓️ ضداسپم: {SPAM_MESSAGE_LIMIT} پیام تو {SPAM_WINDOW_SECONDS} ثانیه یعنی حبس ۱۵ دقیقه‌ای تو زندان روبی.",
-        "- 🛡 مدیریت هوشمند گروه: ادمین گروه با نوشتن «مدیریت هوشمند روشن» فعالش می‌کنه (پیش‌فرض خاموشه). پیام‌های واضحاً توهین‌آمیز/تبلیغاتی حذف می‌شن و با تکرار، ۱۰ دقیقه سکوت می‌شه. ربات باید ادمین با دسترسی حذف پیام باشه.",
-    ]
-    if ai.AI_ENABLED:
-        lines += [
-            "- 🤖 هوش مصنوعی روباهیو: تو پیوی ربات هر چی بخوای می‌تونی بنویسی و روباه جواب می‌ده. تو گروه با «روباهیو سلام...» یا «روباه جون ...» یا منشن کردن ربات یا ریپلای روی جواب‌های روباه باهاش حرف بزن. «راهنما <سوالت>» جواب دقیق درباره‌ی ربات می‌ده.",
-            f"- محدودیت گفتگو با هوش مصنوعی: هر کاربر روزی {ai.USER_DAILY_LIMIT} پیام و بین پیام‌ها {ai.USER_COOLDOWN_SECONDS} ثانیه فاصله.",
-        ]
-    return "\n".join(lines)
-
-
-
-_GUIDE_KEYWORDS = {
-    'روب روب': ['روب روب', 'هور هور', 'عو عو', 'روب پوینت', 'روبپوینت', 'پوینت', 'امتیاز', 'جمع کردن', 'سکه', 'درآمد', 'پول در بیارم'],
-    'شکار': ['شکار', 'هانت'],
-    'روباه / روبی': ['روباه', 'پنل روباه', 'ارتقا روباه', 'تغییر نام', 'اسم روباه', 'نام روباه', 'روباه من', 'تولید روب'],
-    'بازی روبی': ['بازی روبی', 'بازی های روبی', 'میز بازی', 'دوز', 'سنگ کاغذ', 'دارت', 'بسکتبال', 'بولینگ', 'xo'],
-    'بانک': ['بانک', 'افتتاح', 'سود', 'حساب بانکی', 'کارت به کارت', 'کارت', 'واریز'],
-    'کازینو': ['کازینو', 'قمار', 'میز کازینو', 'قمارهای روبی'],
-    'روبام': ['روبام', 'روباش', 'پروفایل', 'مشخصات', 'حساب من'],
-    'لیدر برد': ['لیدر برد', 'لیدربرد', 'رتبه', 'رتبه بندی', 'برترین', 'جدول'],
-    'گردونه': ['گردونه', 'چرخ شانس', 'جایزه روزانه', 'گردونه روزانه'],
-    'قاچاق': ['قاچاق', 'قاچاقچی'],
-    'زندان': ['زندان', 'حبس', 'جریمه', 'زندانی', 'اسپم'],
-    'افزودن ربات': ['افزودن ربات', 'اضافه کردن ربات', 'ربات به گروه', 'ادد', 'حداقل عضو', 'ربات رو بیارم', 'بیارم گروه', 'اضافه کنم به گروه', 'ربات رو اضافه', 'ادد کنم'],
-    'گفتگو با روباه': ['گفتگو', 'چت با روباه', 'باهات حرف', 'حرف زدن با روباه'],
-    'مدیریت هوشمند': ['مدیریت هوشمند', 'ناظر', 'حذف پیام', 'فحش', 'توهین', 'تبلیغ', 'ضد اسپم', 'ضداسپم', 'مدیریت گروه'],
-    'اخبار شهر': ['اخبار شهر', 'خبر شهر', 'خبرنگار'],
-}
-
-
-def build_guide_entries():
-    """آیتم‌های راهنمای جستجوپذیر برای مغز قانون‌محور (فقط حقایق تأییدشده‌ی همین کد)."""
-    entries = []
-    for title, desc in GUIDE_TOPICS:
-        kws = []
-        for key, words in _GUIDE_KEYWORDS.items():
-            if key in title:
-                kws = words
-                break
-        if not kws:   # موضوعی که کلید دستی ندارد: کلمه‌های خود عنوان
-            kws = [w for w in re.split(r'[/\s]+', re.sub(r'[^\w\s/]', ' ', title)) if len(w) >= 4]
-        entries.append({'title': title, 'answer': desc, 'keywords': kws})
-    extra = [
-        ("🎰 اسلات", ['اسلات', 'slot', 'جکپات', 'گردونه شانس', 'اسلات ماشین'],
-         f"از لول {CASINO_UNLOCK_LEVEL}؛ ۱ تا ۳ نفر. تک‌نفره مقابل خانه‌ست (امتیاز بالا جایزه می‌گیره، 7️⃣7️⃣7️⃣ جکپاته). دو نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ی میزه و اگه امتیازها برابر بشه قرعه‌کشی می‌شه. «کازینو روبی» رو بنویس."),
-        ("🎲 تاس", ['تاس', 'dice', 'فرد', 'زوج', 'بزرگترین عدد', 'کوچکترین عدد'],
-         f"از لول {CASINO_UNLOCK_LEVEL}؛ ۱ یا ۲ نفر. تک‌نفره شرط فرد/زوج (ضریب ۱٫۹). دونفره سازنده‌ی میز قانون «بزرگ‌ترین عدد برنده» یا «کوچک‌ترین عدد برنده» رو انتخاب می‌کنه و برای هر دو نفر یکسانه؛ اگه دو عدد برابر بشه مبلغ ورودی برمی‌گرده."),
-        ("🐇 خرگوش‌خور", ['خرگوش', 'خرگوش خور', 'پنجه', 'rabbit'],
-         f"از لول {CASINO_UNLOCK_LEVEL}؛ ۲ نفر، ۲۰ خونه. هر نفر مخفیانه یه خونه رو پنجه‌ش انتخاب می‌کنه و هرکس خونه‌ی پنجه 🐾 رو باز کنه می‌بازه."),
-        ("🃏 دوتایی‌ها", ['دوتایی', 'دوتایی ها', 'جفت', 'حافظه', 'pairs', 'کارت‌های جفت'],
-         f"از لول {CASINO_UNLOCK_LEVEL}؛ ۲ نفر، ۱۶ خونه (۸ جفت)؛ هر نوبت {PAIRS_TURN_SECONDS} ثانیه. هرکس جفت بیشتری پیدا کنه برنده‌ست."),
-        ("🎟 شرط‌بندی کازینو", ['ورودی', 'مبلغ ورودی', 'حداکثر ورودی', 'جایزه میز', 'مبلغ شرط', 'شرط'],
-         f"مبلغ ورودی هر نفر در کازینو حداقل {CASINO_MIN_ENTRY:,} و حداکثر ۵٬۰۰۰٬۰۰۰ روب‌پوینت، در بازی روبی حداکثر ۲٬۵۰۰٬۰۰۰. میز ۶۰ ثانیه برای پیوستن فرصت داره و هر کاربر هر ۹۰ ثانیه در بازی روبی و هر ۴ دقیقه در کازینو می‌سازه یا وارد میز می‌شه."),
-        ("🏦 بانک روبی (جزئیات)", ['سود بانک', 'کارمزد', 'کارت به کارت', 'انتقال به کارت', 'افتتاح حساب', 'سپرده'],
-         f"از لول ۴؛ افتتاح حساب {BANK_OPEN_COST:,} روب‌پوینت، سود {int(BANK_INTEREST_RATE * 100)}٪ هر ۱۲ ساعت. کارت‌به‌کارت {int(BANK_CARD_TRANSFER_FEE_RATE * 100)}٪ کارمزد داره و هر {BANK_CARD_TRANSFER_COOLDOWN // 60} دقیقه یک‌بار ممکنه."),
-        ("💸 انتقال روب‌پوینت", ['انتقال', 'انتقال روب پوینت', 'بفرستم', 'ارسال پوینت', 'پوینت بفرستم', 'روب پوینت بفرستم', 'پول بفرستم', 'هدیه بدم', 'پوینت بدم', 'روب پوینت بدم', 'به دوستم پوینت'],
-         "روی پیام گیرنده ریپلای کن و بنویس «انتقال روب پوینت 50» (مقدار دلخواه)."),
-        ("🧊 یخچال روبی", ['یخچال', 'یخچال روبی', 'خوراکی', 'غذا'],
-         f"از لول {FRIDGE_UNLOCK_LEVEL} فعال می‌شه؛ «یخچال روبی» رو بنویس."),
-        ("🏭 کارخونه روبی", ['کارخونه', 'کارخانه', 'کارخونه روبی', 'تولید'],
-         f"از لول {FACTORY_UNLOCK_LEVEL} فعال می‌شه؛ «کارخونه روبی» یا «کارخونه» رو بنویس."),
-        ("🦁 شهر روبی", ['شهر', 'شهر روبی', 'شهردار', 'شهردار روبی', 'انتخابات', 'دونیت', 'خزانه', 'سطح شهر'],
-         f"تو گروه «شهر روبی» رو بنویس. شهر تا سطح {CITY_MAX_LEVEL} بالا می‌ره (با روب‌روب، نجات روباه زخمی، شکار و دونیت به خزانه). از سطح {CITY_MAYOR_UNLOCK_LEVEL} شهردار روبی فعال می‌شه؛ شهردار اولیه مالک گپ است و می‌تونه شهرداری را واگذار کنه. «اخبار شهر» هم یه خبر بامزه از وضعیت شهر می‌ده."),
-        ("👥 دوست روبی", ['دوست روبی', 'دوست', 'دوستان', 'فرند', 'درخواست دوستی', 'دوست اضافه', 'افزودن دوست'],
-         f"«دوست روبی» رو بنویس و ➕ افزودن دوست رو بزن، بعد آیدی عددی یا @یوزرنیم دوستت رو بفرست. حداکثر {FRIEND_LIMIT} دوست؛ درخواست به پیوی ربات دوستت می‌ره و اون قبول یا رد می‌کنه؛ نتیجه هم تو پیوی ربات به تو خبر داده می‌شه. با دوستات می‌تونی روب‌پوینت و پیام بفرستی و رتبه‌شون رو ببینی."),
-        ("🎁 کد هدیه", ['کد هدیه', 'کد جایزه', 'گیفت کد', 'gift code', 'کد', 'جایزه'],
-         "«کد هدیه» رو بنویس، 🎟 ورود کد رو بزن و کد رو روی همون پنل ریپلای کن. هر کد برای هر حساب فقط یک‌بار قابل استفاده‌ست؛ ظرفیت و مهلت داره."),
-        ("🔗 رفرال", ['رفرال', 'زیرمجموعه', 'دعوت', 'لینک دعوت', 'دعوت دوست'],
-         "«رفرال» رو بنویس تا لینک اختصاصی‌ت رو بگیری؛ با دعوت دوستان پاداش می‌گیری."),
-        ("🛍 شاپ روبی", ['شاپ', 'فروشگاه', 'خرید', 'شاپ روبی'],
-         "«شاپ روبی» رو بنویس تا فروشگاه باز بشه."),
-        ("⚽ پیش‌بینی فوتبال", ['پیش بینی', 'پیشبینی', 'فوتبال', 'بازی فوتبال', 'مسابقه'],
-         "«پیش بینی» رو بنویس تا لیست بازی‌های فعال رو ببینی و نتیجه‌ها رو پیش‌بینی کنی."),
-        ("🔼 لول و سطح", ['لول', 'سطح', 'لول آپ', 'چطور لول', 'چجوری لول', 'ارتقا سطح', 'آنلاک', 'باز میشه', 'از چه لولی'],
-         f"با روب روب، شکار و فعالیت‌های دیگه لول می‌گیری. شکار از لول ۲، روباه و بازی‌ها از لول ۳، بانک از لول ۴، کازینو از لول {CASINO_UNLOCK_LEVEL}، قاچاق از لول ۸، یخچال از لول {FRIDGE_UNLOCK_LEVEL}، کارخونه از لول {FACTORY_UNLOCK_LEVEL}."),
-    ]
-    for title, kws, answer in extra:
-        entries.append({'title': title, 'answer': answer, 'keywords': kws})
-    return entries
-
-
-# ── آموزش دستی به روباه (فقط ادمین‌های ربات، فقط پیوی) ──
-FOX_TEACH_MAX = 300
-FOX_TEACH_RE = re.compile(r'^یاد\s*بگیر[\s:：]+(.+)$', re.S)
-FOX_FORGET_RE = re.compile(r'^فراموش\s*کن[\s:：]+(\d+)$')
-
-# مدیا: نوع → (ایموجی، اسم فارسی، متد reply_* پیام)
-FOX_MEDIA = {
-    'audio': ('🎵', 'آهنگ', 'reply_audio'),
-    'video': ('🎬', 'ویدیو', 'reply_video'),
-    'animation': ('🎞', 'گیف', 'reply_animation'),
-    'sticker': ('😎', 'استیکر', 'reply_sticker'),
-    'voice': ('🎙', 'ویس', 'reply_voice'),
-    'photo': ('🖼', 'عکس', 'reply_photo'),
-    'document': ('📎', 'فایل', 'reply_document'),
-}
-# کلمه‌ای که ادمین تو دستور می‌نویسه → نوع
-FOX_MEDIA_WORDS = {
-    'آهنگ': 'audio', 'موزیک': 'audio', 'music': 'audio',
-    'ویدیو': 'video', 'ویدئو': 'video', 'فیلم': 'video', 'video': 'video',
-    'گیف': 'animation', 'جیف': 'animation', 'gif': 'animation',
-    'استیکر': 'sticker', 'sticker': 'sticker',
-    'ویس': 'voice', 'voice': 'voice',
-    'عکس': 'photo', 'photo': 'photo',
-    'فایل': 'document',
-}
-# «یاد بگیر: کلید۱، کلید۲»  یا  «یاد بگیر آهنگ: کلید۱، کلید۲ | کپشن اختیاری»  (نوع فقط وقتی حساب می‌شه که بعدش «:» بیاد)
-FOX_TEACH_MEDIA_RE = re.compile(
-    r'^یاد\s*بگیر(?:\s+(?P<t>' + '|'.join(sorted(map(re.escape, FOX_MEDIA_WORDS), key=len, reverse=True)) + r')(?=\s*[:：]))?[\s:：]+(?P<body>.+)$',
-    re.S | re.I)
-# اگه روشن باشه (FOX_MEDIA_DIRECT=1) تو گروه‌ها هم وقتی کل پیام دقیقاً یه کلیدِ مدیا باشه (بدون صدا زدن روباه) جواب می‌ده
-FOX_MEDIA_DIRECT = os.getenv('FOX_MEDIA_DIRECT', '0').strip().lower() in ('1', 'true', 'yes', 'on')
-FOX_TEACH_USAGE = (
-    "📎 یاد دادن مدیا:\n\n"
-    "۱) فایل (آهنگ/ویدیو/گیف) رو بفرست و تو کپشنش بنویس:\n"
-    "یاد بگیر آهنگ: کلید۱، کلید۲\n\n"
-    "۲) یا رو هر فایل/استیکری (فوروارد هم جواب می‌ده) ریپلای کن و بنویس:\n"
-    "یاد بگیر استیکر: کلید۱، کلید۲\n\n"
-    "نوع‌ها: آهنگ، ویدیو، گیف، استیکر، ویس، عکس، فایل (نوشتنش اختیاریه؛ خودم تشخیص می‌دم).\n"
-    "کپشن اختیاری: یاد بگیر گیف: خنده، هه | اینم از خنده 😂"
-)
-
-
+# ── استخراج مدیا از پیام (برای آهنگ‌های «روباهیو حال») ──
 def fox_extract_media(m):
     """(نوع، file_id، file_unique_id، mime) از یک پیام تلگرام، یا None اگه مدیا نداشت."""
     if not m:
@@ -12073,182 +11908,18 @@ def fox_extract_media(m):
     return None
 
 
-def fox_media_kind_ok(want, kind, mime):
-    """آیا نوعی که ادمین نوشته (want) با فایل واقعی (kind) جوره؟ (mp3/mp4 که «به‌صورت فایل» فرستاده شده هم قبوله)"""
-    if not want or want == kind:
-        return True
-    prefix = {'audio': 'audio/', 'video': 'video/', 'photo': 'image/'}.get(want)
-    return kind == 'document' and bool(prefix) and (mime or '').lower().startswith(prefix)
-
-
-def load_custom_entries():
-    """پاسخ‌های دستی را از دیتابیس می‌خواند و به مغز می‌دهد. تعداد را برمی‌گرداند."""
-    session = get_session()
-    try:
-        rows = session.query(FoxKnowledge).order_by(FoxKnowledge.id).all()
-        entries = [{'id': r.id, 'keywords': [k for k in (r.keywords or '').split('\n') if k.strip()], 'answer': r.answer,
-                    'media_type': getattr(r, 'media_type', None), 'file_id': getattr(r, 'file_id', None)} for r in rows]
-    except Exception:
-        logger.exception('load custom knowledge failed')
-        entries = []
-    finally:
-        session.close()
-    brain.set_custom(entries)
-    return len(entries)
-
-
-def fox_split_keys(keys_raw):
-    keys = []
-    for k in re.split(r'[،,\n]', keys_raw):
-        k = re.sub(r'\s+', ' ', k).strip()
-        if k and k not in keys:
-            keys.append(k)
-    return keys
-
-
-async def fox_teach_media(update, context, media_msg, text):
-    """مدیا (آهنگ/ویدیو/گیف/استیکر/...) رو با کلیدها ذخیره می‌کنه. media_msg = پیامی که فایل توشه؛ text = متن دستور «یاد بگیر ...»."""
-    msg = update.message
-    reply = lambda t: msg.reply_text(t, **reply_kwargs(msg))
-    m = FOX_TEACH_MEDIA_RE.match((text or '').strip())
-    info = fox_extract_media(media_msg)
-    if not m or not info:
-        await reply("❌ فرمت اشتباهه.\n\n" + FOX_TEACH_USAGE); return
-    kind, file_id, unique_id, mime = info
-    want = FOX_MEDIA_WORDS.get((m.group('t') or '').lower()) if m.group('t') else None
-    if not fox_media_kind_ok(want, kind, mime):
-        await reply(f"❌ این فایل «{FOX_MEDIA[kind][1]}» هست، نه «{FOX_MEDIA[want][1]}». "
-                    f"نوع رو درست بنویس یا بدون نوع بنویس: یاد بگیر: کلید"); return
-    body = m.group('body').strip()
-    sep = re.search(r'\s*(?:\||=>|⇒|＝>)\s*', body)
-    keys_raw, caption = (body[:sep.start()], body[sep.end():].strip()) if sep else (body, '')
-    keys = fox_split_keys(keys_raw)
-    caption = caption.replace('\u2063', '').replace('\u2064', '')
-    if not keys or any(len(k) < 2 or len(k) > 40 for k in keys):
-        await reply("❌ هر کلید باید بین ۲ تا ۴۰ حرف باشه (چند کلید رو با ویرگول جدا کن).\n\n" + FOX_TEACH_USAGE); return
-    if len(caption) > 1000:
-        await reply("❌ کپشن نباید بیشتر از ۱۰۰۰ حرف باشه."); return
-    session = get_session()
-    try:
-        if session.query(FoxKnowledge).count() >= FOX_TEACH_MAX:
-            await reply(f"❌ ظرفیت پر شده ({FOX_TEACH_MAX} مورد). با «فراموش کن <شماره>» چندتا رو پاک کن."); return
-        row = FoxKnowledge(keywords='\n'.join(keys), answer=caption, created_by=update.effective_user.id,
-                           media_type=kind, file_id=file_id, file_unique_id=unique_id)
-        session.add(row); session.commit(); rid = row.id
-    finally:
-        session.close()
-    load_custom_entries()
-    emoji, label, _ = FOX_MEDIA[kind]
-    await reply(f"✅ {emoji} {label} رو یاد گرفتم! (شماره {rid})\n\n🔑 کلیدها: {'، '.join(keys)}\n"
-                + (f"💬 کپشن: {caption[:200]}\n" if caption else "")
-                + "\nتست کن: یکی از کلیدها رو تو پیوی برام بنویس. برای حذف: فراموش کن " + str(rid)
-                + "\n(چند فایل برای یه کلید بدی، هر بار یکیشون تصادفی میاد.)")
-
-
-async def fox_teach_media_caption(update, context):
-    """ادمین یه فایل با کپشن «یاد بگیر ...» تو پیوی فرستاده."""
-    msg = update.message
-    if not msg or not update.effective_user or not admin_only(update.effective_user.id):
-        return
-    if not fox_extract_media(msg):
-        return
-    cap = (msg.caption or '').strip()
-    if MOOD_ADD_RE.match(cap):          # «آهنگ حال: شاد» → آهنگِ «روباهیو حال»
-        await fox_mood_song_add(update, context, msg, cap); return
-    await fox_teach_media(update, context, msg, cap)
-
-
-async def send_fox_media(msg, entry, ctx):
-    """مدیای یادگرفته‌شده را به‌صورت ریپلای می‌فرستد و پیام ارسال‌شده را برمی‌گرداند."""
-    info = FOX_MEDIA.get(entry.get('media_type'))
-    if not info or not entry.get('file_id'):
-        return None
-    cap = (brain.format_answer(entry.get('answer') or '', ctx) or '')[:1000] or None
-    fn = getattr(msg, info[2])
-    if entry['media_type'] == 'sticker':      # استیکر کپشن نداره → کپشن (اگه بود) جدا میاد
-        sent = await fn(entry['file_id'], **reply_kwargs(msg))
-        if cap:
-            await msg.reply_text(cap, **reply_kwargs(msg))
-        return sent
-    return await fn(entry['file_id'], caption=cap, **reply_kwargs(msg))
-
-
-async def fox_teach_command(update, context):
-    """یاد بگیر: کلید۱، کلید۲ | جواب  /  یاد بگیر آهنگ|ویدیو|گیف|استیکر: کلید (ریپلای روی فایل)  /  فراموش کن <شماره>  /  لیست یادگیری"""
-    msg = update.message
-    text = (msg.text or '').strip()
-    reply = lambda t: msg.reply_text(t, **reply_kwargs(msg))
-    if re.sub(r'\s+', ' ', text) == 'لیست یادگیری':
-        session = get_session()
-        try:
-            rows = session.query(FoxKnowledge).order_by(FoxKnowledge.id).all()
-            items = [(r.id, (r.keywords or '').replace('\n', '، '), r.answer or '', getattr(r, 'media_type', None) if getattr(r, 'file_id', None) else None) for r in rows]
-        finally:
-            session.close()
-        if not items:
-            await reply("📚 هنوز چیزی یاد نگرفتم.\n\nبنویس:\nیاد بگیر: کلید۱، کلید۲ | جواب\n\n" + FOX_TEACH_USAGE); return
-        lines = []
-        for i, k, a, mt in items[-40:]:
-            if mt in FOX_MEDIA:
-                em, label, _ = FOX_MEDIA[mt]
-                tail = f"{em} {label}" + (f" — {a[:40].replace(chr(10), ' ')}{'…' if len(a) > 40 else ''}" if a else "")
-            else:
-                tail = f"💬 {a[:60].replace(chr(10), ' ')}{'…' if len(a) > 60 else ''}"
-            lines.append(f"{i}) 🔑 {k}\n    {tail}")
-        await reply(f"📚 یادگرفته‌ها ({len(items)} مورد؛ آخرین ۴۰ تا):\n\n" + "\n\n".join(lines) + "\n\nحذف: فراموش کن <شماره>"); return
-    m = FOX_FORGET_RE.match(text)
-    if m:
-        rid = int(m.group(1))
-        session = get_session()
-        try:
-            row = session.get(FoxKnowledge, rid)
-            if not row:
-                await reply("❌ همچین شماره‌ای پیدا نشد. «لیست یادگیری» رو ببین."); return
-            session.delete(row); session.commit()
-        finally:
-            session.close()
-        n = load_custom_entries()
-        await reply(f"🗑 فراموش کردم. ({n} مورد باقی مونده)"); return
-    # ریپلای روی یه فایل/استیکر → یاد گرفتن مدیا
-    rep = msg.reply_to_message
-    tm = FOX_TEACH_MEDIA_RE.match(text)
-    if tm and rep and fox_extract_media(rep):
-        await fox_teach_media(update, context, rep, text); return
-    if tm and tm.group('t'):
-        await reply("❌ برای یاد دادن مدیا باید روی همون فایل/استیکر ریپلای کنی (یا فایل رو با کپشن «یاد بگیر ...» بفرستی).\n\n" + FOX_TEACH_USAGE); return
-    m = FOX_TEACH_RE.match(text)
-    if not m:
-        return
-    body = m.group(1).strip()
-    sep = re.search(r'\s*(?:\||=>|⇒|＝>)\s*', body)
-    if not sep:
-        await reply("❌ فرمت اشتباهه. این‌جوری بنویس:\n\nیاد بگیر: کلید۱، کلید۲ | جواب\n\nمثال:\nیاد بگیر: کانال، آدرس کانال | کانال ما: @foxio\n\n" + FOX_TEACH_USAGE); return
-    keys_raw, answer = body[:sep.start()], body[sep.end():].strip()
-    keys = fox_split_keys(keys_raw)
-    answer = answer.replace('\u2063', '').replace('\u2064', '')
-    if not keys or any(len(k) < 2 or len(k) > 40 for k in keys):
-        await reply("❌ هر کلید باید بین ۲ تا ۴۰ حرف باشه (چند کلید رو با ویرگول جدا کن)."); return
-    if len(answer) < 2 or len(answer) > 1500:
-        await reply("❌ جواب باید بین ۲ تا ۱۵۰۰ حرف باشه."); return
-    session = get_session()
-    try:
-        if session.query(FoxKnowledge).count() >= FOX_TEACH_MAX:
-            await reply(f"❌ ظرفیت پر شده ({FOX_TEACH_MAX} مورد). با «فراموش کن <شماره>» چندتا رو پاک کن."); return
-        row = FoxKnowledge(keywords='\n'.join(keys), answer=answer, created_by=update.effective_user.id)
-        session.add(row); session.commit(); rid = row.id
-    finally:
-        session.close()
-    load_custom_entries()
-    await reply(f"✅ یاد گرفتم! (شماره {rid})\n\n🔑 کلیدها: {'، '.join(keys)}\n💬 جواب: {answer[:200]}\n\n"
-                "تست کن: یکی از کلیدها رو تو پیوی برام بنویس. برای حذف: فراموش کن " + str(rid))
-
-
 # ── «روباهیو حال»: ۵ سوال ۳گزینه‌ای → آهنگِ متناسب با حال (آهنگ‌ها رو پشتیبانی اضافه می‌کنه) ──
 FOX_MOODS = {
     'happy': ('😄', 'شاد'), 'calm': ('😌', 'آروم'), 'sad': ('😢', 'غمگین'),
     'energy': ('⚡', 'پرانرژی'), 'love': ('💕', 'عاشقانه'), 'rage': ('😤', 'عصبی'),
 }
-FOX_MOOD_WORDS = {brain.normalize(k): v for k, v in {
+def _mood_norm(t):
+    """نرمال‌سازی ساده‌ی کلمه‌های حال (ی/ک عربی، نیم‌فاصله، حروف بزرگ و کوچک)."""
+    t = str(t or '').replace('\u200c', ' ').replace('ي', 'ی').replace('ك', 'ک').replace('ة', 'ه')
+    return re.sub(r'\s+', ' ', t).strip().lower()
+
+
+FOX_MOOD_WORDS = {_mood_norm(k): v for k, v in {
     'شاد': 'happy', 'خوشحال': 'happy', 'آروم': 'calm', 'آرام': 'calm', 'ریلکس': 'calm',
     'غمگین': 'sad', 'دلتنگ': 'sad', 'ناراحت': 'sad', 'پرانرژی': 'energy', 'انرژی': 'energy', 'هیجانی': 'energy',
     'عاشقانه': 'love', 'عاشق': 'love', 'عصبی': 'rage', 'خشمگین': 'rage', 'شاکی': 'rage', 'پر انرژی': 'energy',
@@ -12418,7 +12089,7 @@ def mood_pick_song(mood, uid):
 
 def mood_is_start(text, chat_type):
     """«روباهیو حال» (تو گروه حتماً با اسم روباه؛ تو پیوی «حال» هم کافیه)."""
-    n = brain.normalize(text)
+    n = _mood_norm(text)
     m = MOOD_START_RE.match(n)
     if not m:
         return False
@@ -12445,7 +12116,6 @@ async def mood_start(update, context):
         await msg.reply_text("🦊 هنوز پشتیبانی آهنگی برای این بخش اضافه نکرده؛ یه کم دیگه دوباره بیا 🎶", **reply_kwargs(msg)); return
     text, kb = mood_question_view(user.id, mood_today(), '')
     sent = await msg.reply_text(text, reply_markup=kb, **reply_kwargs(msg))
-    AI_REPLY_IDS[(update.effective_chat.id, sent.message_id)] = 1
 
 
 async def mood_button(update, context):
@@ -12492,7 +12162,6 @@ async def mood_button(update, context):
     try:
         send = context.bot.send_audio if song['media_type'] == 'audio' else context.bot.send_document
         sent = await send(q.message.chat_id, song['file_id'], caption=caption[:1000], reply_to_message_id=q.message.message_id)
-        AI_REPLY_IDS[(q.message.chat_id, sent.message_id)] = 1
     except Exception:
         logger.exception('mood song send failed (id=%s)', song.get('id'))
         try: await q.edit_message_text("😅 نتونستم آهنگ رو بفرستم؛ به پشتیبانی بگو دوباره اضافه‌ش کنه.")
@@ -12519,7 +12188,7 @@ def mood_parse_moods(words):
         w = (w or '').strip()
         if not w:
             continue
-        mk = FOX_MOOD_WORDS.get(brain.normalize(w.replace('_', '').replace('\u200c', '')))
+        mk = FOX_MOOD_WORDS.get(_mood_norm(w.replace('_', '').replace('\u200c', '')))
         if not mk:
             return moods, w
         if mk not in moods:
@@ -12645,7 +12314,7 @@ def mood_hashtag_moods(caption):
     """کپشن → (حال‌های درست از روی هشتگ‌ها). هشتگ ناشناس نادیده گرفته می‌شه."""
     moods = []
     for tag in re.findall(r'#([^\s#]+)', caption or ''):
-        mk = FOX_MOOD_WORDS.get(brain.normalize(tag.replace('_', '').replace('\u200c', '')))
+        mk = FOX_MOOD_WORDS.get(_mood_norm(tag.replace('_', '').replace('\u200c', '')))
         if mk and mk not in moods:
             moods.append(mk)
     return moods
@@ -12671,6 +12340,18 @@ async def mood_channel_post(update, context):
         await context.bot.set_message_reaction(msg.chat_id, msg.message_id, reaction=react)
     except Exception:
         pass
+
+
+async def fox_mood_media_caption(update, context):
+    """ادمین تو پیوی فایل آهنگ رو با کپشن «آهنگ حال: شاد» فرستاده."""
+    msg = update.message
+    if not msg or not update.effective_user or not admin_only(update.effective_user.id):
+        return
+    if not fox_extract_media(msg):
+        return
+    cap = (msg.caption or '').strip()
+    if MOOD_ADD_RE.match(cap):
+        await fox_mood_song_add(update, context, msg, cap)
 
 
 async def fox_mood_admin_command(update, context):
@@ -12723,532 +12404,16 @@ async def fox_mood_admin_command(update, context):
     await fox_mood_song_add(update, context, msg.reply_to_message, text)
 
 
-def ai_extract_prompt(update, context):
-    """اگه پیام مخاطبِ هوش مصنوعیه (mode, prompt) برمی‌گردونه، وگرنه None."""
-    msg = update.message; chat = update.effective_chat
-    text = (msg.text or '').strip()
-    if not text or text.startswith('/') or text == CLAIM_KEYWORD:
-        return None
-    m = AI_GUIDE_RE.match(text)
-    if m:
-        return 'guide', (m.group(1) or '').strip()[:AI_MAX_PROMPT_CHARS]
-    if chat.type == 'private':
-        return 'chat', text[:AI_MAX_PROMPT_CHARS]
-    bu = (getattr(context.bot, 'username', None) or '').lower()
-    if bu and f'@{bu}' in text.lower():
-        cleaned = re.sub(rf'@{re.escape(bu)}', '', text, flags=re.I).strip()
-        if cleaned:
-            return 'chat', cleaned[:AI_MAX_PROMPT_CHARS]
-    m = AI_PREFIX_RE.match(text)
-    if m:
-        return 'chat', m.group(1).strip()[:AI_MAX_PROMPT_CHARS]
-    r = msg.reply_to_message
-    if r and r.from_user and r.from_user.id == context.bot.id and (chat.id, r.message_id) in AI_REPLY_IDS:
-        return 'chat', text[:AI_MAX_PROMPT_CHARS]
-    return None
-
-
-async def ai_chat_entry(update, context):
-    """از انتهای text_router صدا زده می‌شود؛ اگه پیام مخاطب روباه بود True برمی‌گردونه."""
-    if not (ai.AI_ENABLED or brain.ENABLED) or not update.message or not update.effective_chat or not update.effective_user:
-        return False
-    if context.user_data.get('ai_skip_msg') == update.message.message_id:
-        return False       # این پیام ورودی یک فرم ادمین بوده
-    trig = ai_extract_prompt(update, context)
-    if not trig and FOX_MEDIA_DIRECT and brain.ENABLED and update.effective_chat.type != 'private':
-        t = (update.message.text or '').strip()      # گروه: کل پیام دقیقاً یه کلیدِ آهنگ/ویدیو/گیف/استیکر باشه
-        if t and not t.startswith('/') and t != CLAIM_KEYWORD and brain.media_lookup(t, exact=True):
-            trig = ('chat', t[:AI_MAX_PROMPT_CHARS])
-    if not trig:
-        return False
-    context.application.create_task(ai_chat_run(update, context, *trig), update=update)
-    return True
-async def ai_chat_run(update, context, mode, prompt):
-    """جواب می‌دهد: اگه AI_API_KEY تنظیم باشه اول از هوش مصنوعی خارجی، وگرنه (یا در صورت خطا) از مغز قانون‌محور."""
-    msg = update.message; chat = update.effective_chat; tg_user = update.effective_user
-    try:
-        if not await require_membership(update, context):
-            return
-        session = get_session()
-        try:
-            u = get_or_create_user(session, tg_user)
-            ctx_dict = {'name': user_display_name(u), 'level': u.level, 'fox': u.fox_name or 'مکار'}
-        finally:
-            session.close()
-        # آهنگ/ویدیو/گیف/استیکرِ یادگرفته‌شده توسط ادمین: اولویت با خودشه (قبل از API و مغز متنی)
-        if mode == 'chat' and brain.ENABLED:
-            cands = brain.media_candidates(prompt)
-            if cands:
-                if not brain.gate(tg_user.id):
-                    return
-                scope, entries = cands
-                ids = [e.get('id') for e in entries]
-                if all(i is not None for i in ids):
-                    pick = rotation_pick(scope, ids)      # نوبتی: تا همه پخش نشدن تکراری نمیاد
-                    entry = next((e for e in entries if e.get('id') == pick), entries[0])
-                else:
-                    entry = random.choice(entries)
-                sent = None
-                try:
-                    try: await context.bot.send_chat_action(chat.id, 'typing')
-                    except Exception: pass
-                    sent = await send_fox_media(msg, entry, ctx_dict)
-                except Exception:
-                    logger.exception('fox media send failed (id=%s)', entry.get('id'))
-                if sent:
-                    AI_REPLY_IDS[(chat.id, sent.message_id)] = 1
-                    while len(AI_REPLY_IDS) > 3000:
-                        AI_REPLY_IDS.popitem(last=False)
-                    return
-                # ارسال نشد (مثلاً file_id قدیمی) → کولداون رو آزاد می‌کنیم و با جواب متنی معمولی ادامه می‌دیم
-                brain._last_call.pop(tg_user.id, None)
-        answer = None
-        if ai.AI_ENABLED:
-            ok, reason, wait = ai.user_gate(tg_user.id)
-            if not ok and reason == 'cooldown':
-                if chat.type == 'private':
-                    await msg.reply_text(f"🦊 یه لحظه صبر کن؛ {wait} ثانیه‌ی دیگه بپرس.", **reply_kwargs(msg))
-                return
-            if ok and ai.budget_ok('chat'):
-                ai.user_note(tg_user.id); ai.budget_note('chat')
-                try: await context.bot.send_chat_action(chat.id, 'typing')
-                except Exception: pass
-                ctx_line = f"اسم: {ctx_dict['name']}؛ لول: {ctx_dict['level']}؛ اسم روباهش: {ctx_dict['fox']}"
-                key = f"{chat.id}:{tg_user.id}"
-                raw = await ai.complete(
-                    ai.build_system(mode, ctx_line), ai.history_get(key) + [{'role': 'user', 'content': prompt or 'راهنما'}],
-                    max_tokens=350 if mode == 'chat' else 450, temperature=0.8 if mode == 'chat' else 0.3)
-                if raw:
-                    answer = ai.clean_output(raw)
-                    if answer:
-                        ai.history_add(key, prompt, answer)
-            # سقف روزانه پر شده یا API خطا داد → بی‌سروصدا به مغز قانون‌محور برمی‌گردیم
-        if not answer:
-            if not brain.ENABLED or not brain.gate(tg_user.id):
-                return
-            answer = brain.reply(mode, prompt, ctx_dict)
-        if not answer:
-            return
-        sent = await msg.reply_text(answer, **reply_kwargs(msg))
-        AI_REPLY_IDS[(chat.id, sent.message_id)] = 1
-        while len(AI_REPLY_IDS) > 3000:
-            AI_REPLY_IDS.popitem(last=False)
-    except Exception:
-        logger.exception('fox chat failed')
-# ── ناظر هوشمند گروه ──
-_AI_MOD_CACHE = {}       # chat_id → (روشن؟، زمان)
-_AI_ADMIN_CACHE = {}     # (chat_id, user_id) → (ادمین؟، زمان)
-_AI_STRIKES = {}         # (chat_id, user_id) → [زمان تخلف‌ها]
-_AI_HINT_AT = {}         # chat_id → آخرین باری که «دسترسی حذف پیام ندارم» گفتیم
-AI_VIOLATION_LABELS = {'insult': 'توهین', 'hate': 'نفرت‌پراکنی', 'sexual': 'محتوای نامناسب', 'ad': 'تبلیغات', 'spam': 'اسپم'}
-AI_STRIKE_LIMIT = 3
-AI_MUTE_MINUTES = 10
-
-
-def ai_mod_enabled(chat_id):
-    now = _time.time(); c = _AI_MOD_CACHE.get(chat_id)
-    if c and now - c[1] < 60:
-        return c[0]
-    session = get_session()
-    try:
-        row = session.get(GroupChat, chat_id)
-        flag = bool(row and int(getattr(row, 'ai_mod', 0) or 0))
-    except Exception:
-        flag = False
-    finally:
-        session.close()
-    _AI_MOD_CACHE[chat_id] = (flag, now)
-    return flag
-
-
-async def ai_is_chat_admin(bot, chat_id, user_id, use_cache=True):
-    now = _time.time(); c = _AI_ADMIN_CACHE.get((chat_id, user_id))
-    if use_cache and c and now - c[1] < 600:
-        return c[0]
-    try:
-        member = await bot.get_chat_member(chat_id, user_id)
-        flag = member.status in ('administrator', 'creator')
-    except Exception:
-        return True      # مطمئن نیستیم؛ به‌جای مجازات اشتباهی، بررسی نکن
-    _AI_ADMIN_CACHE[(chat_id, user_id)] = (flag, now)
-    return flag
-
-
-async def ai_moderation_handler(update, context):
-    """روی هر پیام متنی گروه؛ فقط اگه ناظر هوشمند روشن باشه کار می‌کنه و هیچ‌وقت جلوی بقیه‌ی هندلرها رو نمی‌گیره.
-    بررسی کاملاً محلیه (بدون هیچ سرویس خارجی) و لحظه‌ایه."""
-    if not brain.ENABLED:
-        return
-    msg = update.message; chat = update.effective_chat; user = update.effective_user
-    if not msg or not msg.text or not chat or chat.type not in ('group', 'supergroup') or not user or user.is_bot:
-        return
-    if user.id in ADMIN_IDS or not ai_mod_enabled(chat.id):
-        return
-    verdict = brain.moderate(msg.text, chat.id, user.id)
-    if not verdict:
-        return
-    context.application.create_task(ai_moderation_run(update, context, verdict[0]), update=update)
-async def ai_moderation_run(update, context, kind):
-    try:
-        msg = update.message; chat = update.effective_chat; user = update.effective_user
-        if await ai_is_chat_admin(context.bot, chat.id, user.id):
-            return
-        await ai_apply_violation(context, msg, chat, user, kind)
-    except Exception:
-        logger.exception('moderation failed')
-async def ai_apply_violation(context, msg, chat, user, v):
-    key = (chat.id, user.id); now = _time.time()
-    strikes = [t for t in _AI_STRIKES.get(key, []) if now - t < 86400] + [now]
-    _AI_STRIKES[key] = strikes
-    n = len(strikes)
-    deleted = False
-    try:
-        await msg.delete(); deleted = True
-    except Exception as e:
-        logger.info('ai mod: cannot delete message in %s: %s', chat.id, e)
-    who = mention_of(user.id, user.first_name or user.username or user.id)
-    label = AI_VIOLATION_LABELS.get(v, 'تخلف')
-    if not deleted and now - _AI_HINT_AT.get(chat.id, 0) > 3600:
-        _AI_HINT_AT[chat.id] = now
-        try: await context.bot.send_message(chat.id, "ℹ️ برای اینکه مدیریت هوشمند بتونه پیام‌های نامناسب رو حذف کنه، ربات باید ادمین گروه با دسترسی «حذف پیام‌ها» باشه.")
-        except Exception: pass
-    if n >= AI_STRIKE_LIMIT:
-        _AI_STRIKES.pop(key, None)
-        muted = False
-        try:
-            await context.bot.restrict_chat_member(
-                chat.id, user.id, permissions=ChatPermissions(can_send_messages=False),
-                until_date=datetime.now(timezone.utc) + timedelta(minutes=AI_MUTE_MINUTES))
-            muted = True
-        except Exception as e:
-            logger.info('ai mod: cannot restrict in %s: %s', chat.id, e)
-        text = (f"🔇 {who} به‌خاطر تکرار «{label}» {AI_MUTE_MINUTES} دقیقه سکوت شد." if muted
-                else f"🚫 {who} این بار سوم «{label}» بود؛ لطفاً رعایت کن. (ربات دسترسی سکوت دادن نداره)")
-    else:
-        text = (f"⚠️ {who} پیامت به‌خاطر «{label}» {'حذف شد' if deleted else 'مناسب نبود'}.\n"
-                f"اخطار {n} از {AI_STRIKE_LIMIT} — با تکرار، {AI_MUTE_MINUTES} دقیقه سکوت می‌شی.")
-    try: await context.bot.send_message(chat.id, text)
-    except Exception: pass
-
-
-async def ai_mod_command(update, context):
-    """«مدیریت هوشمند» / «... روشن» / «... خاموش» — فقط ادمین‌های گروه."""
-    msg = update.message; chat = update.effective_chat; user = update.effective_user
-    if not chat or chat.type not in ('group', 'supergroup'):
-        await msg.reply_text("🛡 مدیریت هوشمند فقط مخصوص گروه‌هاست؛ این دستور رو تو گروه بفرست.", **reply_kwargs(msg)); return
-    if not await require_membership(update, context):
-        return
-    if user.id not in ADMIN_IDS and not await ai_is_chat_admin(context.bot, chat.id, user.id, use_cache=False):
-        await msg.reply_text("⛔ فقط ادمین‌های گروه می‌تونن مدیریت هوشمند رو تنظیم کنن.", **reply_kwargs(msg)); return
-    if not brain.ENABLED:
-        await msg.reply_text("ℹ️ مدیریت هوشمند روی این ربات فعال نیست.", **reply_kwargs(msg)); return
-    text = re.sub(r'\s+', ' ', (msg.text or '').strip())
-    want = 1 if text.endswith('روشن') else 0 if text.endswith('خاموش') else None
-    if want is not None:
-        session = get_session()
-        try:
-            row = session.get(GroupChat, chat.id)
-            if row is None:
-                row = GroupChat(chat_id=chat.id, title=chat.title or "گپ", active=1); session.add(row)
-            row.ai_mod = want; session.commit()
-        finally:
-            session.close()
-        _AI_MOD_CACHE[chat.id] = (bool(want), _time.time())
-    enabled = ai_mod_enabled(chat.id)
-    if want == 1:
-        note = ""
-        try:
-            me = await context.bot.get_chat_member(chat.id, context.bot.id)
-            if not getattr(me, 'can_delete_messages', False):
-                note = "\n\n⚠️ ربات هنوز دسترسی «حذف پیام‌ها» نداره؛ اونو ادمین کن تا بتونه پیام‌های نامناسب رو پاک کنه (برای سکوت دادن، دسترسی «محدود کردن اعضا» هم لازمه)."
-        except Exception:
-            pass
-        await msg.reply_text(
-            "🛡 مدیریت هوشمند روشن شد!\n\n"
-            "• پیام‌های متنی گروه روی خود ربات بررسی می‌شن (به هیچ سرویس بیرونی فرستاده و ذخیره نمی‌شن).\n"
-            "• حذف می‌شه: فحش و توهین واضح، تبلیغ لینک دعوت/کانال/شماره‌ی فروش، و پیام تکراری پشت‌سرهم.\n"
-            f"• سومین تخلف در ۲۴ ساعت = {AI_MUTE_MINUTES} دقیقه سکوت.\n"
-            "• ادمین‌های گروه بررسی نمی‌شن.\n"
-            "• برای خاموش کردن: «مدیریت هوشمند خاموش»" + note, **reply_kwargs(msg))
-    elif want == 0:
-        await msg.reply_text("🛡 مدیریت هوشمند خاموش شد.", **reply_kwargs(msg))
-    else:
-        await msg.reply_text(f"🛡 مدیریت هوشمند: {'روشن ✅' if enabled else 'خاموش ⚪️'}\n\nروشن کردن: «مدیریت هوشمند روشن»\nخاموش کردن: «مدیریت هوشمند خاموش»", **reply_kwargs(msg))
-
-
-# ── اخبار شهر ──
-_AI_NEWS_CACHE = {}      # chat_id → (زمان، متن)
-AI_NEWS_CACHE_SECONDS = 2 * 3600
-
-
-def ai_city_facts(session, row):
-    level = int(row.city_level or 1)
-    totals = {}
-    for uid, amount in session.query(CityDonation.user_id, CityDonation.amount).filter(CityDonation.chat_id == row.chat_id).all():
-        totals[int(uid)] = totals.get(int(uid), 0) + int(amount or 0)
-    donors = []
-    for uid, total in sorted(totals.items(), key=lambda x: (-x[1], x[0]))[:3]:
-        u = session.get(User, uid)
-        donors.append((user_display_name(u) if u else str(uid), total))
-    facts = {
-        'title': row.title or 'گپ', 'level': level,
-        'claims': int(row.city_claim_total or 0), 'rescued': int(row.city_rescued_total or 0),
-        'hunts': int(row.city_hunt_total or 0), 'treasury': int(row.city_treasury or 0),
-        'mayor': (row.city_mayor_name if row.city_mayor_id else None) or row.city_owner_name, 'donors': donors, 'need': None,
-        'max_level': CITY_MAX_LEVEL,
-    }
-    if level < CITY_MAX_LEVEL:
-        req = city_requirements(level)
-        facts['need'] = {'روب روب': max(0, req['points'] - facts['claims']), 'روباه زخمی': max(0, req['rescued'] - facts['rescued']),
-                         'شکار': max(0, req['hunts'] - facts['hunts']), 'خزانه': max(0, req['treasury'] - facts['treasury'])}
-    return facts
-
-
-def ai_city_facts_text(f):
-    lines = [f"- نام شهر: «{f['title']}»", f"- سطح شهر: {f['level']} از {CITY_MAX_LEVEL}",
-             f"- مجموع روب روب‌ها: {f['claims']:,}", f"- روباه‌های زخمی نجات‌یافته: {f['rescued']:,}",
-             f"- مجموع شکارها: {f['hunts']:,}", f"- خزانه: {f['treasury']:,} روب‌پوینت"]
-    if f['mayor']:
-        lines.append(f"- رهبر شهر: {f['mayor']}")
-    if f['donors']:
-        lines.append("- برترین دونیت‌کننده‌ها: " + "، ".join(f"{n} ({a:,})" for n, a in f['donors']))
-    if f['need']:
-        lines.append("- تا سطح بعد هنوز لازمه: " + "، ".join(f"{k} {v:,}" for k, v in f['need'].items() if v > 0))
-    else:
-        lines.append("- شهر به بالاترین سطح رسیده!")
-    return "\n".join(lines)
-
-
-def ai_city_news_fallback(f):
-    return (f"📰 اخبار شهر «{f['title']}»\n\n🏙 سطح {f['level']} از {CITY_MAX_LEVEL}\n🐾 روب روب‌ها: {f['claims']:,}\n"
-            f"🦊 روباه زخمی نجات‌یافته: {f['rescued']:,}\n⚔️ شکارها: {f['hunts']:,}\n🏦 خزانه: {f['treasury']:,} روب‌پوینت")
-
-
-async def city_news_command(update, context):
-    msg = update.message; chat = update.effective_chat
-    if not chat or chat.type not in ('group', 'supergroup'):
-        await msg.reply_text("📰 اخبار شهر فقط مخصوص گروه‌هاست؛ این دستور رو تو یه گروه بفرست.", **reply_kwargs(msg)); return
-    if not await require_membership(update, context):
-        return
-    if not (ai.AI_ENABLED or brain.ENABLED):
-        await msg.reply_text("ℹ️ اخبار شهر روی این ربات فعال نیست.", **reply_kwargs(msg)); return
-    last = _AI_NEWS_CACHE.get(chat.id)
-    if last and _time.time() - last[0] < 60:
-        await msg.reply_text("⏳ خبرنگار هنوز داره خبر جمع می‌کنه؛ یه دقیقه‌ی دیگه بپرس.", **reply_kwargs(msg)); return
-    _AI_NEWS_CACHE[chat.id] = (_time.time(), '')
-    context.application.create_task(city_news_run(update, context), update=update)
-async def city_news_run(update, context):
-    msg = update.message; chat = update.effective_chat
-    try:
-        session = get_session()
-        try:
-            row = session.get(GroupChat, chat.id)
-            if row is None:
-                row = GroupChat(chat_id=chat.id, title=chat.title or "گپ", active=1); session.add(row); session.commit()
-            facts = ai_city_facts(session, row)
-        finally:
-            session.close()
-        text = None
-        if ai.AI_ENABLED and ai.budget_ok('news'):
-            ai.budget_note('news')
-            try: await context.bot.send_chat_action(chat.id, 'typing')
-            except Exception: pass
-            raw = await ai.complete(ai.NEWS_SYSTEM, [{'role': 'user', 'content': "اطلاعات شهر:\n" + ai_city_facts_text(facts)}],
-                                    max_tokens=300, temperature=0.8)
-            cleaned = ai.clean_output(raw or '', 700)
-            text = f"📰 اخبار شهر روبی\n\n{cleaned}" if cleaned else None
-        if not text:
-            text = brain.city_news(facts)
-        await msg.reply_text(text, **reply_kwargs(msg))
-    except Exception:
-        logger.exception('city news failed')
-async def ai_city_levelup_news(context, chat_id, title, level):
-    """بعد از تبریک ارتقای شهر، یک خبر کوتاه و بامزه هم (در پس‌زمینه) می‌فرستد."""
-    try:
-        text = None
-        if ai.AI_ENABLED and ai.budget_ok('news'):
-            ai.budget_note('news')
-            raw = await ai.complete(
-                ai.NEWS_SYSTEM,
-                [{'role': 'user', 'content': f"خبر فوری: شهر «{title}» تازه به سطح {level} از {CITY_MAX_LEVEL} ارتقا پیدا کرد. یه خبر کوتاه و شاد برای اهالی شهر بنویس."}],
-                max_tokens=150, temperature=0.9, timeout=20.0)
-            cleaned = ai.clean_output(raw or '', 400)
-            text = ("📰 " + cleaned) if cleaned else None
-        if not text and brain.ENABLED:
-            text = brain.levelup_news(title, level)
-        if text:
-            await context.bot.send_message(chat_id, text)
-    except Exception:
-        logger.exception('city level-up news failed')
-# ── ابزار ادمین ──
-async def ai_admin_command(update, context):
-    """«وضعیت هوش مصنوعی» / «تست هوش مصنوعی» — فقط ادمین‌های ربات (ADMIN_IDS)."""
-    msg = update.message
-    if not admin_only(update.effective_user.id):
-        return
-    key = ai.AI_API_KEY
-    masked = ('…' + key[-4:]) if key else 'تنظیم نشده'
-    snap = ai.usage_snapshot()
-    lines = [
-        "🤖 وضعیت روباهیو", "",
-        f"🧠 مغز قانون‌محور (رایگان، داخل خود ربات): {'فعال ✅' if brain.ENABLED else 'خاموش ❌'}",
-        f"   گفتگو، «راهنما ...»، مدیریت هوشمند گروه و اخبار شهر | یادگرفته‌های دستی: {brain.custom_count()}", "",
-        f"🌐 هوش مصنوعی خارجی (اختیاری): {'فعال ✅' if ai.AI_ENABLED else 'غیرفعال ⚪️ (AI_API_KEY تنظیم نشده)'}",
-    ]
-    if ai.AI_ENABLED or key:
-        lines += [f"   provider: {ai.AI_PROVIDER} | مدل: {ai.AI_MODEL or '—'} | کلید: {masked}",
-                  "   مصرف امروز: " + "، ".join(f"{b} {snap['budgets'].get(b, 0)}/{lim}" for b, lim in snap['limits'].items())]
-    if ai.LAST_ERROR:
-        lines += ["", f"⚠️ آخرین خطای API: {ai.LAST_ERROR}"]
-    if (msg.text or '').strip().startswith('تست'):
-        if not ai.AI_ENABLED:
-            ctx = {'name': 'ادمین', 'level': 1, 'fox': 'مکار'}
-            lines += ["", "🧪 تست مغز قانون‌محور:",
-                      f"• گفتگو («سلام»): {brain.chat_reply('سلام', ctx)}",
-                      f"• راهنما («بانک»): {brain.guide_answer('بانک')[:160].replace(chr(10), ' ')}…",
-                      f"• ناظر (لینک دعوت): {brain.moderate_text('عضو کانال ما شو t.me/+abc') or 'تشخیص داده نشد ❌'}",
-                      f"• تعداد موضوع‌های راهنما: {len(brain.guide_titles())}"]
-            await msg.reply_text("\n".join(lines), **reply_kwargs(msg)); return
-        await msg.reply_text("\n".join(lines) + "\n\n⏳ دارم یه پیام تست به API می‌فرستم...", **reply_kwargs(msg))
-        context.application.create_task(ai_admin_selftest(update, context), update=update)
-        return
-    lines += ["", "برای تست بنویس: تست هوش مصنوعی"]
-    await msg.reply_text("\n".join(lines), **reply_kwargs(msg))
-async def ai_admin_selftest(update, context):
-    msg = update.message
-    try:
-        t0 = _time.time()
-        out = await ai.complete("فقط یک جمله‌ی کوتاه فارسی جواب بده.", [{'role': 'user', 'content': "سلام روباهیو! فقط بگو حالت چطوره."}], max_tokens=60, temperature=0.5, timeout=25.0)
-        dt = _time.time() - t0
-        if out:
-            await msg.reply_text(f"✅ اتصال برقراره ({dt:.1f} ثانیه)\n\n🦊 {ai.clean_output(out, 300)}", **reply_kwargs(msg))
-        else:
-            await msg.reply_text(f"❌ تست ناموفق بود.\n\nخطا: {ai.LAST_ERROR or 'نامشخص'}", **reply_kwargs(msg))
-    except Exception:
-        logger.exception('ai selftest failed')
-
-
-# ── غلط تایپی دستورها («گازینو» → «آیا منظورت کازینو بود؟») + غلط‌گیر املایی ──
+# عبارت‌های دستور ربات (برای تشخیص اینکه پیام یک دستور است)
 FOX_COMMAND_PHRASES = [
     "روبام", "روباش", "ایموجی روبی", "شکلک روبی", "گردونه", "چرخ شانس", "دوست روبی", "فرند روب", "دوست روباهیو", "کد هدیه", "کد جایزه",
     "لیدربرد", "لیدر برد", "شهر روبی", "شهر روباهیو", "شهر روباه", "شهردار روبی", "روباه", "روبی", "روباهیو",
     "زندان روبی", "زندان روباهیو", "قاچاق روبی", "قاچاق روباهیو", "شکار", "یخچال روبی", "کارخونه روبی", "کارخونه",
     "رفرال", "زیرمجموعه", "زیرمجموعه گیری", "بانک", "بانک روبی", "شاپ روبی", "فروشگاه روبی", "بازی روبی",
-    "بازی های روبی", "کازینو روبی", "کازینو", "پیش بینی", "پیشبینی", "پیش بینی فوتبال", "اخبار شهر", "اخبار شهر روبی",
-    "خبر شهر", "مدیریت هوشمند", "روباهیو حال", "روب روب", "هور هور",
+    "بازی های روبی", "کازینو روبی", "کازینو", "پیش بینی", "پیشبینی", "پیش بینی فوتبال", "روباهیو حال", "روب روب", "هور هور",
 ]
 if CLAIM_KEYWORD and CLAIM_KEYWORD not in FOX_COMMAND_PHRASES:
     FOX_COMMAND_PHRASES.append(CLAIM_KEYWORD)
-FOX_SPELL_DEFAULT = os.getenv('FOX_SPELL_DEFAULT', '1').strip().lower() in ('1', 'true', 'yes', 'on')
-SPELL_TOGGLE_RE = re.compile(r'^(?:غلط\s*گیر|غلط\s*یاب|غلط\s*گیر\s*املایی|املا\s*یار)(?:\s+(روشن|خاموش))?$')
-_HINT_AT = {}            # (chat_id, user_id) → زمان آخرین پیشنهاد دستور
-_HINT_CHAT_AT = {}       # chat_id → زمان آخرین پیشنهاد دستور
-_SPELL_AT = {}           # (chat_id, user_id) → زمان آخرین تذکر املایی
-_SPELL_CHAT_AT = {}      # chat_id → زمان آخرین تذکر املایی
-_SPELL_CACHE = {}        # chat_id → (روشن؟، زمان)
-
-
-def _trim_times(d, limit=5000):
-    if len(d) > limit:
-        for k in sorted(d, key=d.get)[:limit // 2]:
-            d.pop(k, None)
-
-
-async def command_hint(update, context, text):
-    """اگه کل پیام شبیه (ولی نه دقیقاً) یه دستور ربات بود «آیا منظورت X بود؟» می‌فرسته. True = پیام مصرف شد."""
-    if len(text) > 60:
-        return False
-    msg = update.message; chat = update.effective_chat; user = update.effective_user
-    if not msg or not chat or not user:
-        return False
-    sug = spell.suggest_command(text, FOX_COMMAND_PHRASES)
-    if sug:
-        reply = f"🦊 آیا منظورت «{sug}» بود؟ 🤔\nهمین رو بنویس تا اجرا بشه."
-    else:
-        tr = spell.suggest_transfer(text)
-        if not tr:
-            return False
-        reply = f"🦊 آیا منظورت «{tr}» بود؟ 🤔\n(روی پیام گیرنده ریپلای کن و همین رو بنویس)"
-    now = _time.time(); private = chat.type == 'private'
-    if now - _HINT_AT.get((chat.id, user.id), 0) < (2 if private else 15) or (not private and now - _HINT_CHAT_AT.get(chat.id, 0) < 4):
-        return True      # ضداسپم؛ ولی پیام رو به هوش مصنوعی هم نمی‌دیم
-    _HINT_AT[(chat.id, user.id)] = now; _HINT_CHAT_AT[chat.id] = now
-    _trim_times(_HINT_AT); _trim_times(_HINT_CHAT_AT)
-    await msg.reply_text(reply, **reply_kwargs(msg))
-    return True
-
-
-def spell_enabled(chat, context):
-    if chat.type == 'private':
-        return not (context.user_data or {}).get('spell_off')
-    now = _time.time(); c = _SPELL_CACHE.get(chat.id)
-    if c and now - c[1] < 60:
-        return c[0]
-    flag = FOX_SPELL_DEFAULT
-    session = get_session()
-    try:
-        row = session.get(GroupChat, chat.id)
-        v = int(getattr(row, 'spell_mod', -1) if row is not None and getattr(row, 'spell_mod', None) is not None else -1)
-        flag = FOX_SPELL_DEFAULT if v < 0 else bool(v)
-    except Exception:
-        pass
-    finally:
-        session.close()
-    _SPELL_CACHE[chat.id] = (flag, now)
-    return flag
-
-
-async def spell_assist(update, context, text):
-    """غلط‌های املایی مطمئن رو (قذا → غذا) با یه ریپلای کوتاه تصحیح می‌کنه. بقیه‌ی کارهای ربات رو متوقف نمی‌کنه."""
-    if len(text) > 400:
-        return
-    pairs = spell.find_typos(text)
-    if not pairs:
-        return
-    msg = update.message; chat = update.effective_chat; user = update.effective_user
-    if not msg or not chat or not user or not spell_enabled(chat, context):
-        return
-    now = _time.time(); private = chat.type == 'private'
-    if now - _SPELL_AT.get((chat.id, user.id), 0) < (20 if private else 45) or (not private and now - _SPELL_CHAT_AT.get(chat.id, 0) < 12):
-        return
-    _SPELL_AT[(chat.id, user.id)] = now; _SPELL_CHAT_AT[chat.id] = now
-    _trim_times(_SPELL_AT); _trim_times(_SPELL_CHAT_AT)
-    try:
-        await msg.reply_text(spell.format_typos(pairs), **reply_kwargs(msg))
-    except Exception:
-        logger.exception('spell reply failed')
-
-
-async def spell_toggle_command(update, context):
-    """«غلط گیر» / «غلط گیر روشن» / «غلط گیر خاموش» — تو گروه فقط ادمین‌ها؛ تو پیوی برای خود کاربر."""
-    msg = update.message; chat = update.effective_chat; user = update.effective_user
-    text = re.sub(r'\s+', ' ', (msg.text or '').replace('\u200c', ' ').strip())
-    m = SPELL_TOGGLE_RE.match(text)
-    want = None if not m or not m.group(1) else 1 if m.group(1) == 'روشن' else 0
-    reply = lambda t: msg.reply_text(t, **reply_kwargs(msg))
-    if chat.type == 'private':
-        if want is not None:
-            context.user_data['spell_off'] = (want == 0)
-        st = "روشن ✅" if spell_enabled(chat, context) else "خاموش ⛔"
-        await reply(f"✍️ غلط‌گیر املایی تو پیوی: {st}\nتغییر: «غلط گیر روشن» یا «غلط گیر خاموش»"); return
-    if want is not None:
-        if user.id not in ADMIN_IDS and not await ai_is_chat_admin(context.bot, chat.id, user.id, use_cache=False):
-            await reply("⛔ فقط ادمین‌های گروه می‌تونن غلط‌گیر رو تنظیم کنن."); return
-        session = get_session()
-        try:
-            row = session.get(GroupChat, chat.id)
-            if row is None:
-                row = GroupChat(chat_id=chat.id, title=chat.title or "گپ", active=1); session.add(row)
-            row.spell_mod = want; session.commit()
-        finally:
-            session.close()
-        _SPELL_CACHE[chat.id] = (bool(want), _time.time())
-    st = "روشن ✅" if spell_enabled(chat, context) else "خاموش ⛔"
-    await reply(f"✍️ غلط‌گیر املایی تو این گروه: {st}\n"
-                "غلط‌های مطمئن (مثل «قذا» ← «غذا») رو با یه پیام کوتاه تصحیح می‌کنه؛ هر نفر حداکثر دقیقه‌ای یه بار.\n"
-                "تغییر (فقط ادمین): «غلط گیر روشن» / «غلط گیر خاموش»")
-
-
 async def track_city_member_presence(update, context):
     """حضور اعضای گپ را برای شرط ۳ روز شهرداری ثبت می‌کند."""
     chat=update.effective_chat
@@ -13435,7 +12600,7 @@ FEATURE_DISPLAY_NAMES = {
     'friends': 'دوست روبی', 'gift_shop': 'شاپ روبی', 'gift_code': 'کد هدیه',
     'football': 'پیش بینی فوتبال', 'fridge': 'یخچال روبی', 'factory': 'کارخونه روبی',
     'mood': 'روباهیو حال', 'flag': 'پرچم', 'fox_panel': 'روباه', 'claim': 'روب روب',
-    'city_news': 'اخبار شهر', 'city_mayor': 'شهردار روبی', 'emoji': 'ایموجی روبی',
+    'city_mayor': 'شهردار روبی', 'emoji': 'ایموجی روبی',
     'lucky_bag': 'کیف روب پوینت', 'owl': 'جغد روبی',
 }
 
@@ -13466,7 +12631,6 @@ FEATURE_NAME_ALIASES = {
     'flag': ['پرچم'],
     'fox_panel': ['روباه', 'روبی', 'روباهیو'],
     'claim': ['روب روب', 'هور هور', 'عو عو'],
-    'city_news': ['اخبار شهر'],
     'city_mayor': ['شهردار روبی', 'شهردار'],
     'lucky_bag': ['کیف روب پوینت', 'کیف پول روبی', 'کیف پول'],
     'emoji': ['ایموجی روبی', 'شکلک روبی'],
@@ -13502,7 +12666,6 @@ FEATURE_TRIGGER_TEXTS = {
     'games': {"بازی روبی", "بازی های روبی", "بازی‌های روبی", "🕹 بازی های روبی", "بازی"},
     'casino': {"کازینو روبی", "کازینو", "🃏 کازینو روبی"},
     'football': {"پیش بینی", "پیش بینی فوتبال", "⚽ پیش بینی", "پیشبینی"},
-    'city_news': {"اخبار شهر", "اخبار شهر روبی", "خبر شهر", "📰 اخبار شهر"},
     'emoji': {"ایموجی روبی", "شکلک روبی"},
     'owl': {"جغد روبی", "جغد"},
 }
@@ -13733,12 +12896,6 @@ async def text_router(update, context):
         await casino_command(update, context); return
     if re.sub(r"[\s‌]+", " ", text) in {"پیش بینی", "پیش بینی فوتبال", "⚽ پیش بینی", "پیشبینی"}:
         await football_predict_command(update, context); return
-    if text in {"اخبار شهر", "اخبار شهر روبی", "خبر شهر", "📰 اخبار شهر"}:
-        await city_news_command(update, context); return
-    if re.sub(r"\s+", " ", text) in {"مدیریت هوشمند", "مدیریت هوشمند روشن", "مدیریت هوشمند خاموش"}:
-        await ai_mod_command(update, context); return
-    if re.sub(r"\s+", " ", text) in {"وضعیت هوش مصنوعی", "تست هوش مصنوعی"} and admin_only(update.effective_user.id):
-        await ai_admin_command(update, context); return
     # انتقال روب پوینت 50 — فقط با ریپلای به گیرنده
     m = re.fullmatch(r"انتقال\s+روب\s+پوینت\s+([0-9۰-۹.,]+(?:k|کی|کا|m|م|میل)?)", text, re.I)
     if m:
@@ -13760,19 +12917,6 @@ async def text_router(update, context):
             MOOD_ADD_RE.match(text) or MOOD_LIST_RE.match(re.sub(r"\s+", " ", text)) or MOOD_DEL_RE.match(re.sub(r"\s+", " ", text))
             or MOOD_CHANNEL_RE.match(re.sub(r"\s+", " ", text))):
         await fox_mood_admin_command(update, context); return
-    # آموزش دستی به روباه (فقط ادمین، فقط پیوی)
-    if update.effective_chat.type == "private" and admin_only(update.effective_user.id) and (
-            FOX_TEACH_RE.match(text) or FOX_FORGET_RE.match(text) or re.sub(r"\s+", " ", text) == "لیست یادگیری"):
-        await fox_teach_command(update, context); return
-    # تنظیم غلط‌گیر املایی
-    if SPELL_TOGGLE_RE.match(re.sub(r"\s+", " ", text.replace("\u200c", " "))):
-        await spell_toggle_command(update, context); return
-    # غلط تایپی دستورها: «گازینو» → «آیا منظورت کازینو بود؟»
-    if await command_hint(update, context, text): return
-    # غلط‌گیر املایی (فقط تذکر می‌ده؛ کار بقیه‌ی بخش‌ها ادامه پیدا می‌کنه)
-    await spell_assist(update, context, text)
-    # هر پیام دیگری که مخاطبش هوش مصنوعیه (پیوی، «روباهیو ...»، منشن، ریپلای روی جواب روباه، «راهنما ...»)
-    if await ai_chat_entry(update, context): return
 
 
 async def persian_slash_router(update, context):
@@ -13959,7 +13103,6 @@ def _transfer_all_user_data(session, source_id, target_id, recovery_row):
         "gift_codes": ("created_by",),
         "giveaways": ("created_by",),
         "giveaway_entries": ("inviter_id",),
-        "fox_knowledge": ("created_by",),
         "fox_mood_songs": ("created_by",),
         "fox_mood_channels": ("added_by",),
         "bank_transactions": ("counterparty_user_id",),
@@ -15366,11 +14509,6 @@ def main():
     if not BOT_TOKEN: raise RuntimeError('BOT_TOKEN is missing. Add BOT_TOKEN in Railway Variables.')
     init_db()
     education_module.mention_hook = user_mention   # اسمِ طراحِ سؤال به‌صورت لینک آبی نمایش داده شود
-    ai.set_knowledge(build_ai_knowledge())
-    brain.set_guide(build_guide_entries())
-    logger.info("پاسخ‌های دستی یادگرفته‌شده: %s", load_custom_entries())
-    logger.info("مغز قانون‌محور: %s | هوش مصنوعی خارجی: %s", "فعال" if brain.ENABLED else "خاموش",
-                f"فعال ({ai.AI_PROVIDER} / {ai.AI_MODEL})" if ai.AI_ENABLED else "غیرفعال (AI_API_KEY تنظیم نشده)")
     # پیش‌فرض کتابخانه فقط ۱ کانکشن هم‌زمان به تلگرام باز می‌کند و آپدیت‌ها را یکی‌یکی
     # (سریالی) پردازش می‌کند؛ همین باعث می‌شد با زیاد شدن گپ‌ها و کاربران، کل ربات کند شود
     # چون هر پیام باید منتظر تمام‌شدن پردازش پیام قبلی (در هر گپی) می‌ماند.
@@ -15497,12 +14635,10 @@ def main():
     app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, track_city_member_presence), group=-2)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,edu_early_handler),group=-7)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text_router),group=2)
-    # ادمین تو پیوی فایل (آهنگ/ویدیو/گیف/استیکر/...) رو با کپشن «یاد بگیر ...» می‌فرسته → به روباه یاد داده می‌شه
+    # ادمین تو پیوی فایل آهنگ رو با کپشن «آهنگ حال: ...» می‌فرسته → به آهنگ‌های «روباهیو حال» اضافه می‌شه
     app.add_handler(MessageHandler(
-        (filters.AUDIO | filters.VIDEO | filters.ANIMATION | filters.Sticker.ALL | filters.VOICE | filters.PHOTO | filters.Document.ALL)
-        & filters.ChatType.PRIVATE & filters.User(user_id=list(ADMIN_IDS)) & filters.CaptionRegex(r"^\s*(?:یاد\s*بگیر|آهنگ\s+حال)"),
-        fox_teach_media_caption), group=4)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,ai_moderation_handler),group=5)
+        (filters.AUDIO | filters.Document.ALL) & filters.ChatType.PRIVATE & filters.User(user_id=list(ADMIN_IDS)) & filters.CaptionRegex(r"^\s*(?:یاد\s*بگیر\s+)?آهنگ\s+حال"),
+        fox_mood_media_caption), group=4)
     bridge.register(app)  # روباهیو وصل شو: وصل کردن موقت دو گپ
     # کانال آهنگ: ثبت کانال وقتی ادمین ربات، ربات رو ادمین کانال می‌کنه + آهنگ‌های کانال با هشتگ حال
     app.add_handler(ChatMemberHandler(mood_channel_member, ChatMemberHandler.MY_CHAT_MEMBER), group=-3)

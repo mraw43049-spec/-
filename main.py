@@ -14,6 +14,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, Optional
 
 BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))
@@ -1235,4 +1236,614 @@ def _edu_progress(session, uid, lock=False):
     p = q.first()
     if not p:
         p = edu.EducationProgress(user_id=uid)
-    
+        session.add(p)
+        session.flush()
+    return p
+
+
+def _aw(d):
+    return d.replace(tzinfo=timezone.utc) if d is not None and d.tzinfo is None else d
+
+
+def _edu_active_options(edu, uid, p, session):
+    """(سؤال، گزینه‌ها به ترتیب نمایش، اندیس درست در همین ترتیب، طراح) برای سؤال فعال؛ ترتیب گزینه‌ها برای هر سؤال ثابته."""
+    topic, qid = p.active_topic, int(p.active_question)
+    if qid >= edu.USER_Q_OFFSET:
+        r = session.get(edu.EduUserQuestion, qid - edu.USER_Q_OFFSET)
+        if not r or r.status != "approved" or r.topic != topic:
+            return None
+        opts = [(0, r.correct_opt), (1, r.wrong1), (2, r.wrong2)]
+        seed = f"{uid}:{qid}:{int(_aw(p.active_expires).timestamp())}"
+        _random.Random(seed).shuffle(opts)
+        author = session.get(User, r.author_id)
+        designer = display_name(author) if author else "کاربر"
+        correct_pos = [i for i, (orig, _t) in enumerate(opts) if orig == 0][0]
+        return r.question, [t for _o, t in opts], correct_pos, designer
+    question, opts, correct = edu.TOPICS[topic][1][qid]
+    return question, list(opts), int(correct), ""
+
+
+def _edu_state(session, uid, p=None):
+    edu = _edu()
+    p = p or _edu_progress(session, uid)
+    now = datetime.now(timezone.utc)
+    unlocked = set((p.unlocked or "general").split(","))
+    certs = int(p.certificates or 0)
+    answers = int(p.correct_answers or 0)
+    cooldown = 0
+    if p.last_play_at:
+        cooldown = max(0, int(EDU_COOLDOWN - (now - _aw(p.last_play_at)).total_seconds()))
+    active = None
+    if p.active_topic and p.active_question is not None and p.active_expires:
+        left = int((_aw(p.active_expires) - now).total_seconds())
+        if left > 0:
+            got = _edu_active_options(edu, uid, p, session)
+            if got:
+                question, options, _cp, designer = got
+                active = {"topic": p.active_topic, "topic_title": edu.TOPICS[p.active_topic][0],
+                          "question": question, "options": options, "designer": designer, "left": left}
+    return {
+        "title": edu._name(certs),
+        "correct_answers": answers,
+        "units": int(p.correct or 0),
+        "certificates": certs,
+        "max_certificates": 15,
+        "to_next": max(0, edu._threshold(certs) - answers) if certs < 15 else 0,
+        "pending_certificate": bool(p.pending_certificate),
+        "next_title": edu._name(certs + 1),
+        "tuition": edu._tuition(certs),
+        "reward": edu._reward(certs),
+        "cooldown": cooldown,
+        "unlock_cost": EDU_UNLOCK_COST,
+        "topics": [{"key": k, "title": v[0], "unlocked": k in unlocked} for k, v in edu.TOPICS.items()],
+        "active": active,
+    }
+
+
+@app.get("/api/botinfo")
+def bot_info(tg_user: dict = Depends(current_telegram_user_raw)):
+    """یوزرنیم بات (برای دکمه‌ی «طرح سوال» که به پیوی بات می‌ره)."""
+    global _BOT_USERNAME
+    if not _BOT_USERNAME:
+        try:
+            r = _tg_http.get(f"{_TG_API}/getMe").json()
+            _BOT_USERNAME = (r.get("result") or {}).get("username") or ""
+        except Exception:  # noqa: BLE001
+            _BOT_USERNAME = ""
+    return {"username": _BOT_USERNAME}
+
+
+_BOT_USERNAME = ""
+
+
+@app.get("/api/edu")
+def edu_state(tg_user: dict = Depends(current_telegram_user)):
+    session = get_session()
+    try:
+        if not session.get(User, tg_user["id"]):
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        p = _edu_progress(session, tg_user["id"])
+        session.commit()
+        return _edu_state(session, tg_user["id"], p)
+    finally:
+        session.close()
+
+
+class EduStart(BaseModel):
+    topic: str
+
+
+@app.post("/api/edu/start")
+def edu_start(body: EduStart, tg_user: dict = Depends(current_telegram_user)):
+    edu = _edu()
+    session = get_session()
+    try:
+        uid = tg_user["id"]
+        user = session.query(User).filter(User.telegram_id == uid).with_for_update().first()
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        p = _edu_progress(session, uid, lock=True)
+        if body.topic not in edu.TOPICS:
+            raise HTTPException(status_code=400, detail="موضوع نامعتبره.")
+        if body.topic not in set((p.unlocked or "general").split(",")):
+            raise HTTPException(status_code=403, detail="این موضوع هنوز قفله.")
+        now = datetime.now(timezone.utc)
+        if p.active_expires and _aw(p.active_expires) > now and p.active_topic:
+            return {"state": _edu_state(session, uid, p)}
+        if p.last_play_at and (now - _aw(p.last_play_at)).total_seconds() < EDU_COOLDOWN:
+            raise HTTPException(status_code=429, detail="هر ۲۵ دقیقه یک سؤال مجازه.")
+        topic = body.topic
+        seen = _json.loads(p.answered or "{}")
+        used = set(seen.get(topic, []))
+        pool = edu.TOPICS[topic][1]
+        user_qs = {edu.USER_Q_OFFSET + r.id: r for r in session.query(edu.EduUserQuestion).filter(
+            edu.EduUserQuestion.topic == topic, edu.EduUserQuestion.status == "approved",
+            edu.EduUserQuestion.author_id != uid).all()}
+        all_ids = list(range(len(pool))) + list(user_qs.keys())
+        available = [i for i in all_ids if i not in used]
+        if not available:
+            seen[topic] = []
+            p.answered = _json.dumps(seen)
+            available = all_ids
+        qid = _random.choice(available)
+        p.active_topic = topic
+        p.active_question = qid
+        p.active_expires = now + timedelta(seconds=EDU_QUESTION_SECONDS)
+        p.last_play_at = now
+        session.commit()
+        return {"state": _edu_state(session, uid, p)}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+class EduUnlock(BaseModel):
+    topic: str
+
+
+@app.post("/api/edu/unlock")
+def edu_unlock(body: EduUnlock, tg_user: dict = Depends(current_telegram_user)):
+    edu = _edu()
+    session = get_session()
+    try:
+        uid = tg_user["id"]
+        user = session.query(User).filter(User.telegram_id == uid).with_for_update().first()
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        p = _edu_progress(session, uid, lock=True)
+        if body.topic not in edu.TOPICS:
+            raise HTTPException(status_code=400, detail="موضوع نامعتبره.")
+        unlocked = set((p.unlocked or "general").split(","))
+        if body.topic in unlocked:
+            return {"message": "این موضوع از قبل باز بوده.", "state": _edu_state(session, uid, p)}
+        if int(user.fox_points or 0) < EDU_UNLOCK_COST:
+            raise HTTPException(status_code=400, detail="روب‌پوینت کافی نیست.")
+        user.fox_points = int(user.fox_points or 0) - EDU_UNLOCK_COST
+        unlocked.add(body.topic)
+        p.unlocked = ",".join(sorted(unlocked))
+        session.commit()
+        return {"message": "موضوع با موفقیت خریداری شد ✅", "state": _edu_state(session, uid, p)}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+class EduAnswer(BaseModel):
+    pos: int
+
+
+@app.post("/api/edu/answer")
+def edu_answer(body: EduAnswer, tg_user: dict = Depends(current_telegram_user)):
+    edu = _edu()
+    session = get_session()
+    try:
+        uid = tg_user["id"]
+        p = _edu_progress(session, uid, lock=True)
+        now = datetime.now(timezone.utc)
+        if (not p.active_topic or p.active_question is None or not p.active_expires
+                or now > _aw(p.active_expires) + timedelta(seconds=EDU_GRACE)):
+            p.active_topic = None
+            p.active_question = None
+            p.active_expires = None
+            session.commit()
+            raise HTTPException(status_code=400, detail="⏰ زمان سؤال تموم شد؛ این دور پایان یافت.")
+        got = _edu_active_options(edu, uid, p, session)
+        topic, qid = p.active_topic, int(p.active_question)
+        seen = _json.loads(p.answered or "{}")
+        seen.setdefault(topic, []).append(qid)
+        p.answered = _json.dumps(seen)
+        p.active_topic = None
+        p.active_question = None
+        p.active_expires = None
+        if not got:
+            session.commit()
+            raise HTTPException(status_code=400, detail="این سؤال دیگه در دسترس نیست؛ دوباره تلاش کن.")
+        _q, options, correct_pos, _d = got
+        if int(body.pos) != correct_pos:
+            session.commit()
+            return {"result": "wrong", "message": "❌ پاسخ اشتباه بود؛ ۲۵ دقیقه بعد دوباره تلاش کن.",
+                    "correct_text": options[correct_pos], "state": _edu_state(session, uid, p)}
+        p.correct_answers = int(p.correct_answers or 0) + 1
+        p.correct = int(p.correct or 0) + 2
+        msg = f"✅ درست! +۲ واحد | 🎯 پاسخ‌های درست: {p.correct_answers}"
+        if int(p.certificates or 0) < 15 and p.correct_answers >= edu._threshold(int(p.certificates or 0)):
+            p.pending_certificate = 1
+            msg += " | 🎓 به حد نصاب مدرک رسیدی!"
+        session.commit()
+        return {"result": "correct", "message": msg, "state": _edu_state(session, uid, p)}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@app.post("/api/edu/certificate")
+def edu_certificate(tg_user: dict = Depends(current_telegram_user)):
+    edu = _edu()
+    session = get_session()
+    try:
+        uid = tg_user["id"]
+        user = session.query(User).filter(User.telegram_id == uid).with_for_update().first()
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        p = _edu_progress(session, uid, lock=True)
+        if not p.pending_certificate:
+            raise HTTPException(status_code=400, detail="مدرکی در انتظار تأیید نیست.")
+        certs = int(p.certificates or 0)
+        cost, reward = edu._tuition(certs), edu._reward(certs)
+        if int(user.fox_points or 0) < cost:
+            raise HTTPException(status_code=400, detail=f"روب‌پوینت کافی نیست؛ شهریه {cost:,} است.")
+        user.fox_points = int(user.fox_points or 0) - cost + reward
+        p.certificates = certs + 1
+        p.pending_certificate = 0
+        session.commit()
+        return {"result": "correct", "state": _edu_state(session, uid, p),
+                "message": f"🎓 مدرک {edu._name(certs + 1)} صادر شد! شهریه {cost:,} | جایزه {reward:,} روب‌پوینت"}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# بانک روبی (دقیقاً همون منطق بانک داخل بات: افتتاح، واریز، برداشت، کارت‌به‌کارت، سود)
+# ---------------------------------------------------------------------------
+BANK_MIN_LEVEL = 4
+
+
+def _bank_models():
+    import database
+    return database.BankAccount, database.BankTransaction
+
+
+def _bank_notify(uid: int, text_msg: str):
+    """اطلاع‌رسانی بی‌صدا به پیوی کاربر (اگه نشد، مهم نیست)."""
+    try:
+        _tg_http.post(f"{_TG_API}/sendMessage", json={"chat_id": int(uid), "text": text_msg})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _parse_amount(botmod, raw) -> int:
+    """عدد یا متن مثل 50k / ۵۰کا / 2m / 3میل → عدد صحیح مثبت (همون parse_amount بات)."""
+    if isinstance(raw, bool):
+        raise ValueError
+    if isinstance(raw, (int, float)):
+        v = int(raw)
+        if v != raw:
+            raise ValueError
+        return v
+    return int(botmod.parse_amount(str(raw)))
+
+
+def _bank_tx_payload(session, BankTransaction, account_number):
+    rows = (session.query(BankTransaction).filter(BankTransaction.account_number == account_number)
+            .order_by(BankTransaction.id.desc()).limit(15).all())
+    out = []
+    for r in rows:
+        ts = r.created_at
+        if ts is not None and ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        out.append({
+            "id": r.id, "direction": r.direction, "amount": int(r.amount or 0),
+            "description": r.description or "",
+            "counterparty": r.counterparty_account or "",
+            "ts": int(ts.timestamp()) if ts else 0,
+        })
+    return out
+
+
+def _bank_payload(session, botmod, user, account):
+    BankAccount, BankTransaction = _bank_models()
+    wallet = int(user.fox_points or 0)
+    storage = 0
+    try:
+        storage = int(user.fox_storage or 0)
+    except Exception:  # noqa: BLE001
+        pass
+    base = {
+        "unlocked": int(user.level or 1) >= BANK_MIN_LEVEL,
+        "min_level": BANK_MIN_LEVEL,
+        "level": int(user.level or 1),
+        "has_account": account is not None,
+        "wallet": wallet,
+        "open_cost": int(botmod.BANK_OPEN_COST),
+        "change_cost": int(botmod.BANK_CHANGE_COST),
+        "fee_rate": float(botmod.BANK_CARD_TRANSFER_FEE_RATE),
+        "transfer_cooldown": int(botmod.BANK_CARD_TRANSFER_COOLDOWN),
+        "interest_interval": int(botmod.BANK_INTEREST_INTERVAL_SECONDS),
+        "fox_storage": storage,
+        "display_name": display_name(user),
+    }
+    if account is None:
+        base.update({"bank": 0, "total_assets": wallet + storage, "transactions": []})
+        return base
+    bal = int(account.balance or 0)
+    rate = float(botmod.vip_bank_rate(user))
+    est = int(bal * rate)
+    base.update({
+        "account_number": account.account_number,
+        "bank": bal,
+        "total_assets": wallet + bal + storage,
+        "rate": rate,
+        "rate_percent": int(round(rate * 100)),
+        "next_interest": est,
+        "bank_with_interest": bal + est,
+        "transfer_left": int(botmod.seconds_left(account.last_card_transfer_at, botmod.BANK_CARD_TRANSFER_COOLDOWN)),
+        "interest_left": int(botmod.seconds_left(account.last_interest_at, botmod.BANK_INTEREST_INTERVAL_SECONDS)) if account.last_interest_at else 0,
+        "transactions": _bank_tx_payload(session, BankTransaction, account.account_number),
+    })
+    return base
+
+
+def _bank_locked(session, uid):
+    """کاربر و حساب بانکی با قفل ردیف (بدون خطا اگه حساب نباشه)."""
+    BankAccount, _ = _bank_models()
+    user = session.query(User).filter(User.telegram_id == uid).with_for_update().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+    account = session.query(BankAccount).filter(BankAccount.user_id == uid).with_for_update().first()
+    return user, account
+
+
+def _bank_need_account(user, account):
+    if int(user.level or 1) < BANK_MIN_LEVEL:
+        raise HTTPException(status_code=403, detail=f"🔒 بانک روبی از لول {BANK_MIN_LEVEL} باز می‌شه.")
+    if account is None:
+        raise HTTPException(status_code=400, detail="اول باید شعبه‌ی بانک رو افتتاح کنی.")
+
+
+@app.get("/api/bank")
+def bank_state(tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    BankAccount, _ = _bank_models()
+    session = get_session()
+    try:
+        uid = tg_user["id"]
+        user = session.get(User, uid)
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        account = session.query(BankAccount).filter(BankAccount.user_id == uid).with_for_update().first()
+        if account is not None:
+            botmod.apply_bank_interest(account, session)   # سود دوره‌ای، مثل باز کردن پنل بانک در بات
+        session.commit()
+        return _bank_payload(session, botmod, user, account)
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@app.post("/api/bank/open")
+def bank_open(tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user, account = _bank_locked(session, tg_user["id"])
+        if int(user.level or 1) < BANK_MIN_LEVEL:
+            raise HTTPException(status_code=403, detail=f"🔒 بانک روبی از لول {BANK_MIN_LEVEL} باز می‌شه.")
+        if account is not None:
+            return {"message": "شعبه‌ات از قبل باز بوده.", **_bank_payload(session, botmod, user, account)}
+        account, ok = botmod.ensure_bank(session, user)
+        if not ok:
+            raise HTTPException(status_code=400, detail=f"❌ برای افتتاح شعبه‌ی بانک {int(botmod.BANK_OPEN_COST):,} روب‌پوینت لازم داری.")
+        session.commit()
+        return {"message": "🏦 شعبه‌ی بانک روبی افتتاح شد!", **_bank_payload(session, botmod, user, account)}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+class BankAmount(BaseModel):
+    amount: Any
+
+
+@app.post("/api/bank/deposit")
+def bank_deposit(body: BankAmount, tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    _, BankTransaction = _bank_models()
+    try:
+        amount = _parse_amount(botmod, body.amount)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="مبلغ نامعتبره. مثال: 50000 یا 50k")
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="مبلغ باید بیشتر از صفر باشه.")
+    session = get_session()
+    try:
+        user, account = _bank_locked(session, tg_user["id"])
+        _bank_need_account(user, account)
+        if int(user.fox_points or 0) < amount:
+            raise HTTPException(status_code=400, detail="❌ روب‌پوینت کافی نیست.")
+        botmod.apply_bank_interest(account, session)
+        user.fox_points = int(user.fox_points or 0) - amount
+        account.balance = int(account.balance or 0) + amount
+        session.add(BankTransaction(account_number=account.account_number, direction="deposit", amount=amount, description="واریز به بانک"))
+        session.commit()
+        return {"message": f"➕ {amount:,} روب‌پوینت به بانک واریز شد.", **_bank_payload(session, botmod, user, account)}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+class BankWithdraw(BaseModel):
+    percent: Optional[int] = None
+    amount: Optional[Any] = None
+
+
+@app.post("/api/bank/withdraw")
+def bank_withdraw(body: BankWithdraw, tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    _, BankTransaction = _bank_models()
+    session = get_session()
+    try:
+        user, account = _bank_locked(session, tg_user["id"])
+        _bank_need_account(user, account)
+        botmod.apply_bank_interest(account, session)
+        bal = int(account.balance or 0)
+        if body.percent is not None:
+            if int(body.percent) not in (25, 50, 75, 100):
+                raise HTTPException(status_code=400, detail="درصد نامعتبره.")
+            amount = (bal * int(body.percent)) // 100
+            desc = f"برداشت {int(body.percent)}%"
+        elif body.amount is not None:
+            try:
+                amount = _parse_amount(botmod, body.amount)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="مبلغ نامعتبره. مثال: 50000 یا 50k")
+            desc = "برداشت از بانک"
+        else:
+            raise HTTPException(status_code=400, detail="مبلغ یا درصد برداشت رو بفرست.")
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="موجودی کافی نیست.")
+        if amount > bal:
+            raise HTTPException(status_code=400, detail="❌ موجودی بانک کافی نیست.")
+        account.balance = bal - amount
+        user.fox_points = int(user.fox_points or 0) + amount
+        session.add(BankTransaction(account_number=account.account_number, direction="withdraw", amount=amount, description=desc))
+        session.commit()
+        return {"message": f"➖ {amount:,} روب‌پوینت به کیف پولت برگشت.", **_bank_payload(session, botmod, user, account)}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+class BankLookup(BaseModel):
+    dest: str
+    amount: Optional[Any] = None
+
+
+def _clean_account(raw: str) -> str:
+    trans = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+    return "".join(ch for ch in str(raw or "").translate(trans) if ch.isdigit())
+
+
+@app.post("/api/bank/lookup")
+def bank_lookup(body: BankLookup, tg_user: dict = Depends(current_telegram_user)):
+    """پیش‌نمایش کارت‌به‌کارت (گیرنده + کارمزد + مجموع) قبل از تأیید نهایی."""
+    botmod = load_botmod()
+    BankAccount, _ = _bank_models()
+    session = get_session()
+    try:
+        uid = tg_user["id"]
+        user = session.get(User, uid)
+        account = session.query(BankAccount).filter(BankAccount.user_id == uid).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        _bank_need_account(user, account)
+        dest = _clean_account(body.dest)
+        target = session.get(BankAccount, dest) if dest else None
+        if not target:
+            raise HTTPException(status_code=404, detail="❌ حسابی با این شماره پیدا نشد.")
+        if target.user_id == uid:
+            raise HTTPException(status_code=400, detail="❌ نمی‌تونی به حساب خودت کارت‌به‌کارت کنی.")
+        target_user = session.get(User, target.user_id)
+        out = {"dest": dest, "name": display_name(target_user) if target_user else "کاربر"}
+        if body.amount is not None:
+            try:
+                amount = _parse_amount(botmod, body.amount)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="مبلغ نامعتبره.")
+            if amount <= 0:
+                raise HTTPException(status_code=400, detail="مبلغ باید بیشتر از صفر باشه.")
+            fee = max(1, int(amount * botmod.BANK_CARD_TRANSFER_FEE_RATE))
+            out.update({"amount": amount, "fee": fee, "total": amount + fee})
+        return out
+    finally:
+        session.close()
+
+
+@app.post("/api/bank/transfer")
+def bank_transfer(body: BankLookup, tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    BankAccount, BankTransaction = _bank_models()
+    uid = tg_user["id"]
+    dest = _clean_account(body.dest)
+    try:
+        amount = _parse_amount(botmod, body.amount)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="مبلغ نامعتبره. مثال: 500 یا 5k")
+    if amount <= 0 or not dest:
+        raise HTTPException(status_code=400, detail="شماره حساب و مبلغ رو درست وارد کن.")
+    session = get_session()
+    notify = None
+    try:
+        user, account = _bank_locked(session, uid)
+        _bank_need_account(user, account)
+        target = session.query(BankAccount).filter(BankAccount.account_number == dest).with_for_update().first()
+        if not target:
+            raise HTTPException(status_code=404, detail="❌ حسابی با این شماره پیدا نشد.")
+        if target.user_id == uid:
+            raise HTTPException(status_code=400, detail="❌ نمی‌تونی به حساب خودت کارت‌به‌کارت کنی.")
+        left = botmod.seconds_left(account.last_card_transfer_at, botmod.BANK_CARD_TRANSFER_COOLDOWN)
+        if left:
+            raise HTTPException(status_code=429, detail=f"⏳ کارت‌به‌کارت بعدی {botmod.format_duration(left)} دیگه فعال می‌شه.")
+        botmod.apply_bank_interest(account, session)
+        fee = max(1, int(amount * botmod.BANK_CARD_TRANSFER_FEE_RATE))
+        total = amount + fee
+        if int(account.balance or 0) < total:
+            raise HTTPException(status_code=400, detail=f"❌ موجودی بانک کافی نیست. مبلغ {amount:,} + کارمزد {fee:,} = {total:,} روب‌پوینت لازمه.")
+        target_user = session.get(User, target.user_id)
+        account.balance = int(account.balance or 0) - total
+        target.balance = int(target.balance or 0) + amount
+        account.last_card_transfer_at = datetime.now(timezone.utc)
+        session.add(BankTransaction(account_number=account.account_number, counterparty_account=dest, counterparty_user_id=target.user_id,
+                                    direction="card_out", amount=amount, description=f"کارت به کارت (کارمزد 5٪: {fee:,})"))
+        session.add(BankTransaction(account_number=account.account_number, direction="fee", amount=fee, description="کارمزد 5٪ کارت به کارت"))
+        session.add(BankTransaction(account_number=dest, counterparty_account=account.account_number, counterparty_user_id=uid,
+                                    direction="card_in", amount=amount, description="کارت به کارت"))
+        session.commit()
+        notify = (target.user_id, f"💳 {amount:,} روب‌پوینت به حساب روبی شما واریز شد.\n👤 فرستنده: {display_name(user)}\n💳 حساب شما: {dest}")
+        payload = _bank_payload(session, botmod, user, account)
+        to_name = display_name(target_user) if target_user else "کاربر"
+        result = {"message": f"✅ {amount:,} روب‌پوینت برای {to_name} کارت‌به‌کارت شد (کارمزد {fee:,}).", **payload}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+    if notify:
+        _bank_notify(*notify)
+    return result
+
+
+@app.post("/api/bank/change")
+def bank_change_card(tg_user: dict = Depends(current_telegram_user)):
+    import secrets
+    botmod = load_botmod()
+    BankAccount, BankTransaction = _bank_models()
+    session = get_session()
+    try:
+        user, account = _bank_locked(session, tg_user["id"])
+        _bank_need_account(user, account)
+        cost = int(botmod.BANK_CHANGE_COST)
+        if int(user.fox_points or 0) < cost:
+            raise HTTPException(status_code=400, detail=f"❌ برای تغییر شماره کارت {cost:,} روب‌پوینت لازم داری.")
+        old = account.account_number
+        new = "".join(str(secrets.randbelow(10)) for _ in range(12))
+        while session.get(BankAccount, new):
+            new = "".join(str(secrets.randbelow(10)) for _ in range(12))
+        user.fox_points = int(user.fox_points or 0) - cost
+        account.account_number = new
+        session.query(BankTransaction).filter(BankTransaction.account_number == old).update(
+            {BankTransaction.account_number: new}, synchronize_session=False)
+        session.add(BankTransaction(account_number=new, direction="fee", amount=cost, description="هزینه تغییر شماره کارت"))
+        session.commit()
+        return {"message": "✅ شماره کارت روبی تغییر کرد.", **_bank_payload(session, botmod, user, account)}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()

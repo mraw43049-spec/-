@@ -329,6 +329,32 @@ button:disabled::after,.lb-close::after{display:none}
 li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 .pod .ptitle{font-size:10.5px;color:#ffd27a;font-weight:800;margin-top:2px;line-height:1.5;white-space:normal;word-break:keep-all}
 .filter{padding:8px 13px}
+
+/* ---------- بانک روبی ---------- */
+.bk-hero{background:linear-gradient(160deg,#1c4a37ee,#0b2219ee)}
+.bk-total{text-align:center;margin:2px 0 6px}
+.bk-total span{display:block;font-size:12px;color:#bfe3cf}
+.bk-total b{display:block;font-size:30px;color:#ffd45e;text-shadow:0 0 18px #ffc94d55;line-height:1.3}
+.bk-total small{font-size:11px;color:#a9d4bd}
+.bk-card{background:linear-gradient(135deg,#2a1d5a,#15314a 55%,#0d3a2c);border-color:#7a62d6;overflow:hidden}
+.bk-chip{width:42px;height:30px;border-radius:7px;background:linear-gradient(135deg,#ffe28a,#c98a1f);margin-bottom:10px;box-shadow:inset 0 1px 0 #fff8}
+.bk-number{display:block;width:100%;background:none;border:0;color:#fff;font-family:inherit;font-weight:900;font-size:21px;letter-spacing:2px;direction:ltr;text-align:center;padding:8px 0;margin:2px 0;text-shadow:0 2px 6px #0009}
+.bk-owner{text-align:center;color:#d7ccff;font-size:13px;font-weight:700}
+.bk-bal{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px dashed #ffffff30}
+.bk-bal span{color:#cfc6ee;font-size:12px}.bk-bal b{color:#ffd45e;font-size:20px}
+.bk-row{display:flex;justify-content:space-between;align-items:center;padding:8px 2px;border-bottom:1px solid #2a5c4533;font-size:13.5px}
+.bk-row:last-child{border-bottom:0}.bk-row span{color:#bfe3cf}.bk-row b{color:#fff}
+.bk-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.bk-actions .wide{grid-column:1/-1}
+.bk-tx{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 4px;border-bottom:1px solid #2a5c4544}
+.bk-tx:last-child{border-bottom:0}
+.bk-tx .t{font-size:13px;font-weight:800}.bk-tx .d{font-size:11px;color:#8fc2a8;margin-top:2px}
+.bk-tx .a{font-weight:900;font-size:14px;direction:ltr;white-space:nowrap}
+.bk-tx .a.pos{color:#5ef0a8}.bk-tx .a.neg{color:#ff8a8a}
+.bk-quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.bk-quick button{flex:1;min-width:58px;padding:9px 4px;border-radius:12px;border:1px solid #3fae83;background:#153a2b;color:#eafff3;font-weight:800;font-family:inherit;font-size:13px}
+.bk-preview{margin-top:10px;padding:12px;border-radius:14px;background:#0a1d15;border:1px solid #2a5c45;line-height:2;font-size:13px}
+.bk-preview b{color:#ffd45e}
 </style>
 </head>
 <body>
@@ -364,11 +390,15 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     <rect x="14" y="35" width="20" height="6" rx="2.5" fill="url(#gGoldD)"/>
     <path d="M24 12l2 4.2 4.6.6-3.4 3.2.9 4.5-4.1-2.3-4.1 2.3.9-4.5-3.4-3.2 4.6-.6z" fill="#fff" opacity=".85"/>
   </symbol>
-  <symbol id="i-chat" viewBox="0 0 48 48">
-    <ellipse cx="24" cy="43" rx="14" ry="3" fill="#0006"/>
-    <path d="M10 6h28a6 6 0 0 1 6 6v17a6 6 0 0 1-6 6H22l-10 8v-8h-2a6 6 0 0 1-6-6V12a6 6 0 0 1 6-6z" fill="url(#gMint)"/>
-    <path d="M10 6h28a6 6 0 0 1 6 6v4c-10 4-30 4-40 0v-4a6 6 0 0 1 6-6z" fill="url(#gShine)" opacity=".65"/>
-    <circle cx="15.5" cy="21" r="2.8" fill="#fff"/><circle cx="24" cy="21" r="2.8" fill="#fff"/><circle cx="32.5" cy="21" r="2.8" fill="#fff"/>
+  <symbol id="i-bank" viewBox="0 0 48 48">
+    <ellipse cx="24" cy="43" rx="15" ry="3" fill="#0006"/>
+    <path d="M24 5 43 16v4H5v-4z" fill="url(#gGold)"/>
+    <path d="M24 5 43 16v2.5C33 21 15 21 5 18.5V16z" fill="url(#gShine)" opacity=".65"/>
+    <rect x="9" y="22" width="5.5" height="14" rx="1.5" fill="url(#gMint)"/>
+    <rect x="21.2" y="22" width="5.5" height="14" rx="1.5" fill="url(#gMint)"/>
+    <rect x="33.5" y="22" width="5.5" height="14" rx="1.5" fill="url(#gMint)"/>
+    <rect x="5" y="37" width="38" height="5" rx="2" fill="url(#gGoldD)"/>
+    <circle cx="24" cy="13.5" r="2.4" fill="#fff" opacity=".9"/>
   </symbol>
 </defs></svg>
 <div class="scene" aria-hidden="true">
@@ -575,12 +605,80 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 
 
 
+<section id="bankView" class="view">
+  <div class="card bk-hero">
+    <div class="section-title">💼 دارایی‌های من</div>
+    <div class="bk-total"><span>مجموع کل دارایی</span><b id="bkTotal">۰</b><small>روب‌پوینت</small></div>
+    <div class="stat-row">
+      <div class="stat"><b id="bkWallet">۰</b><span>👛 کیف پول</span></div>
+      <div class="stat"><b id="bkBank">۰</b><span>🏦 بانک</span></div>
+      <div class="stat"><b id="bkStorage">۰</b><span>🦊 انبار روباه</span></div>
+    </div>
+  </div>
+
+  <div id="bkLocked" class="card" style="display:none;text-align:center">
+    <div class="section-title">🔒 بانک روبی قفله</div>
+    <div id="bkLockedMsg" class="muted"></div>
+  </div>
+
+  <div id="bkOpenCard" class="card" style="display:none;text-align:center">
+    <div class="section-title">🏦 بانک روبی</div>
+    <div id="bkOpenMsg" class="muted" style="line-height:1.9"></div>
+    <button id="bkOpenBtn" class="action" style="margin-top:12px;width:100%">🏦 افتتاح شعبه</button>
+  </div>
+
+  <div id="bkMain" style="display:none">
+    <div class="card bk-card">
+      <div class="bk-chip"></div>
+      <div class="muted" style="margin:0">💳 شماره کارت روبی (برای کپی لمس کن)</div>
+      <button id="bkNumber" class="bk-number" type="button">—</button>
+      <div class="bk-owner" id="bkOwner"></div>
+      <div class="bk-bal"><span>موجودی بانک</span><b id="bkBalance">۰</b></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">🤑 سود بانک</div>
+      <div class="bk-row"><span>درصد سود</span><b id="bkRate">۳٪</b></div>
+      <div class="bk-row"><span>سود دوره‌ی بعد</span><b id="bkInterest">۰</b></div>
+      <div class="bk-row"><span>مبلغ کل با سود</span><b id="bkWithInterest">۰</b></div>
+      <div class="bk-row"><span>زمان محاسبه‌ی بعدی</span><b id="bkInterestLeft">—</b></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">⚙️ مدیریت حساب</div>
+      <div class="bk-actions">
+        <button id="bkDeposit" class="action">➕ واریز</button>
+        <button id="bkWithdraw" class="action">➖ برداشت</button>
+        <button id="bkTransfer" class="action wide secondary">💳 کارت به کارت روبی 🦊</button>
+        <button id="bkChange" class="action wide secondary">➿ تغییر شماره کارت</button>
+      </div>
+      <div id="bkTransferInfo" class="muted" style="text-align:center;margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">📃 آخرین تراکنش‌ها</div>
+      <div id="bkTx"><div class="muted" style="text-align:center">تراکنشی ثبت نشده است.</div></div>
+    </div>
+  </div>
+</section>
+
 <nav class="tabs">
   <button id="eduTab" class="tab"><svg class="ico"><use href="#i-edu"/></svg>درس</button>
   <button id="wheelTab" class="tab"><svg class="ico"><use href="#i-game"/></svg>بازی‌ها</button>
   <button id="foxTab" class="tab center active"><span class="cav" id="cAvatar">🦊</span><span id="cName">روباه</span></button>
+  <button id="bankTab" class="tab"><svg class="ico"><use href="#i-bank"/></svg>بانک</button>
   <button id="leaderTab" class="tab"><svg class="ico"><use href="#i-trophy"/></svg>لیدربرد</button>
 </nav>
+
+<div id="bkModal" class="modal"><div class="sheet">
+  <h3 id="bkmTitle">بانک</h3>
+  <div id="bkmHint" class="muted" style="margin:0 0 10px;line-height:1.8"></div>
+  <input id="bkmDest" inputmode="numeric" autocomplete="off" placeholder="شماره کارت مقصد (۱۲ رقم)" style="display:none;margin-bottom:8px">
+  <input id="bkmAmount" inputmode="text" autocomplete="off" placeholder="مبلغ؛ مثلاً 50000 یا 50k">
+  <div id="bkmQuick" class="bk-quick"></div>
+  <div id="bkmPreview" class="bk-preview" style="display:none"></div>
+  <div class="row"><button id="bkmOk" class="action">✅ تأیید</button><button id="bkmNo" class="action secondary">لغو</button></div>
+</div></div>
 
 <div id="renameModal" class="modal"><div class="sheet">
   <h3>✏️ اسم جدید روباه (حداکثر ۱۶ کاراکتر)</h3>
@@ -969,57 +1067,161 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     };
   });
 
-  // ---------- چت‌روم ----------
-  var chatLastId = 0, chatTimer = null, chatLoaded = false, chatBusy = false;
-  function fmtTime(ts){
-    if (!ts) return "";
-    return new Date(ts*1000).toLocaleTimeString("fa-IR", {hour:"2-digit", minute:"2-digit"});
+
+  // ---------- بانک روبی ----------
+  var bank = null, bankAt = 0, bankTickT = null, bankBusy = false;
+  function bkLeft(sec){ return Math.max(0, (sec || 0) - Math.floor((Date.now() - bankAt) / 1000)); }
+  function loadBank(){
+    return api("/api/bank").then(function(d){ setBank(d); stamp(); })
+      .catch(function(e){ if (!e.gate) toast(e.message, false); });
   }
-  function addChat(m){
-    var box = $("chatBox"), empty = $("chatEmpty");
-    if (empty) { empty.remove(); }
-    if (box.querySelector('[data-id="'+m.id+'"]')) return;
-    var row = document.createElement("div"); row.className = "cmsg" + (m.me ? " me" : ""); row.dataset.id = m.id;
-    var bub = document.createElement("div"); bub.className = "cbub";
-    if (!m.me) {
-      var nm = document.createElement("div"); nm.className = "cname"; nm.textContent = m.name + (m.skin ? " " + m.skin : "");
-      bub.appendChild(nm);
+  function setBank(d){ bank = d; bankAt = Date.now(); drawBank(); }
+  var BK_DIR = {
+    deposit: ["➕ واریز به بانک", 1], withdraw: ["➖ برداشت از بانک", -1], interest: ["🤑 سود بانکی", 1],
+    fee: ["💸 کارمزد / هزینه", -1], card_out: ["📤 کارت به کارت (ارسال)", -1], card_in: ["📥 کارت به کارت (دریافت)", 1]
+  };
+  function drawBank(){
+    if (!bank) return;
+    $("bkTotal").textContent = fa(bank.total_assets);
+    $("bkWallet").textContent = fa(bank.wallet);
+    $("bkBank").textContent = fa(bank.bank);
+    $("bkStorage").textContent = fa(bank.fox_storage);
+    var locked = !bank.unlocked, noAcc = bank.unlocked && !bank.has_account, ok = bank.unlocked && bank.has_account;
+    $("bkLocked").style.display = locked ? "" : "none";
+    $("bkOpenCard").style.display = noAcc ? "" : "none";
+    $("bkMain").style.display = ok ? "" : "none";
+    if (locked) $("bkLockedMsg").textContent = "بانک روبی از لول " + fa(bank.min_level) + " باز می‌شه. لول فعلی تو: " + fa(bank.level);
+    if (noAcc) {
+      $("bkOpenMsg").textContent = "برای افتتاح شعبه " + fa(bank.open_cost) + " روب‌پوینت لازمه. هر ۱۲ ساعت روی موجودی بانکت سود می‌گیری.";
+      $("bkOpenBtn").disabled = bank.wallet < bank.open_cost;
+      $("bkOpenBtn").textContent = "🏦 افتتاح شعبه (" + fa(bank.open_cost) + " روب‌پوینت)";
     }
-    var tx = document.createElement("div"); tx.className = "ctext"; tx.textContent = m.text;
-    var tm = document.createElement("div"); tm.className = "ctime"; tm.textContent = fmtTime(m.ts);
-    bub.appendChild(tx); bub.appendChild(tm);
-    row.appendChild(avatarEl(m.avatar, m.name)); row.appendChild(bub);
-    box.appendChild(row);
-    if (m.id > chatLastId) chatLastId = m.id;
+    if (!ok) return;
+    $("bkNumber").textContent = bank.account_number;
+    $("bkOwner").textContent = "👤 " + bank.display_name;
+    $("bkBalance").textContent = fa(bank.bank) + " 🪙";
+    $("bkRate").textContent = fa(bank.rate_percent) + "٪";
+    $("bkInterest").textContent = fa(bank.next_interest) + " 🪙";
+    $("bkWithInterest").textContent = fa(bank.bank_with_interest) + " 🪙";
+    var tx = $("bkTx"); tx.innerHTML = "";
+    if (!bank.transactions || !bank.transactions.length) {
+      var em = document.createElement("div"); em.className = "muted"; em.style.textAlign = "center"; em.textContent = "تراکنشی ثبت نشده است."; tx.appendChild(em);
+    } else bank.transactions.forEach(function(t){
+      var info = BK_DIR[t.direction] || [t.description || t.direction, 1];
+      var row = document.createElement("div"); row.className = "bk-tx";
+      var l = document.createElement("div");
+      var a = document.createElement("div"); a.className = "t"; a.textContent = info[0];
+      var b = document.createElement("div"); b.className = "d";
+      b.textContent = (t.ts ? new Date(t.ts * 1000).toLocaleString("fa-IR", { month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" }) : "") + (t.counterparty ? " · " + t.counterparty : "");
+      l.appendChild(a); l.appendChild(b);
+      var amt = document.createElement("div"); amt.className = "a " + (info[1] > 0 ? "pos" : "neg");
+      amt.textContent = (info[1] > 0 ? "+" : "−") + fa(t.amount);
+      row.appendChild(l); row.appendChild(amt); tx.appendChild(row);
+    });
+    drawBankLive();
   }
-  function loadChat(){
-    if (chatBusy) return Promise.resolve();
-    chatBusy = true;
-    var box = $("chatBox");
-    var nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-    return api("/api/chat?after=" + chatLastId).then(function(d){
-      var ms = d.messages || [];
-      if (!chatLoaded && !ms.length) { var e = $("chatEmpty"); if (e) e.textContent = "هنوز پیامی نیست؛ اولین نفر باش! 🦊"; }
-      ms.forEach(addChat);
-      if (!chatLoaded || (ms.length && nearBottom)) box.scrollTop = box.scrollHeight;
-      chatLoaded = true;
-      stamp();
-    }).catch(function(e){
-      if (e.gate) return;
-      var em = $("chatEmpty"); if (em) em.textContent = "خطا: " + e.message;
-    }).then(function(){ chatBusy = false; });
+  function drawBankLive(){
+    if (!bank || !bank.has_account) return;
+    var il = bkLeft(bank.interest_left);
+    $("bkInterestLeft").textContent = il > 0 ? fmtHMS(il) : "به‌زودی";
+    var tl = bkLeft(bank.transfer_left);
+    $("bkTransferInfo").textContent = tl > 0 ? "⏳ کارت‌به‌کارت بعدی تا " + fmtMS(tl) + " دیگه" : "کارت‌به‌کارت: کارمزد " + fa(Math.round(bank.fee_rate * 100)) + "٪ · هر " + fa(Math.round(bank.transfer_cooldown / 60)) + " دقیقه یک‌بار";
+    $("bkTransfer").disabled = tl > 0 || bankBusy;
   }
-  function sendChat(){
-    var inp = $("chatInput"), t = inp.value.trim();
-    if (!t) return;
-    inp.value = "";
-    api("/api/chat", "POST", { text: t }).then(function(r){
-      if (r.message) addChat(r.message);
-      var box = $("chatBox"); box.scrollTop = box.scrollHeight;
-    }).catch(function(e){ inp.value = t; toast(e.message, false); });
+  function bankCall(path, body){
+    if (bankBusy) return Promise.resolve(null);
+    bankBusy = true; drawBankLive();
+    return api(path, "POST", body || {}).then(function(r){
+      if (r && r.message) toast(r.message, true);
+      if (r && r.unlocked !== undefined) setBank(r);
+      return r;
+    }).catch(function(e){ if (!e.gate) toast(e.message, false); return null; })
+      .then(function(r){ bankBusy = false; drawBankLive(); return r; });
   }
-  $("chatSend").onclick = sendChat;
-  $("chatInput").onkeydown = function(e){ if (e.key === "Enter") { e.preventDefault(); sendChat(); } };
+  function copyText(t){
+    function fb(){ var ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } catch(e){} document.body.removeChild(ta); }
+    try { if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).catch(fb); } catch(e){}
+    fb();
+  }
+  $("bkNumber").onclick = function(){ if (bank && bank.account_number) { copyText(bank.account_number); toast("📋 شماره کارت کپی شد", true); } };
+  $("bkOpenBtn").onclick = function(){ bankCall("/api/bank/open"); };
+  $("bkChange").onclick = function(){
+    if (!bank) return;
+    if (!confirm("تغییر شماره کارت با " + fa(bank.change_cost) + " روب‌پوینت؟")) return;
+    bankCall("/api/bank/change");
+  };
+
+  // مودال مشترک واریز / برداشت / کارت‌به‌کارت
+  var bkMode = "", bkStep = 0, bkPending = null;
+  function bkOpenModal(mode){
+    if (!bank || !bank.has_account) return;
+    bkMode = mode; bkStep = 0; bkPending = null;
+    $("bkmAmount").value = ""; $("bkmDest").value = "";
+    $("bkmPreview").style.display = "none"; $("bkmPreview").textContent = "";
+    $("bkmDest").style.display = mode === "transfer" ? "" : "none";
+    $("bkmAmount").style.display = "";
+    $("bkmOk").style.display = ""; $("bkmOk").textContent = "✅ تأیید";
+    var q = $("bkmQuick"); q.innerHTML = "";
+    function qb(label, fn){ var b = document.createElement("button"); b.type = "button"; b.textContent = label; b.onclick = fn; q.appendChild(b); }
+    if (mode === "deposit") {
+      $("bkmTitle").textContent = "➕ واریز به بانک";
+      $("bkmHint").textContent = "موجودی کیف پول: " + fa(bank.wallet) + " روب‌پوینت";
+      qb("همه", function(){ $("bkmAmount").value = String(bank.wallet); });
+      qb("نصف", function(){ $("bkmAmount").value = String(Math.floor(bank.wallet / 2)); });
+    } else if (mode === "withdraw") {
+      $("bkmTitle").textContent = "➖ برداشت از بانک";
+      $("bkmHint").textContent = "موجودی بانک: " + fa(bank.bank) + " روب‌پوینت — یکی از درصدها رو بزن یا مبلغ دلخواه بنویس.";
+      [25, 50, 75, 100].forEach(function(p){
+        qb(fa(p) + "٪", function(){
+          bkClose(); bankCall("/api/bank/withdraw", { percent: p });
+        });
+      });
+    } else {
+      $("bkmTitle").textContent = "💳 کارت به کارت روبی 🦊";
+      $("bkmHint").textContent = "موجودی بانک: " + fa(bank.bank) + " · کارمزد " + fa(Math.round(bank.fee_rate * 100)) + "٪ روی مبلغ اضافه می‌شه.";
+    }
+    $("bkModal").classList.add("open");
+  }
+  function bkClose(){ $("bkModal").classList.remove("open"); bkStep = 0; bkPending = null; }
+  $("bkDeposit").onclick = function(){ bkOpenModal("deposit"); };
+  $("bkWithdraw").onclick = function(){ bkOpenModal("withdraw"); };
+  $("bkTransfer").onclick = function(){ bkOpenModal("transfer"); };
+  $("bkmNo").onclick = bkClose;
+  $("bkModal").addEventListener("click", function(e){ if (e.target === $("bkModal")) bkClose(); });
+  $("bkmOk").onclick = function(){
+    var amount = $("bkmAmount").value.trim();
+    if (bkMode === "deposit" || bkMode === "withdraw") {
+      if (!amount) { toast("مبلغ رو وارد کن.", false); return; }
+      bkClose();
+      bankCall(bkMode === "deposit" ? "/api/bank/deposit" : "/api/bank/withdraw", { amount: amount });
+      return;
+    }
+    // کارت به کارت: مرحله‌ی ۱ پیش‌نمایش، مرحله‌ی ۲ تأیید نهایی
+    if (bkStep === 0) {
+      var dest = $("bkmDest").value.trim();
+      if (!dest || !amount) { toast("شماره کارت مقصد و مبلغ رو وارد کن.", false); return; }
+      if (bankBusy) return; bankBusy = true;
+      api("/api/bank/lookup", "POST", { dest: dest, amount: amount }).then(function(r){
+        bkPending = { dest: r.dest, amount: amount };
+        var p = $("bkmPreview");
+        p.innerHTML = "";
+        [["👤 گیرنده", r.name], ["💳 حساب مقصد", r.dest], ["💰 مبلغ دریافتی گیرنده", fa(r.amount) + " روب‌پوینت"],
+         ["💳 کارمزد", fa(r.fee) + " روب‌پوینت"], ["📤 مجموع کسر از بانک", fa(r.total) + " روب‌پوینت"]].forEach(function(x){
+          var d = document.createElement("div"); d.appendChild(document.createTextNode(x[0] + ": "));
+          var b = document.createElement("b"); b.textContent = x[1]; d.appendChild(b); p.appendChild(d);
+        });
+        var q = document.createElement("div"); q.style.marginTop = "6px"; q.textContent = "❓ از انتقال مطمئنی؟"; p.appendChild(q);
+        p.style.display = "";
+        $("bkmDest").style.display = "none"; $("bkmAmount").style.display = "none";
+        $("bkmOk").textContent = "✅ بله، انتقال بده"; bkStep = 1;
+      }).catch(function(e){ if (!e.gate) toast(e.message, false); })
+        .then(function(){ bankBusy = false; });
+      return;
+    }
+    if (!bkPending) return;
+    var pend = bkPending; bkClose();
+    bankCall("/api/bank/transfer", { dest: pend.dest, amount: pend.amount });
+  };
 
   // ---------- زوم عکس ----------
   var lb = $("lightbox"), lbImg = $("lbImg");
@@ -1473,24 +1675,25 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   function show(v){
     if (v !== view) { try { window.scrollTo(0, 0); } catch(e){} }
     view = v;
-    ["fox","edu","wheel","leader","chat"].forEach(function(n){
+    ["fox","edu","wheel","leader","bank"].forEach(function(n){
       $(n + "View").classList.toggle("active", v === n);
       $(n + "Tab").classList.toggle("active", v === n);
     });
-    clearInterval(chatTimer); chatTimer = null;
+    clearInterval(bankTickT); bankTickT = null;
     clearInterval(eduTick); eduTick = null;
     clearInterval(wheelTick); wheelTick = null;
     clearInterval(bombTick); bombTick = null;
     if (v === "edu") { loadEdu(); eduTick = setInterval(function(){ drawEdu(false); }, 1000); }
     else if (v === "wheel") { loadWheel(); wheelTick = setInterval(drawWheelInfo, 1000); if (bombMode === "bomb") { loadBomb(); bombTick = setInterval(drawBombCd, 1000); } else if (bombMode === "plinko") loadPlinko(); }
     else if (v === "leader") loadLeader();
-    else if (v === "chat") { loadChat(); chatTimer = setInterval(function(){ if (!document.hidden) loadChat(); }, 4000); }
+    else if (v === "bank") { loadBank(); bankTickT = setInterval(drawBankLive, 1000); }
     else loadProfile();
   }
   $("foxTab").onclick = function(){ show("fox"); };
   $("eduTab").onclick = function(){ show("edu"); };
   $("wheelTab").onclick = function(){ show("wheel"); };
   $("leaderTab").onclick = function(){ show("leader"); };
+  $("bankTab").onclick = function(){ show("bank"); };
 
   function refreshNow(){
     var b = $("btnRefresh");
@@ -1501,7 +1704,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     if (view === "leader") p = loadLeader();
     else if (view === "edu") p = loadEdu();
     else if (view === "wheel") p = (bombMode === "bomb" ? loadBomb() : bombMode === "plinko" ? loadPlinko() : loadWheel());
-    else if (view === "chat") p = loadChat();
+    else if (view === "bank") p = loadBank();
     else p = loadProfile();
     Promise.resolve(p).then(function(){ toast("🔄 اطلاعات بروز شد", true); }).then(function(){
       setTimeout(function(){ b.classList.remove("spin"); }, 400);
@@ -1511,7 +1714,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 
   // بروزرسانی خودکار بی‌صدا: هر ۲۰ ثانیه + وقتی دوباره برمی‌گردی داخل مینی‌اپ
   setInterval(function(){
-    if (document.hidden || busy || view === "chat" || view === "edu" || view === "wheel") return;
+    if (document.hidden || busy || view === "bank" || view === "edu" || view === "wheel") return;
     if (view === "fox") loadProfile(true); else loadLeader();
   }, 20000);
   document.addEventListener("visibilitychange", function(){
