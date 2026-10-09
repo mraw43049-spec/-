@@ -3,7 +3,32 @@
 import json, random, logging, re, os
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import Column, BigInteger, Integer, String, DateTime, Text
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram import InlineKeyboardButton as _TelegramInlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+
+# Telegram inline-button color policy (Bot API button styles).
+# Keep this wrapper local to each module so existing button callbacks stay unchanged.
+def InlineKeyboardButton(text, *args, **kwargs):
+    _text = str(text or '').strip().lower()
+    _callback = kwargs.get('callback_data')
+    # Respect an explicit style supplied by a caller.
+    if _callback is not None and 'style' not in kwargs:
+        _cb = str(_callback).lower()
+        _negative = any(word in _text for word in ('❌', '🚫', '✖', 'رد', 'خیر', 'لغو', 'بازگشت', 'انصراف', 'حذف', 'نه'))
+        _positive = any(word in _text for word in ('✅', 'تأیید', 'تایید', 'بله', 'قبول', 'تأیید', 'تایید', 'approve', 'confirm'))
+        if _negative or any(word in _cb for word in (':no:', ':reject:', ':cancel', ':back:', ':dismiss:')):
+            kwargs['style'] = 'danger'
+        elif _positive or any(word in _cb for word in (':yes:', ':confirm:', ':approve:', ':accept:')):
+            kwargs['style'] = 'success'
+        elif _cb.startswith('bank:'):
+            # Bank actions are blue except withdraw/back/cancel.
+            if ':withdraw:' in _cb or ':back:' in _cb or ':cancel' in _cb:
+                kwargs['style'] = 'danger'
+            else:
+                kwargs['style'] = 'primary'
+        elif _cb.startswith(('rg:', 'csetup:', 'rcreate:', 'rdicebet:', 'rbomb:')):
+            kwargs['style'] = 'primary'
+    return _TelegramInlineKeyboardButton(text, *args, **kwargs)
+
 from database import Base, User, get_session
 from config import ADMIN_IDS
 
