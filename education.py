@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """روباهیو درس: پنج موضوع، سؤال‌های سه‌گزینه‌ای، زمان ۱۵ ثانیه و فاصله ۲۵ دقیقه‌ای و مدارک."""
-import json, random, logging, re
+import json, random, logging, re, os
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import Column, BigInteger, Integer, String, DateTime, Text
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
@@ -140,6 +140,17 @@ def _progress_text(p):
     remaining=max(0,_threshold(p.certificates)-int(p.correct_answers or 0)) if p.certificates<15 else 0
     return f"🎓 پاسخ‌های درست: {int(p.correct_answers or 0)}\n🔹 واحدها: {int(p.correct or 0)}\n🏅 مدارک: {p.certificates}/۱۵\n📈 تا مدرک بعدی: {remaining} پاسخ درست"
 
+def _miniapp_url(view="education"):
+    base = os.environ.get("MINI_APP_URL", "https://web-production-a8598.up.railway.app").strip().rstrip("/")
+    return (base + ("?view=" + view if view else "")) if base else ""
+
+
+def edu_miniapp_row():
+    """دکمه‌ی مینی‌اپ درس (web_app فقط در پیوی کار می‌کند)."""
+    url = _miniapp_url("education")
+    return [InlineKeyboardButton("🚀 باز کردن درس در مینی‌اپ", web_app=WebAppInfo(url=url))] if url else None
+
+
 def _edu_panel(s, u, p):
     """(متن، کیبورد) پنل اصلی درس؛ هم برای /روباهیو درس و هم برای برگشت از طرح سؤال."""
     unlocked=set((p.unlocked or "general").split(","))
@@ -153,6 +164,8 @@ def _edu_panel(s, u, p):
     rows=[[InlineKeyboardButton(TOPICS[k][0],callback_data=f"edutopic:{k}")] for k in TOPICS]
     if int(p.certificates or 0) < 15:
         rows.append([InlineKeyboardButton("✍️ طرح سوال",callback_data="eduq:menu")])
+    _mrow = edu_miniapp_row()
+    if _mrow: rows.append(_mrow)
     if p.last_play_at and (_now()-_aware(p.last_play_at)).total_seconds()<1500:
         left=1500-int((_now()-_aware(p.last_play_at)).total_seconds())
         return "\n".join(lines)+f"\n\n⏳ سؤال بعدی تا {left//60} دقیقه دیگر.", InlineKeyboardMarkup(rows)
@@ -162,18 +175,32 @@ async def education_command(update, context):
     # پنل درس و تمام دکمه‌های آن فقط در پیوی قابل استفاده‌اند تا اعضای دیگر گروه
     # نتوانند روی پنل شخصی یک کاربر کلیک کنند.
     if update.effective_chat and update.effective_chat.type != "private":
-        me = await context.bot.get_me()
-        url = f"https://t.me/{me.username}?start=edu_panel"  # با این لینک، پنل درس خودش در پیوی باز می‌شود؛ لازم نیست کاربر دوباره «روباهیو درس» را تایپ کند.
-        rows = [[InlineKeyboardButton("📚 ورود به پنل درس", url=url)]]
-        mini_url = os.environ.get("MINI_APP_URL", "https://web-production-a8598.up.railway.app").strip().rstrip("/")
-        if mini_url:
-            # لینک مستقیم به تب درس مینی‌اپ؛ در کنار لینک پیوی بات هر دو مسیر در دسترس‌اند.
-            rows.append([InlineKeyboardButton("🚀 ورود به مینی اپ — درس", web_app=WebAppInfo(url=mini_url + "?view=education"))])
-        await update.message.reply_text(
-            "📚 پنل درس فقط در پیوی ربات فعال است.",
-            reply_markup=InlineKeyboardMarkup(rows),
-            **({"reply_to_message_id": update.message.message_id} if update.message else {})
-        )
+        msg = update.message
+        if not msg:
+            return
+        kw = {"reply_to_message_id": msg.message_id, "allow_sending_without_reply": True}
+        text = "📚 پنل درس فقط در پیوی ربات فعال است.\nبرای ورود، دکمه‌ی زیر را بزن 👇"
+        username = getattr(context.bot, "username", None)
+        if not username:
+            try:
+                username = (await context.bot.get_me()).username
+            except Exception:
+                logging.getLogger(__name__).exception("get_me failed in education_command")
+                username = None
+        if username:
+            # توجه: دکمه‌ی web_app داخل گروه مجاز نیست؛ پس هر دو دکمه به پیوی ربات می‌روند
+            # و آنجا پنل درس / دکمه‌ی مینی‌اپ باز می‌شود.
+            rows = [[InlineKeyboardButton("📚 ورود به پنل درس", url=f"https://t.me/{username}?start=edu_panel")],
+                    [InlineKeyboardButton("🚀 درس در مینی‌اپ", url=f"https://t.me/{username}?start=edu_app")]]
+            try:
+                await msg.reply_text(text, reply_markup=InlineKeyboardMarkup(rows), **kw)
+                return
+            except Exception:
+                logging.getLogger(__name__).exception("education group reply (with buttons) failed")
+        try:
+            await msg.reply_text(text + ("\n👉 https://t.me/" + username + "?start=edu_panel" if username else ""), **kw)
+        except Exception:
+            logging.getLogger(__name__).exception("education group reply (plain) failed")
         return
     s=get_session()
     try:

@@ -8,6 +8,7 @@
 import asyncio
 import hashlib
 import hmac
+import logging
 import os
 import sys
 import threading
@@ -120,6 +121,18 @@ def active_skins(user):
             out.append(k)
     # فقط یک اسکین فعال؛ اگر داده قدیمی خراب باشد آخرین مقدار معتبر برنده است.
     return out[-1:] if out else []
+
+
+_ASSET_FILES = {"ruby_gift.svg": "image/svg+xml", "fox_portal.jpg": "image/jpeg"}
+
+
+@app.get("/assets/{name}")
+def get_asset(name: str):
+    mt = _ASSET_FILES.get(name)
+    p = BASE_DIR / "assets" / name
+    if not mt or not p.is_file():
+        raise HTTPException(status_code=404, detail="فایل پیدا نشد.")
+    return FileResponse(p, media_type=mt, headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/skin/{key}/{gender}")
@@ -752,13 +765,20 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
     session = get_session()
     try:
         def base_entry(rank, u, value):
-            skins = active_skins(u)
+            try:
+                skins = active_skins(u)
+            except Exception:  # noqa: BLE001
+                skins = []
+            try:
+                av = avatar_url(u.telegram_id)
+            except Exception:  # noqa: BLE001
+                av = ""
             return {
                 "rank": rank,
-                "name": display_name(u),
+                "name": str(display_name(u)),
                 "value": int(value or 0),
                 "me": u.telegram_id == tg_user["id"],
-                "avatar": avatar_url(u.telegram_id),
+                "avatar": av,
                 "skin": SKIN_INFO.get(skins[-1], "") if skins else "",
                 "title": titles.get(rank, "") if rank <= 3 else "",
             }
@@ -776,14 +796,12 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
             users_by_id = {u.telegram_id: u for u in session.query(User).filter(User.telegram_id.in_(ids or [0])).all()}
             pairs = [(users_by_id[uid], cnt) for uid, cnt in rows if uid in users_by_id]
         elif category == "edu":
-            # LEFT JOIN تا کاربرهایی که هنوز رکورد EducationProgress ندارند هم
-            # از لیدربرد حذف نشوند و جدول «درس» هیچ‌وقت خالیِ کاذب نشان داده نشود.
-            edu = _edu()
+            education = _edu()
             rows = (
-                session.query(User, func.coalesce(edu.EducationProgress.correct_answers, 0).label("correct_answers"))
-                .outerjoin(edu.EducationProgress, edu.EducationProgress.user_id == User.telegram_id)
-                .filter(~User.telegram_id.in_(admin_ids))
-                .order_by(func.coalesce(edu.EducationProgress.correct_answers, 0).desc(), User.telegram_id.asc())
+                session.query(User, education.EducationProgress.correct_answers)
+                .join(education.EducationProgress, education.EducationProgress.user_id == User.telegram_id)
+                .filter(education.EducationProgress.correct_answers > 0, ~User.telegram_id.in_(admin_ids))
+                .order_by(education.EducationProgress.correct_answers.desc(), User.telegram_id.asc())
                 .limit(50).all()
             )
             pairs = [(u, c) for u, c in rows]
@@ -792,8 +810,18 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
             users = (session.query(User).filter(~User.telegram_id.in_(admin_ids))
                      .order_by(col.desc(), User.telegram_id.asc()).limit(50).all())
             pairs = [(u, getattr(u, field)) for u in users]
-        entries = [base_entry(i + 1, u, v) for i, (u, v) in enumerate(pairs)]
+        entries = []
+        for u, v in pairs:
+            try:
+                entries.append(base_entry(len(entries) + 1, u, v))
+            except Exception:  # noqa: BLE001  - یک کاربر خراب نباید کل لیدربرد رو خالی کنه
+                logging.getLogger(__name__).exception("leaderboard entry failed (user=%s)", getattr(u, "telegram_id", "?"))
         return {"category": category, "label": label, "emoji": emoji, "entries": entries}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger(__name__).exception("leaderboard failed (category=%s)", category)
+        raise HTTPException(status_code=500, detail=f"لیدربرد لود نشد: {type(e).__name__}: {e}")
     finally:
         session.close()
 
@@ -1170,6 +1198,11 @@ def edu_state(tg_user: dict = Depends(current_telegram_user)):
         p = _edu_progress(session, user.telegram_id)
         session.commit()
         return _edu_state(session, user, p)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger(__name__).exception("edu state failed")
+        raise HTTPException(status_code=500, detail=f"پنل درس لود نشد: {type(e).__name__}: {e}")
     finally:
         session.close()
 

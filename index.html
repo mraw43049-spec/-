@@ -464,7 +464,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   <div class="card">
     <div class="section-title">📊 وضعیت روباه</div>
     <div class="stats">
-      <div class="stat"><span class="ruby-gift-label"><span class="ruby-gift"><img src="assets/ruby_gift.svg" alt="گیفت روبی"></span>گیفت روبی</span><b id="points">—</b></div>
+      <div class="stat">💰 روب‌پوینت<b id="points">—</b></div>
       <div class="stat">🏆 رتبه<b id="rank">—</b></div>
       <div class="stat">💫 تولید در ثانیه<b id="rate">—</b></div>
       <div class="stat">🍖 شکم<b id="belly">—</b></div>
@@ -478,7 +478,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   <div class="card">
     <div class="section-title" id="lbTitle">🏆 لیدربرد روبی</div>
     <div class="filters">
-      <button class="filter active" data-cat="points"><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span> روب‌پوینت</button>
+      <button class="filter active" data-cat="points">💰 روب‌پوینت</button>
       <button class="filter" data-cat="referral">👑 رفرال‌ها</button>
       <button class="filter" data-cat="rescued">🎃 روباه‌های زخمی</button>
       <button class="filter" data-cat="hunt">⚔️ شکار</button>
@@ -528,7 +528,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   </div>
   <div id="bombCard" class="card" style="display:none">
     <div class="section-title">💥 بمب</div>
-    <div class="bomb-top"><span><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span> موجودی روب‌پوینت: <b id="bBal">—</b></span><span id="bCd" class="muted"></span></div>
+    <div class="bomb-top"><span>💰 موجودی روب‌پوینت: <b id="bBal">—</b></span><span id="bCd" class="muted"></span></div>
     <div id="bSetup">
       <div class="muted" id="bRule" style="line-height:1.9"></div>
       <div class="bomb-amt"><input id="bAmt" type="number" inputmode="numeric" placeholder="مبلغ ورودی" autocomplete="off"></div>
@@ -538,7 +538,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     <div id="bPlay" style="display:none">
       <div class="bomb-info">
         <div class="stat">🧩 خانه‌های امن<b id="bSafe">۰</b></div>
-        <div class="stat"><span class="ruby-gift-label"><span class="ruby-gift sm"><img src="assets/ruby_gift.svg" alt=""></span>ورودی روب‌پوینت</span><b id="bEntry">۰</b></div>
+        <div class="stat">ورودی روب‌پوینت<b id="bEntry">۰</b></div>
         <div class="stat">💵 دریافتی با «کافیه»<b id="bCash">۰</b></div>
         <div class="stat">⏭ خانه‌ی امن بعدی<b id="bNext">—</b></div>
       </div>
@@ -835,7 +835,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 
     var up = $("upgradeInfo");
     if (d.upgrade_cost == null) up.textContent = d.max_level ? "🏆 روباه به آخرین سطح رسیده!" : "";
-    else up.textContent = "⭐ هزینه‌ی ارتقای بعدی: " + fa(d.upgrade_cost) + " گیفت روبی";
+    else up.textContent = "⭐ هزینه‌ی ارتقای بعدی: " + fa(d.upgrade_cost) + " روب‌پوینت";
 
     if (d.locked) banner("🔒 روباه از سطح " + fa(d.unlock_level) + " باز می‌شه.", false);
     else if (d.sick) banner("🤒 روباهت مریضه؛ اول توی بات درمانش کن.", false);
@@ -903,7 +903,13 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 
   // ---------- لیدربرد ----------
   var cat = "points", lbCache = {}, lbSig = {};
+  // اسم و آیکن هر دسته همیشه از همین جدول میاد (هیچ‌وقت از جایی دیگه عوض نمی‌شه)
+  var LB_CATS = { points:["روب‌پوینت","💰"], referral:["رفرال‌ها","👑"], rescued:["روباه‌های زخمی","🎃"],
+                  hunt:["شکار","⚔️"], claim:["روب روب","🐾"], edu:["پاسخ درست درس","🎓"], owl:["جغد روبی","🦉"] };
+  function safeAvatar(url, name){ try { return avatarEl(url, name, "lb"); } catch(e){ var s = document.createElement("span"); s.className = "avatar"; s.textContent = String(name || "?").charAt(0); return s; } }
   function renderLeader(data, key){
+    var meta = LB_CATS[key] || [data.label || "روبی", data.emoji || ""];
+    data = { label: meta[0], emoji: meta[1], entries: (data && data.entries) || [] };
     var list = $("list"), msg = $("msg"), pod = $("podium");
     avQ = avQ.filter(function(j){ return j.g !== "lb"; });
     list.innerHTML = ""; pod.innerHTML = "";
@@ -921,8 +927,8 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       d.className = "pod p" + (i+1) + (e.me ? " me" : "");
       var m = document.createElement("div"); m.className = "medal"; m.textContent = medals[i];
       var nm = document.createElement("div"); nm.className = "pname"; nm.textContent = e.name + (e.skin ? " " + e.skin.split(" ")[0] : "");
-      var v = document.createElement("div"); v.className = "pval"; if(cat === "points"){ v.innerHTML = giftValueHTML(e.value); } else { v.textContent = fa(e.value) + " " + (data.emoji || ""); }
-      d.appendChild(m); d.appendChild(avatarEl(e.avatar, e.name, "lb")); d.appendChild(nm);
+      var v = document.createElement("div"); v.className = "pval"; v.textContent = fa(e.value) + " " + (data.emoji || "");
+      d.appendChild(m); d.appendChild(safeAvatar(e.avatar, e.name)); d.appendChild(nm);
       if (e.title) { var tt = document.createElement("div"); tt.className = "ptitle"; tt.textContent = String(e.title).replace(/^[^\u0600-\u06FF]+/, ""); d.appendChild(tt); }
       d.appendChild(v);
       pf.appendChild(d);
@@ -933,8 +939,8 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       var li = document.createElement("li"); if (e.me) li.className = "me";
       var r = document.createElement("span"); r.className = "rank"; r.textContent = fa(e.rank);
       var n = document.createElement("span"); n.className = "name"; n.textContent = e.name + (e.skin ? " " + e.skin.split(" ")[0] : "");
-      var v = document.createElement("span"); v.className = "value"; if(cat === "points"){ v.innerHTML = giftValueHTML(e.value); } else { v.textContent = fa(e.value) + " " + (data.emoji || ""); }
-      li.appendChild(r); li.appendChild(avatarEl(e.avatar, e.name, "lb")); li.appendChild(n); li.appendChild(v); lf.appendChild(li);
+      var v = document.createElement("span"); v.className = "value"; v.textContent = fa(e.value) + " " + (data.emoji || "");
+      li.appendChild(r); li.appendChild(safeAvatar(e.avatar, e.name)); li.appendChild(n); li.appendChild(v); lf.appendChild(li);
     });
     list.appendChild(lf);
   }
@@ -947,7 +953,8 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       lbCache[key] = data;
       if (key !== cat) return;                            // کاربر تو این فاصله دسته رو عوض کرده
       if (cached && lbSig[key] === JSON.stringify(data.entries || [])) return;   // تغییری نکرده → دوباره نکش
-      renderLeader(data, key);
+      try { renderLeader(data, key); }
+      catch(err){ msg.style.display = "block"; msg.textContent = "خطا در نمایش لیدربرد: " + err.message; }
     }).catch(function(e){ if (e.gate || cached) return; msg.style.display = "block"; msg.textContent = "خطا: " + e.message; });
   }
   document.querySelectorAll("[data-cat]").forEach(function(b){
