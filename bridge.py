@@ -218,17 +218,17 @@ def invite_kb(bid):
 
 def connected_kb(bid):
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("🚨 گزارش", callback_data=f"brg:rep:{bid}"),
-        InlineKeyboardButton("🔚 پایان گفت و گو", callback_data=f"brg:end:{bid}"),
+        InlineKeyboardButton("🔴 گزارش", callback_data=f"brg:rep:{bid}"),
+        InlineKeyboardButton("🔌 قطع گفت‌وگو", callback_data=f"brg:end:{bid}"),
     ]])
 
 
 def report_only_kb(bid):
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🚨 گزارش", callback_data=f"brg:rep:{bid}")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔴 گزارش", callback_data=f"brg:rep:{bid}")]])
 
 
 def msg_kb(mid):
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🚨 گزارش", callback_data=f"brg:rm:{mid}")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔴 گزارش", callback_data=f"brg:rm:{mid}")]])
 
 
 INVITE_TEXT = ("یک لونه روباه 🦊🏠 می‌خواهد با شما گفت و گو کند.\n\n"

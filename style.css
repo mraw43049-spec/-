@@ -296,3 +296,21 @@ body {
 }
 
 .tabbar-icon { font-size: 20px; }
+
+
+/* اصلاح رنگ دکمه‌های روباهیو */
+button, .btn, .button { transition: filter .15s ease, transform .15s ease; }
+button:active, .btn:active, .button:active { transform: scale(.98); }
+/* فروشگاه: سبز */
+.shop button, .shop .btn, .store button, .store .btn,
+button[data-action*="shop"], button[data-action*="store"],
+button[id*="shop"], button[id*="store"] {
+  background: linear-gradient(135deg, #16a34a, #22c55e) !important;
+  border-color: #16a34a !important; color: #fff !important;
+}
+/* ورود به مینی‌اپ: آبی */
+.miniapp button, .miniapp .btn, .mini-app button, .mini-app .btn,
+button[data-action*="miniapp"], button[id*="miniapp"] {
+  background: linear-gradient(135deg, #2563eb, #38bdf8) !important;
+  border-color: #2563eb !important; color: #fff !important;
+}
