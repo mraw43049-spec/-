@@ -73,6 +73,24 @@ def _startup_warm():
     threading.Thread(target=_warm_up, daemon=True).start()
 
 
+# ---------------------------------------------------------------------------
+# صفحات وب مینی‌اپ
+# ---------------------------------------------------------------------------
+@app.get("/", include_in_schema=False)
+@app.get("/miniapp", include_in_schema=False)
+@app.get("/lobby", include_in_schema=False)
+def miniapp_home():
+    """نمایش رابط کاربری مینی‌اپ در دامنهٔ اصلی و مسیر /miniapp."""
+    page = BASE_DIR / "index.html"
+    if not page.is_file():
+        raise HTTPException(status_code=500, detail="فایل index.html در کنار main.py پیدا نشد.")
+    return FileResponse(page, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache"})
+
+@app.get("/health", include_in_schema=False)
+def health_check():
+    return {"ok": True, "service": "ruby-fox-miniapp"}
+
+
 NO_CACHE = {"Cache-Control": "no-cache"}   # هر بار چک می‌کنه؛ اگه عوض نشده باشه ۳۰۴ می‌گیره (بدون دانلود دوباره)
 
 # ---------------------------------------------------------------------------
