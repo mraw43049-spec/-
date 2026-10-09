@@ -42,6 +42,21 @@ app = FastAPI(title="Ruby Fox Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=800)   # صفحه و جواب‌های JSON فشرده می‌شن → لود سریع‌تر
 
+
+# Serve the Telegram Mini App from the same Railway service as the API.
+# Without this route, Telegram can open the domain but receives a 404 instead of index.html.
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+async def miniapp_home():
+    page = BASE_DIR / "index.html"
+    if not page.is_file():
+        raise HTTPException(status_code=404, detail="Mini App frontend not found")
+    return FileResponse(
+        page,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-cache"},
+    )
+
 # جدول چت‌روم اگه هنوز ساخته نشده باشه (مثلاً مینی‌اپ جدا از بات بالا بیاد) همین‌جا ساخته می‌شه.
 for _tbl in (ChatMessage, PendingAttack):
     try:
