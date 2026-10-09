@@ -8,7 +8,6 @@
 import asyncio
 import hashlib
 import hmac
-import logging
 import os
 import sys
 import threading
@@ -121,18 +120,6 @@ def active_skins(user):
             out.append(k)
     # فقط یک اسکین فعال؛ اگر داده قدیمی خراب باشد آخرین مقدار معتبر برنده است.
     return out[-1:] if out else []
-
-
-_ASSET_FILES = {"ruby_gift.svg": "image/svg+xml", "fox_portal.jpg": "image/jpeg"}
-
-
-@app.get("/assets/{name}")
-def get_asset(name: str):
-    mt = _ASSET_FILES.get(name)
-    p = BASE_DIR / "assets" / name
-    if not mt or not p.is_file():
-        raise HTTPException(status_code=404, detail="فایل پیدا نشد.")
-    return FileResponse(p, media_type=mt, headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/skin/{key}/{gender}")
@@ -765,20 +752,13 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
     session = get_session()
     try:
         def base_entry(rank, u, value):
-            try:
-                skins = active_skins(u)
-            except Exception:  # noqa: BLE001
-                skins = []
-            try:
-                av = avatar_url(u.telegram_id)
-            except Exception:  # noqa: BLE001
-                av = ""
+            skins = active_skins(u)
             return {
                 "rank": rank,
-                "name": str(display_name(u)),
+                "name": display_name(u),
                 "value": int(value or 0),
                 "me": u.telegram_id == tg_user["id"],
-                "avatar": av,
+                "avatar": avatar_url(u.telegram_id),
                 "skin": SKIN_INFO.get(skins[-1], "") if skins else "",
                 "title": titles.get(rank, "") if rank <= 3 else "",
             }
@@ -796,7 +776,6 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
             users_by_id = {u.telegram_id: u for u in session.query(User).filter(User.telegram_id.in_(ids or [0])).all()}
             pairs = [(users_by_id[uid], cnt) for uid, cnt in rows if uid in users_by_id]
         elif category == "edu":
-            education = _edu()
             rows = (
                 session.query(User, education.EducationProgress.correct_answers)
                 .join(education.EducationProgress, education.EducationProgress.user_id == User.telegram_id)
@@ -810,18 +789,8 @@ def get_leaderboard(category: str = "points", tg_user: dict = Depends(current_te
             users = (session.query(User).filter(~User.telegram_id.in_(admin_ids))
                      .order_by(col.desc(), User.telegram_id.asc()).limit(50).all())
             pairs = [(u, getattr(u, field)) for u in users]
-        entries = []
-        for u, v in pairs:
-            try:
-                entries.append(base_entry(len(entries) + 1, u, v))
-            except Exception:  # noqa: BLE001  - یک کاربر خراب نباید کل لیدربرد رو خالی کنه
-                logging.getLogger(__name__).exception("leaderboard entry failed (user=%s)", getattr(u, "telegram_id", "?"))
+        entries = [base_entry(i + 1, u, v) for i, (u, v) in enumerate(pairs)]
         return {"category": category, "label": label, "emoji": emoji, "entries": entries}
-    except HTTPException:
-        raise
-    except Exception as e:  # noqa: BLE001
-        logging.getLogger(__name__).exception("leaderboard failed (category=%s)", category)
-        raise HTTPException(status_code=500, detail=f"لیدربرد لود نشد: {type(e).__name__}: {e}")
     finally:
         session.close()
 
@@ -1102,6 +1071,112 @@ def bomb_cashout(tg_user: dict = Depends(current_telegram_user)):
 
 
 # ---------------------------------------------------------------------------
+# کازینو: پلینکو 🔴
+# نتیجه (مسیر توپ) کاملاً سمت سرور و با random امن تعیین می‌شه؛ مینی‌اپ فقط همون مسیر رو انیمیشن می‌کنه.
+# شرط‌ها (لول کازینو، زندان، بن، مریضی) همون بمب‌ه. ورودی/سقف/ضرایب از بالای همین بخش قابل تنظیمه
+# یا با متغیرهای PLINKO_MIN_ENTRY / PLINKO_MAX_ENTRY / PLINKO_COOLDOWN تو Railway.
+# ---------------------------------------------------------------------------
+import random as _plinko_random_mod
+
+PLINKO_ROWS = 10
+PLINKO_MIN_ENTRY = int(os.environ.get("PLINKO_MIN_ENTRY", "1000") or 1000)
+PLINKO_MAX_ENTRY = int(os.environ.get("PLINKO_MAX_ENTRY", "200000") or 200000)
+PLINKO_COOLDOWN = float(os.environ.get("PLINKO_COOLDOWN", "2") or 2)     # ثانیه؛ فقط برای جلوگیری از اسپم
+
+# ضرایب ۱۱ خانه (از چپ به راست)؛ بازگشت به بازیکن حدود ۹۴ تا ۹۶ درصد
+PLINKO_RISKS = {
+    "low":  {"title": "🟢 کم‌ریسک",   "mult": [5.6, 2.0, 1.3, 1.1, 1.0, 0.5, 1.0, 1.1, 1.3, 2.0, 5.6]},
+    "mid":  {"title": "🟡 متوسط",     "mult": [14.0, 4.0, 1.8, 1.1, 0.7, 0.6, 0.7, 1.1, 1.8, 4.0, 14.0]},
+    "high": {"title": "🔴 پرریسک",    "mult": [50.0, 9.0, 3.0, 1.0, 0.3, 0.2, 0.3, 1.0, 3.0, 9.0, 50.0]},
+}
+_plinko_rng = _plinko_random_mod.SystemRandom()
+_plinko_last: dict = {}      # uid -> زمان آخرین پرتاب
+
+
+def _plinko_roll(rows=PLINKO_ROWS):
+    """مسیر توپ: هر ردیف ۰=چپ یا ۱=راست؛ خانه‌ی نهایی = تعداد راست‌ها."""
+    path = [_plinko_rng.getrandbits(1) for _ in range(rows)]
+    return path, sum(path)
+
+
+def _plinko_payout(amount: int, mult: float) -> int:
+    return int(amount * mult + 1e-9)
+
+
+@app.get("/api/plinko")
+def plinko_state(tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = session.query(User).filter(User.telegram_id == tg_user["id"]).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        return {
+            "unlocked": int(user.level or 1) >= botmod.CASINO_UNLOCK_LEVEL,
+            "unlock_level": botmod.CASINO_UNLOCK_LEVEL, "level": int(user.level or 1),
+            "disabled": bool(getattr(botmod, "CASINO_DISABLED", False)),
+            "min_entry": PLINKO_MIN_ENTRY, "max_entry": PLINKO_MAX_ENTRY,
+            "balance": int(user.fox_points or 0),
+            "rows": PLINKO_ROWS,
+            "risks": {k: {"title": v["title"], "mult": v["mult"]} for k, v in PLINKO_RISKS.items()},
+        }
+    finally:
+        session.close()
+
+
+class PlinkoDrop(BaseModel):
+    amount: int
+    risk: str = "mid"
+
+
+@app.post("/api/plinko/drop")
+def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = locked_user(session, tg_user, botmod)
+        if getattr(botmod, "CASINO_DISABLED", False):
+            raise HTTPException(status_code=403, detail=getattr(botmod, "CASINO_DISABLED_TEXT", "کازینو فعلاً غیرفعاله."))
+        _bomb_guard(botmod, session, user)
+        risk = PLINKO_RISKS.get(str(body.risk or "mid"))
+        if not risk:
+            raise HTTPException(status_code=400, detail="سطح ریسک نامعتبره.")
+        amount = int(body.amount or 0)
+        if amount < PLINKO_MIN_ENTRY:
+            raise HTTPException(status_code=400, detail=f"❌ حداقل مبلغ ورودی پلینکو {PLINKO_MIN_ENTRY:,} روب‌پوینته.")
+        if amount > PLINKO_MAX_ENTRY:
+            raise HTTPException(status_code=400, detail=f"❌ سقف مبلغ ورودی پلینکو {PLINKO_MAX_ENTRY:,} روب‌پوینته.")
+        uid = int(user.telegram_id)
+        now = time.time()
+        if now - _plinko_last.get(uid, 0) < PLINKO_COOLDOWN:
+            raise HTTPException(status_code=429, detail="⏳ یه لحظه صبر کن تا توپ قبلی بیفته.")
+        if int(user.fox_points or 0) < amount:
+            raise HTTPException(status_code=400, detail="❌ روب‌پوینت کافی نداری.")
+        path, slot = _plinko_roll()
+        mult = float(risk["mult"][slot])
+        payout = _plinko_payout(amount, mult)
+        user.fox_points = int(user.fox_points or 0) - amount + payout
+        session.commit()
+        if len(_plinko_last) > 50000:
+            _plinko_last.clear()
+        _plinko_last[uid] = now
+        profit = payout - amount
+        if profit > 0:
+            msg = f"🎉 ضریب ×{mult:g}! {profit:,} روب‌پوینت سود کردی."
+        elif profit == 0:
+            msg = f"😐 ضریب ×{mult:g}؛ پولت برگشت."
+        else:
+            msg = f"😢 ضریب ×{mult:g}؛ {abs(profit):,} روب‌پوینت باختی."
+        return {"path": path, "slot": slot, "mult": mult, "payout": payout, "profit": profit,
+                "balance": int(user.fox_points or 0), "message": msg}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
 # روباهیو درس (همون منطق education.py؛ پیشرفت بین بات و مینی‌اپ مشترکه)
 # ---------------------------------------------------------------------------
 EDU_UNLOCK_COST = 30000
@@ -1123,352 +1198,4 @@ def _edu_progress(session, uid, lock=False):
     p = q.first()
     if not p:
         p = edu.EducationProgress(user_id=uid)
-        session.add(p)
-        session.flush()
-    return p
-
-
-def _edu_question(session, p):
-    """سؤال فعال رو (با ترتیب گزینه‌های ثابت برای هر سؤال) برمی‌گردونه: (متن، [متن گزینه‌ها], اندیس درست در ترتیب نمایش، طراح)."""
-    import random
-    edu = _edu()
-    topic, qid = p.active_topic, int(p.active_question)
-    designer = ""
-    if qid >= edu.USER_Q_OFFSET:
-        r = session.get(edu.EduUserQuestion, qid - edu.USER_Q_OFFSET)
-        if not r or r.status != "approved" or r.topic != topic:
-            return None
-        question = r.question
-        opts = [(0, r.correct_opt), (1, r.wrong1), (2, r.wrong2)]
-        au = session.get(User, r.author_id)
-        designer = display_name(au) if au else ""
-        correct_orig = 0
-    else:
-        question, texts, correct_orig = edu.TOPICS[topic][1][qid]
-        opts = list(enumerate(texts))
-    seed = f"{p.user_id}:{qid}:{int(edu._aware(p.active_expires).timestamp()) if p.active_expires else 0}"
-    random.Random(seed).shuffle(opts)       # ترتیب ثابتِ هر نوبت (با رفرش عوض نمی‌شه)
-    correct_pos = [o[0] for o in opts].index(correct_orig)
-    return question, [o[1] for o in opts], correct_pos, designer
-
-
-def _edu_state(session, user, p):
-    edu = _edu()
-    now = edu._now()
-    unlocked = set((p.unlocked or "general").split(","))
-    cert = int(p.certificates or 0)
-    cooldown = 0
-    if p.last_play_at:
-        cooldown = max(0, EDU_COOLDOWN - int((now - edu._aware(p.last_play_at)).total_seconds()))
-    active = None
-    if p.active_topic and p.active_question is not None and p.active_expires and now <= edu._aware(p.active_expires) + timedelta(seconds=EDU_GRACE):
-        qd = _edu_question(session, p)
-        if qd:
-            active = {
-                "topic": p.active_topic, "topic_title": edu.TOPICS[p.active_topic][0],
-                "question": qd[0], "options": qd[1], "designer": qd[3],
-                "left": max(0, int((edu._aware(p.active_expires) - now).total_seconds())),
-            }
-    return {
-        "topics": [{"key": k, "title": v[0], "unlocked": k in unlocked} for k, v in edu.TOPICS.items()],
-        "unlock_cost": EDU_UNLOCK_COST,
-        "correct_answers": int(p.correct_answers or 0),
-        "units": int(p.correct or 0),
-        "certificates": cert,
-        "max_certificates": 15,
-        "title": edu._name(cert),
-        "to_next": max(0, edu._threshold(cert) - int(p.correct_answers or 0)) if cert < 15 else 0,
-        "pending_certificate": bool(p.pending_certificate) and cert < 15,
-        "next_title": edu._name(cert + 1) if cert < 15 else "",
-        "tuition": edu._tuition(cert) if cert < 15 else 0,
-        "reward": edu._reward(cert) if cert < 15 else 0,
-        "cooldown": cooldown,
-        "active": active,
-        "balance": int(user.fox_points or 0),
-    }
-
-
-@app.get("/api/edu")
-def edu_state(tg_user: dict = Depends(current_telegram_user)):
-    session = get_session()
-    try:
-        user = session.get(User, tg_user["id"])
-        if not user:
-            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
-        p = _edu_progress(session, user.telegram_id)
-        session.commit()
-        return _edu_state(session, user, p)
-    except HTTPException:
-        raise
-    except Exception as e:  # noqa: BLE001
-        logging.getLogger(__name__).exception("edu state failed")
-        raise HTTPException(status_code=500, detail=f"پنل درس لود نشد: {type(e).__name__}: {e}")
-    finally:
-        session.close()
-
-
-class EduStart(BaseModel):
-    topic: str
-
-
-class EduAnswer(BaseModel):
-    pos: int
-
-
-@app.post("/api/edu/start")
-def edu_start(body: EduStart, tg_user: dict = Depends(current_telegram_user)):
-    import json, random
-    edu = _edu()
-    topic = body.topic
-    if topic not in edu.TOPICS:
-        raise HTTPException(status_code=400, detail="موضوع نامعتبره.")
-    session = get_session()
-    try:
-        user = session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first()
-        if not user:
-            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
-        p = _edu_progress(session, user.telegram_id, lock=True)
-        if topic not in set((p.unlocked or "general").split(",")):
-            raise HTTPException(status_code=403, detail="این موضوع قفله؛ اول بازش کن.")
-        now = edu._now()
-        if p.last_play_at and (now - edu._aware(p.last_play_at)).total_seconds() < EDU_COOLDOWN:
-            raise HTTPException(status_code=429, detail="هر ۲۵ دقیقه یک سؤال مجاز است.")
-        seen = json.loads(p.answered or "{}")
-        used = set(seen.get(topic, []))
-        pool = edu.TOPICS[topic][1]
-        user_q_ids = [edu.USER_Q_OFFSET + r[0] for r in session.query(edu.EduUserQuestion.id).filter(
-            edu.EduUserQuestion.topic == topic, edu.EduUserQuestion.status == "approved",
-            edu.EduUserQuestion.author_id != p.user_id).all()]
-        all_ids = list(range(len(pool))) + user_q_ids
-        available = [i for i in all_ids if i not in used]
-        if not available:
-            seen[topic] = []
-            p.answered = json.dumps(seen)
-            available = all_ids
-        p.active_topic = topic
-        p.active_question = random.choice(available)
-        p.active_expires = now + timedelta(seconds=EDU_QUESTION_SECONDS)
-        p.last_play_at = now
-        session.commit()
-        return _edu_state(session, user, p)
-    finally:
-        session.close()
-
-
-@app.post("/api/edu/answer")
-def edu_answer(body: EduAnswer, tg_user: dict = Depends(current_telegram_user)):
-    import json
-    edu = _edu()
-    session = get_session()
-    try:
-        user = session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first()
-        if not user:
-            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
-        p = _edu_progress(session, user.telegram_id, lock=True)
-        if (not p.active_topic or p.active_question is None or not p.active_expires
-                or edu._now() > edu._aware(p.active_expires) + timedelta(seconds=EDU_GRACE)):
-            p.active_topic = None
-            p.active_question = None
-            p.active_expires = None
-            session.commit()
-            return {"result": "timeout", "message": "⏰ زمان سؤال تموم شد؛ این دور پایان یافت.", "state": _edu_state(session, user, p)}
-        qd = _edu_question(session, p)
-        topic, qid = p.active_topic, int(p.active_question)
-        seen = json.loads(p.answered or "{}")
-        seen.setdefault(topic, []).append(qid)
-        p.answered = json.dumps(seen)
-        p.active_topic = None
-        p.active_question = None
-        p.active_expires = None
-        if qd is None:
-            session.commit()
-            return {"result": "gone", "message": "این سؤال دیگه در دسترس نیست؛ دوباره تلاش کن.", "state": _edu_state(session, user, p)}
-        if body.pos != qd[2]:
-            session.commit()
-            return {"result": "wrong", "correct_text": qd[1][qd[2]],
-                    "message": "❌ پاسخ اشتباه بود؛ بازی تمام شد. ۲۵ دقیقه بعد دوباره تلاش کن.",
-                    "state": _edu_state(session, user, p)}
-        p.correct_answers = int(p.correct_answers or 0) + 1
-        p.correct = int(p.correct or 0) + 2
-        msg = "✅ درست! +۲ واحد"
-        if int(p.certificates or 0) < 15 and p.correct_answers >= edu._threshold(p.certificates):
-            p.pending_certificate = 1
-            msg += f"\n🎓 به حد نصاب مدرک {edu._name(p.certificates + 1)} رسیدی!"
-        session.commit()
-        return {"result": "correct", "message": msg, "state": _edu_state(session, user, p)}
-    finally:
-        session.close()
-
-
-@app.post("/api/edu/unlock")
-def edu_unlock(body: EduStart, tg_user: dict = Depends(current_telegram_user)):
-    edu = _edu()
-    if body.topic not in edu.TOPICS:
-        raise HTTPException(status_code=400, detail="موضوع نامعتبره.")
-    session = get_session()
-    try:
-        user = session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first()
-        if not user:
-            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
-        p = _edu_progress(session, user.telegram_id, lock=True)
-        unlocked = set((p.unlocked or "general").split(","))
-        if body.topic in unlocked:
-            raise HTTPException(status_code=409, detail="این موضوع از قبل بازه.")
-        if int(user.fox_points or 0) < EDU_UNLOCK_COST:
-            raise HTTPException(status_code=402, detail="روب‌پوینت کافی نیست.")
-        unlocked.add(body.topic)
-        p.unlocked = ",".join(sorted(unlocked))
-        user.fox_points = int(user.fox_points) - EDU_UNLOCK_COST
-        session.commit()
-        return {"message": "موضوع با موفقیت خریداری شد ✅", "state": _edu_state(session, user, p)}
-    finally:
-        session.close()
-
-
-@app.post("/api/edu/certificate")
-def edu_certificate(tg_user: dict = Depends(current_telegram_user)):
-    edu = _edu()
-    session = get_session()
-    try:
-        user = session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first()
-        if not user:
-            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
-        p = _edu_progress(session, user.telegram_id, lock=True)
-        if not p.pending_certificate or int(p.certificates or 0) >= 15:
-            raise HTTPException(status_code=409, detail="مدرک در انتظار تأیید وجود نداره.")
-        cost, reward = edu._tuition(p.certificates), edu._reward(p.certificates)
-        if int(user.fox_points or 0) < cost:
-            raise HTTPException(status_code=402, detail=f"روب‌پوینت کافی نیست؛ شهریه {cost:,} است.")
-        user.fox_points = int(user.fox_points) - cost + reward
-        p.certificates = int(p.certificates) + 1
-        p.pending_certificate = 0
-        session.commit()
-        return {"message": f"🎉 مدرک {edu._name(p.certificates)} دریافت شد! شهریه {cost:,} | جایزه {reward:,} | خالص {reward - cost:+,}",
-                "state": _edu_state(session, user, p)}
-    finally:
-        session.close()
-
-
-_BOT_USERNAME = {"v": None}
-
-
-@app.get("/api/botinfo")
-def bot_info(tg_user: dict = Depends(current_telegram_user)):
-    """یوزرنیم بات برای دکمه‌ی «طرح سؤال» که کاربر رو به پیوی بات می‌بره."""
-    if not _BOT_USERNAME["v"]:
-        res = attack_owl.tg_call("getMe")
-        if res and res.get("username"):
-            _BOT_USERNAME["v"] = res["username"]
-    return {"username": _BOT_USERNAME["v"]}
-
-
-# ---------------------------------------------------------------------------
-# چت‌روم عمومی
-# ---------------------------------------------------------------------------
-CHAT_MAX_LEN = 300
-CHAT_COOLDOWN_SECONDS = 2
-CHAT_PAGE = 60
-_last_chat_at: dict = {}
-
-
-class ChatBody(BaseModel):
-    text: str
-
-
-# پیش‌فرض: همه‌ی کاربرهای ثبت‌شده می‌تونن چت کنن. فلگ‌های is_banned / banned_until مربوط به بن بات
-# (مثلاً تخلف در فروشگاه گیفت) هستن و قبلاً چت رو هم بی‌دلیل می‌بستن. اگه خواستی بن‌شده‌ها چت نکنن،
-# توی Railway متغیر CHAT_BLOCK_BANNED=1 بذار.
-CHAT_BLOCK_BANNED = os.environ.get("CHAT_BLOCK_BANNED", "0").strip() == "1"
-
-
-def _chat_blocked(user) -> bool:
-    if not CHAT_BLOCK_BANNED:
-        return False
-    now = datetime.now(timezone.utc)
-    if int(user.is_banned or 0):
-        return True
-    bu = user.banned_until
-    if bu is not None:
-        if bu.tzinfo is None:
-            bu = bu.replace(tzinfo=timezone.utc)
-        if bu > now:
-            return True
-    return False
-
-
-def _chat_rows(session, rows, me_id):
-    ids = {r.user_id for r in rows}
-    users = {u.telegram_id: u for u in session.query(User).filter(User.telegram_id.in_(ids or [0])).all()}
-    out = []
-    for r in rows:
-        u = users.get(r.user_id)
-        skins = active_skins(u) if u else []
-        out.append({
-            "id": r.id,
-            "user_id": r.user_id,
-            "name": display_name(u) if u else str(r.user_id),
-            "avatar": avatar_url(r.user_id),
-            "skin": SKIN_INFO.get(skins[-1], "").split(" ")[0] if skins else "",
-            "text": r.text,
-            "me": r.user_id == me_id,
-            "ts": int(r.created_at.timestamp()) if r.created_at else 0,
-        })
-    return out
-
-
-@app.get("/api/chat")
-def chat_list(after: int = 0, tg_user: dict = Depends(current_telegram_user)):
-    """after=0 → آخرین پیام‌ها؛ after=N → فقط پیام‌های جدیدتر از N."""
-    session = get_session()
-    try:
-        q = session.query(ChatMessage)
-        if after > 0:
-            rows = q.filter(ChatMessage.id > after).order_by(ChatMessage.id.asc()).limit(200).all()
-        else:
-            rows = q.order_by(ChatMessage.id.desc()).limit(CHAT_PAGE).all()[::-1]
-        return {"messages": _chat_rows(session, rows, tg_user["id"])}
-    finally:
-        session.close()
-
-
-@app.post("/api/chat")
-def chat_send(body: ChatBody, tg_user: dict = Depends(current_telegram_user)):
-    text = " ".join((body.text or "").split())
-    if not text:
-        raise HTTPException(status_code=400, detail="پیام خالیه.")
-    if len(text) > CHAT_MAX_LEN:
-        raise HTTPException(status_code=400, detail=f"پیام حداکثر {CHAT_MAX_LEN} کاراکتر می‌تونه باشه.")
-    now = time.time()
-    if now - _last_chat_at.get(tg_user["id"], 0) < CHAT_COOLDOWN_SECONDS:
-        raise HTTPException(status_code=429, detail="یکم آروم‌تر 😅 چند ثانیه صبر کن.")
-    session = get_session()
-    try:
-        user = session.get(User, tg_user["id"])
-        if not user:
-            raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
-        if _chat_blocked(user):
-            raise HTTPException(status_code=403, detail="🚫 اجازه‌ی چت کردن نداری.")
-        _last_chat_at[tg_user["id"]] = now
-        msg = ChatMessage(user_id=user.telegram_id, text=text)
-        session.add(msg)
-        session.commit()
-        # قدیمی‌ترها رو پاک می‌کنیم تا جدول بزرگ نشه (۲۰۰۰ پیام آخر نگه داشته می‌شه)
-        if msg.id % 100 == 0:
-            session.query(ChatMessage).filter(ChatMessage.id < msg.id - 2000).delete()
-            session.commit()
-        return {"message": _chat_rows(session, [msg], user.telegram_id)[0]}
-    finally:
-        session.close()
-
-
-# ---------------------------------------------------------------------------
-# صفحه‌ی مینی‌اپ (فقط همین یه فایل عمومیه، نه کل پوشه)
-# ---------------------------------------------------------------------------
-@app.get("/")
-def index_page():
-    return FileResponse(BASE_DIR / "index.html", headers=NO_CACHE)
-
-
-@app.get("/api/health")
-def health():
-    return {"ok": True, "service": "ruby-miniapp"}
+    
