@@ -77,6 +77,32 @@ _LOCKS = {}      # bridge_id -> asyncio.Lock  (ترتیب پیام‌ها حفظ
 _last_purge = [0.0]
 _BANNED = set()          # user_id های محروم‌شده از «روباهیو وصل شو»
 _ban_notice = {}         # user_id -> آخرین زمانی که پیام «محروم هستی» دیده
+_last_relay_at = {}       # user_id -> آخرین زمان ارسال موفق/تلاش پیام تونل
+_flood_notice = {}        # user_id -> آخرین اخطار سرعت
+BAD_WORDS = (
+    "کص", "کسکش", "کصکش", "کیر", "کونی", "کیرخر", "کونده", "کونگشاد",
+    "جنده", "جاکش", "عن", "گه", "گوه", "گاییدن", "گاییدم", "گایدم",
+    "گاییدمت", "گاییدنت", "گاییدش", "گاییده", "مادرقحبه", "مادرجنده",
+    "پدرسگ", "پدرسوخته", "بی ناموس", "بیناموس", "ناموس فروش", "ناموس",
+    "نوامیس", "حرومزاده", "حرامزاده", "سگ پدر", "سگ مادر", "بی شرف",
+    "بی غیرت", "الدنگ", "لاشی", "هرزه", "بی پدرومادر", "گوه خور",
+    "گوه نخور", "بی همه چیز", "بی وجود", "بیشعور", "احمق", "خنگ",
+    "نادون", "پست فطرت", "نمک نشناس", "دورو", "دروغ گو", "پررو",
+    "خودخواه", "بی معرفت", "آشغال", "کثافت", "عوضی"
+)
+def contains_profanity(text):
+    # یکسان‌سازی حروف و حذف فاصله/نشانه‌ها برای تشخیص شکل‌های کشیده یا جداشده
+    t = unicodedata.normalize("NFKC", str(text or "")).lower()
+    t = t.translate(str.maketrans({"ي":"ی", "ى":"ی", "ك":"ک", "ۀ":"ه", "ة":"ه"}))
+    compact = re.sub(r"[\\s\\W_ـ]+", "", t, flags=re.UNICODE)
+    for word in BAD_WORDS:
+        w = re.sub(r"[\\s\\W_ـ]+", "", word, flags=re.UNICODE)
+        if w and w in compact:
+            return True
+    return False
+PROFANITY_NOTICE = "🚫 این پیام از تونل رد نمی‌شه؛ لطفاً از کلمات رکیک استفاده نکن."
+FLOOD_NOTICE = "🐢 آروم‌تر، تونل ریزش می‌کنه!"
+
 
 LINK_WARNING = "⚠️ لینک و یوزرنیم از تونل لونه‌ها رد نمی‌شن"
 BANNED_NOTICE = "🚫 شما از «روباهیو وصل شو» محروم شدید و پیام‌هاتون از تونل لونه‌ها رد نمی‌شه."
@@ -218,17 +244,17 @@ def invite_kb(bid):
 
 def connected_kb(bid):
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("🔴 گزارش", callback_data=f"brg:rep:{bid}"),
+        InlineKeyboardButton("گزارش⚠️", callback_data=f"brg:rep:{bid}", style="danger"),
         InlineKeyboardButton("🔌 قطع گفت‌وگو", callback_data=f"brg:end:{bid}"),
     ]])
 
 
 def report_only_kb(bid):
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🔴 گزارش", callback_data=f"brg:rep:{bid}")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("گزارش⚠️", callback_data=f"brg:rep:{bid}", style="danger")]])
 
 
 def msg_kb(mid):
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🔴 گزارش", callback_data=f"brg:rm:{mid}")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("گزارش⚠️", callback_data=f"brg:rm:{mid}", style="danger")]])
 
 
 INVITE_TEXT = ("یک لونه روباه 🦊🏠 می‌خواهد با شما گفت و گو کند.\n\n"
@@ -435,6 +461,10 @@ async def handle_text(update, context) -> bool:
     try:
         s.query(ChatBridge).filter(ChatBridge.id == bid).update({"wait_message_id": wait.message_id})
         s.commit()
+        try:
+            await context.bot.pin_chat_message(chat_id=chat.id, message_id=wait.message_id, disable_notification=True)
+        except Exception:
+            pass
     finally:
         s.close()
     context.application.create_task(_broadcast(context.bot, bid), update=update)
@@ -600,6 +630,11 @@ async def _accept(q, context, bid):
     _load_cache()
     await q.answer("🚪 در باز شد!")
     bot = context.bot
+    # پیام اصلی دعوت (عکس‌دار) در گپ پذیرنده سنجاق شود.
+    try:
+        await bot.pin_chat_message(chat_id=b_chat, message_id=q.message.message_id, disable_notification=True)
+    except Exception:
+        pass
     # جستجوهای قبلیِ خودِ گپ B
     for oid in own_cancel:
         await _clear_search_messages(bot, oid, "🚫 جستجو لغو شد (به یک گپ دیگه وصل شدی).")
@@ -679,6 +714,18 @@ async def _finish(bot, bid, by, text):
     finally:
         s.close()
     _load_cache()
+    pinned = {}
+    try:
+        raw_pinned = cmsgs.get("_pinned", "{}")
+        pinned = json.loads(raw_pinned) if isinstance(raw_pinned, str) else (raw_pinned or {})
+    except Exception:
+        pinned = {}
+    for pcid, mids in pinned.items():
+        for pmid in mids or []:
+            try:
+                await bot.unpin_chat_message(chat_id=int(pcid), message_id=int(pmid))
+            except Exception:
+                pass
     caption = _final_caption(bid, text)
     for cid in chats:
         try:
@@ -955,6 +1002,23 @@ async def _relay_one(bot, info, chat, user, msg, kind):
     if contains_link(raw_text, ents):
         await _notice(bot, chat.id, msg, LINK_WARNING, user.id)
         return
+    if contains_profanity(raw_text):
+        await _notice(bot, chat.id, msg, PROFANITY_NOTICE, user.id)
+        return
+    now_mono = time.monotonic()
+    last = _last_relay_at.get(user.id, 0.0)
+    if now_mono - last < 3.0:
+        if now_mono - _flood_notice.get(user.id, 0.0) >= 3.0:
+            _flood_notice[user.id] = now_mono
+            try:
+                notice = await bot.send_message(chat_id=chat.id, text=FLOOD_NOTICE,
+                    reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True))
+                task = asyncio.create_task(_delete_later(bot, chat.id, notice.message_id, 3))
+                _bg_tasks.add(task); task.add_done_callback(_bg_tasks.discard)
+            except Exception:
+                pass
+        return
+    _last_relay_at[user.id] = now_mono
 
     name = clean_name(user)
     head = f"👤 <b>{esc(name)}</b> از گپ «{esc(safe_title(chat.title))}»"

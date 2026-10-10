@@ -8964,8 +8964,15 @@ async def admin_callback(update, context):
         finally: session.close()
         await q.message.reply_text(f"👥 تعداد کاربران ثبت‌شده: {count}")
     elif action == "broadcast":
-        context.user_data["admin_action"]="broadcast"
-        await q.message.reply_text("📣 پیام همگانی رو بفرست.\n\n• متن یا مدیا (عکس، ویدیو، گیف، فایل، ویس، آهنگ، استیکر...) با کپشن\n• فرمت‌بندی تلگرام حفظ می‌شه: بولد، ایتالیک، زیرخط، خط‌خورده، اسپویلر، نقل‌قول، کد، لینک و نیم‌فاصله\n\nهمون‌طور که بفرستی برای همه (کاربرها و گپ‌ها) کپی می‌شه.")
+        await q.message.reply_text("📣 پیام همگانی — مقصد رو انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("👥 ارسال به گپ‌ها", callback_data="admin:broadcastgroups")],
+            [InlineKeyboardButton("✉️ ارسال به پیوی کاربران", callback_data="admin:broadcastusers")],
+        ]))
+    elif action in ("broadcastgroups", "broadcastusers"):
+        mode = "groups" if action == "broadcastgroups" else "users"
+        context.user_data["admin_action"] = "broadcast:" + mode
+        label = "گپ‌ها" if mode == "groups" else "پیوی کاربران"
+        await q.message.reply_text(f"📣 پیام رو بفرست تا فقط به {label} ارسال بشه. متن یا مدیا با کپشن قابل قبوله.")
     elif action == "addpoints": context.user_data["admin_action"]="addpoints"; await q.message.reply_text("🦊 فرمت: آیدی عددی یا @شناسه کاربر + مقدار روب‌پوینت")
     elif action == "fineadd":
         context.user_data["admin_action"]="fine:add"
@@ -9111,7 +9118,7 @@ async def _admin_broadcast_task(bot, admin_chat, ids, from_chat_id, message_id):
     await notify_user_private(bot, admin_chat, f"✅ پیام همگانی تموم شد.\n📨 موفق: {ok:,}\n❌ ناموفق (بلاک/حذف حساب/خروج ربات): {fail:,}")
 
 
-async def run_admin_broadcast(update, context):
+async def run_admin_broadcast(update, context, mode="all"):
     """پیام ادمین (متن یا مدیا، با فرمت تلگرام) رو عیناً کپی می‌کنه برای همه‌ی کاربرها و گپ‌ها."""
     msg = update.message
     session = get_session()
@@ -9120,8 +9127,9 @@ async def run_admin_broadcast(update, context):
         groups = [c.chat_id for c in session.query(GroupChat).filter(GroupChat.active == 1).all()]
     finally:
         session.close()
-    recipients = list(dict.fromkeys(users + groups))
-    await msg.reply_text(f"📣 ارسال به {len(recipients):,} مقصد (کاربر و گپ) شروع شد؛ وقتی تموم شد گزارشش رو می‌فرستم.", **reply_kwargs(msg))
+    recipients = list(dict.fromkeys(users if mode == "users" else groups if mode == "groups" else users + groups))
+    label = "گپ‌ها" if mode == "groups" else "پیوی کاربران" if mode == "users" else "کاربرها و گپ‌ها"
+    await msg.reply_text(f"📣 ارسال به {len(recipients):,} مقصد ({label}) شروع شد؛ وقتی تموم شد گزارشش رو می‌فرستم.", **reply_kwargs(msg))
     task = asyncio.create_task(_admin_broadcast_task(context.bot, msg.chat_id, recipients, msg.chat_id, msg.message_id))
     _GW_TASKS.add(task)
     task.add_done_callback(_GW_TASKS.discard)
@@ -9131,10 +9139,11 @@ async def admin_broadcast_media(update, context):
     """مدیای ادمین وقتی توی حالت «پیام همگانی» باشه (بقیه‌ی حالت‌ها دست نمی‌خورن)."""
     if not update.message or not admin_only(update.effective_user.id):
         return
-    if context.user_data.get("admin_action") != "broadcast":
+    action = context.user_data.get("admin_action", "")
+    if not str(action).startswith("broadcast"):
         return
     context.user_data.pop("admin_action", None)
-    await run_admin_broadcast(update, context)
+    await run_admin_broadcast(update, context, mode=str(action).split(":", 1)[1] if ":" in str(action) else "all")
     raise ApplicationHandlerStop
 
 
@@ -9194,8 +9203,8 @@ async def admin_text(update, context):
             return True
         finally:
             session.close()
-    if action == "broadcast":
-        await run_admin_broadcast(update, context); return
+    if str(action).startswith("broadcast"):
+        await run_admin_broadcast(update, context, mode=str(action).split(":", 1)[1] if ":" in str(action) else "all"); return
     if action == "giftall":
         cleaned = text.replace(",", "").replace("،", "").strip()
         if not cleaned.lstrip("-").isdigit():
