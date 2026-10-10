@@ -1195,6 +1195,12 @@ async def handle_jail_memory_text(update,context):
         if not await _active_jail(session,user):
             context.user_data.pop('jail_memory_wait',None); return False
         text=update.message.text.strip()
+        # هر کاربر در کل فقط یک بار اجازه‌ی نوشتن خاطره روی دیوار زندان را دارد.
+        already = session.query(JailWallMemory).filter(JailWallMemory.author_id == user.telegram_id).first()
+        if already:
+            context.user_data.pop('jail_memory_wait',None)
+            await update.message.reply_text('🧱 تو قبلاً خاطره‌ات را روی دیوار زندان نوشته‌ای؛ هر کاربر فقط یک بار می‌تواند بنویسد.', **reply_kwargs(update.message))
+            return True
         if len(text)<2 or len(text)>300:
             await update.message.reply_text("❌ خاطره باید بین ۲ تا ۳۰۰ کاراکتر باشد.",**reply_kwargs(update.message)); return True
         session.add(JailWallMemory(author_id=user.telegram_id,text=text,created_at=now_utc()))
@@ -6687,7 +6693,6 @@ def apply_bank_interest(account, session):
 
 def bank_keyboard(account):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton('👤 مشاهده حساب تلگرام',url=f'tg://user?id={account.user_id}')],
         [InlineKeyboardButton('➖ برداشت',callback_data=f'bank:withdraw:{account.user_id}'), InlineKeyboardButton('➕ واریز',callback_data=f'bank:deposit:{account.user_id}')],
         [InlineKeyboardButton('💳 کارت به کارت روبی🦊',callback_data=f'bank:transfer:{account.user_id}'), InlineKeyboardButton('📃 تراکنش‌ها',callback_data=f'bank:transactions:{account.user_id}')],
         [InlineKeyboardButton('➿ تغییر حساب روبی',callback_data=f'bank:change:{account.user_id}')],
@@ -9797,10 +9802,14 @@ async def _reply_skin_photo(msg,path,caption,markup):
         if sent.photo:_SKIN_FILE_IDS[path]=sent.photo[-1].file_id
     except Exception:pass
 
-async def _send_roobam_panel(msg,text,label,uid,username,bot=None,skin_path=None):
+async def _send_roobam_panel(msg,text,label,uid,username,bot=None,skin_path=None,profile_locked=None):
     """همان متن روبام/روباش را با عکس پروفایل تلگرامی کاربر نشان می‌دهد؛ اگر عکس قابل دریافت نباشد، متن بدون عکس ارسال می‌شود."""
     label=strip_mentions(label) or str(uid)
-    attempts=[InlineKeyboardMarkup([[InlineKeyboardButton(label,url=f"tg://user?id={uid}")]])]
+    if profile_locked is not None:
+        buttons = [[InlineKeyboardButton('🔓 باز کردن پروفایل' if profile_locked else '🔒 قفل کردن پروفایل', callback_data='profilelock:toggle')]]
+        attempts=[InlineKeyboardMarkup(buttons)]
+    else:
+        attempts=[InlineKeyboardMarkup([[InlineKeyboardButton(label,url=f"tg://user?id={uid}")]])]
     if username:
         attempts.append(InlineKeyboardMarkup([[InlineKeyboardButton(label,url=f"https://t.me/{username}")]]))
     attempts.append(None)
@@ -9861,6 +9870,7 @@ MARRIAGE_GIFTS = {
     "chocolate": ("🍫", "شکلات"),
 }
 MARRIAGE_ACTIONS = {"حال", "بوسه", "بغل"}
+MARRIAGE_GIFT_PRICES = {"gift": 100_000, "bouquet": 200_000, "chocolate": 250_000, "ring": 300_000}
 MARRIAGE_TEMPLATES = {
     "حال": [
         "💞 {actor} به {target_word} حال داد 💝",
@@ -9921,7 +9931,8 @@ def marriage_return_gift(session, m):
     if marriage_gift_item(session, m.male_id, m.gift_item_key): return False
     emoji = m.gift_emoji or MARRIAGE_GIFTS[m.gift_item_key][0]
     cat, key = marriage_gift_catalog(emoji)
-    if not key: return False
+    if not key:
+        cat, key = 'marriage', m.gift_item_key
     session.add(RubyEmojiItem(owner_id=m.male_id, item_key=key, emoji=emoji, category=cat))
     return True
 
@@ -10028,7 +10039,7 @@ def marriage_panel(session, viewer):
                 f"🦊 روبی : {user_mention(viewer)}\n"
                 "┘─ ❗️ وضعیت : مجرد\n\n"
                 "✨ هنوز سینگل و تنهایی در شب کنار گرگ های وحشی به سر میبری😢\n"
-                "┘─ ❓ جهت خواستگاری از یکی از دوستان روبی خود از گزینه های زیر استفاده کنید ⬇️", None)
+                "┘─ ❓ هدیه را انتخاب و خریداری کن؛ سپس روی پیام خانم موردنظر ریپلای کن و «ازدواج» بنویس.", None)
     spouse_id = marriage_spouse_id(m, viewer.telegram_id); spouse = session.get(User, spouse_id)
     rel = int(m.relation or 0)
     gift = m.gift_emoji
@@ -10138,10 +10149,33 @@ async def marriage_callback(update, context):
             if active_marriage(session,uid): return await q.answer("💍 تو همین حالا متاهلی.",show_alert=True)
             if pending_marriage_for(session,uid): return await q.answer("⏳ یک درخواست ازدواج در انتظار پاسخ است.",show_alert=True)
             item=marriage_gift_item(session,uid,gift_key)
-            if not item: return await q.answer(f"❌ {MARRIAGE_GIFTS[gift_key][0]} را اول از ایموجی روبی خریداری کن.",show_alert=True)
+            if not item:
+                price=MARRIAGE_GIFT_PRICES[gift_key]
+                emoji,label=MARRIAGE_GIFTS[gift_key]
+                await q.answer()
+                await _edit(f"💕 فروشگاه هدیه خواستگاری\n\n{emoji} {label}\n💰 قیمت: {price:,} روب‌پوینت\n🪙 موجودی تو: {int(user.fox_points or 0):,}\n\nخرید این هدیه را تأیید می‌کنی؟", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('✅ خرید و ادامه',callback_data=f'marriage:buy:{gift_key}'),InlineKeyboardButton('❌ لغو',callback_data='marriage:cancel:0:x')]]))
+                return
             context.user_data['marriage_proposal']={'gift_key':gift_key,'emoji':item.emoji}
             await q.answer()
-            await _edit("💕 ازدواج روبی 💍\n\n🔺 خواستگاری روبی | انتخاب همدم زندگی\n\n❗️ خانمی👩🏻‍🦰 خود را جهت خواستگاری انتخاب کنید :\n┘─ ❓ آیدی عددی یا @شناسه کاربری خانم را بفرست.\n(تنها دوستان مجرد و دارای سطح ۳ به بالا نمایش داده می‌شوند)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('❌ لغو',callback_data='marriage:cancel:0:x')]]))
+            await _edit("💕 ازدواج روبی 💍\n\n🔺 خواستگاری روبی | انتخاب همدم زندگی\n\n❗️ روی پیام کاربر موردنظر ریپلای کن و دستور «ازدواج» را بفرست؛ یا آیدی عددی/@شناسه را در همین مرحله وارد کن.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('❌ لغو',callback_data='marriage:cancel:0:x')]]))
+            return
+        if action=='buy':
+            gift_key=parts[2] if len(parts)>2 else ''
+            if gift_key not in MARRIAGE_GIFTS: return await q.answer('هدیه نامعتبر است.',show_alert=True)
+            if user.fox_gender!='male': return await q.answer('⛔ فقط روباه مرد می‌تواند خواستگاری کند.',show_alert=True)
+            if active_marriage(session,uid) or pending_marriage_for(session,uid): return await q.answer('در حال حاضر امکان خواستگاری نداری.',show_alert=True)
+            price=MARRIAGE_GIFT_PRICES[gift_key]
+            if int(user.fox_points or 0)<price: return await q.answer(f'روب‌پوینت کافی نیست؛ قیمت {price:,} است.',show_alert=True)
+            emoji,label=MARRIAGE_GIFTS[gift_key]
+            cat,item_key=marriage_gift_catalog(emoji)
+            if not item_key:
+                cat,item_key='marriage',gift_key
+            user.fox_points-=price
+            session.add(RubyEmojiItem(owner_id=uid,item_key=item_key,emoji=emoji,category=cat))
+            session.commit()
+            context.user_data['marriage_proposal']={'gift_key':gift_key,'emoji':emoji}
+            await q.answer('✅ خرید انجام شد؛ حالا خواستگاری را ادامه بده.',show_alert=True)
+            await _edit(f"💕 هدیه خریداری شد!\n\n🎁 {emoji} {label}\n💰 پرداخت‌شده: {price:,} روب‌پوینت\n🪙 موجودی: {int(user.fox_points or 0):,}\n\nبرای خواستگاری، روی پیام کاربر موردنظر ریپلای کن و «ازدواج» بنویس یا آیدی عددی/@شناسه را بفرست.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('❌ لغو',callback_data='marriage:cancel:0:x')]]))
             return
         if action=='cancel':
             context.user_data.pop('marriage_proposal',None); await q.answer('لغو شد.');
@@ -10155,7 +10189,6 @@ async def marriage_callback(update, context):
                 return await q.answer('❌ شرایط ازدواج دیگر برقرار نیست.',show_alert=True)
             if active_marriage(session,male.telegram_id) or active_marriage(session,female.telegram_id) or pending_marriage_for(session,male.telegram_id) or pending_marriage_for(session,female.telegram_id):
                 return await q.answer('❌ یکی از دو نفر دیگر شرایط ازدواج ندارد.',show_alert=True)
-            if not get_friendship(session,male.telegram_id,female.telegram_id): return await q.answer('❌ این کاربر دوست روباهیو تو نیست.',show_alert=True)
             if getattr(female,'marriage_lock_until',None) and not admin_only(int(female.telegram_id)) and now_utc()<aware(female.marriage_lock_until): return await q.answer('⏳ این کاربر فعلاً از ازدواج دوباره محروم است.',show_alert=True)
             item=marriage_gift_item(session,male.telegram_id,gift_key)
             if not item: return await q.answer('❌ هدیه در انبارت نیست.',show_alert=True)
@@ -10433,8 +10466,11 @@ async def handle_marriage_text(update, context):
         session=get_session()
         try:
             male=get_or_create_user(session,update.effective_user)
-            raw=clean_friend_input(text)
-            target=await resolve_friend_target(context.bot,raw)
+            if text.strip() == 'ازدواج' and update.message.reply_to_message and update.message.reply_to_message.from_user:
+                target = update.message.reply_to_message.from_user
+            else:
+                raw=clean_friend_input(text)
+                target=await resolve_friend_target(context.bot,raw)
             if not target: await update.message.reply_text('❌ کاربر پیدا نشد. آیدی عددی یا @شناسه درست بفرست.'); return True
             female=session.get(User,target.id)
             if not female:
@@ -10443,7 +10479,6 @@ async def handle_marriage_text(update, context):
             if female.fox_gender!='female': await update.message.reply_text('❌ این کاربر روباه زن نیست.'); return True
             if int(female.level or 1)<MARRIAGE_UNLOCK_LEVEL: await update.message.reply_text('❌ سطح این کاربر برای ازدواج کافی نیست.'); return True
             if target.id==male.telegram_id or active_marriage(session,target.id) or pending_marriage_for(session,target.id): await update.message.reply_text('❌ این کاربر در حال حاضر شرایط ازدواج ندارد.'); return True
-            if not get_friendship(session,male.telegram_id,target.id): await update.message.reply_text('❌ فقط می‌توانی از بین دوستان روباهیو خودت خواستگاری کنی.'); return True
             if getattr(male,'marriage_lock_until',None) and not admin_only(int(male.telegram_id)) and now_utc()<aware(male.marriage_lock_until): await update.message.reply_text(f'⏳ تا {format_duration(int((aware(male.marriage_lock_until)-now_utc()).total_seconds()))} دیگر نمی‌توانی ازدواج کنی.'); return True
             if getattr(female,'marriage_lock_until',None) and not admin_only(int(female.telegram_id)) and now_utc()<aware(female.marriage_lock_until): await update.message.reply_text('⏳ این کاربر فعلاً از ازدواج دوباره محروم است.'); return True
             if not marriage_gift_item(session,male.telegram_id,prop['gift_key']): await update.message.reply_text('❌ هدیه‌ای که انتخاب کردی دیگر در انبارت نیست.'); return True
@@ -10570,20 +10605,12 @@ async def handle_marriage_text(update, context):
                 except Exception: pass
         # متن اقدام + میزان رابطه با تصویر ازدواج روبی، دقیقاً به همان پیام همسر ریپلای می‌شود.
         try:
-            if os.path.exists(MARRIAGE_PANEL_IMAGE):
-                with open(MARRIAGE_PANEL_IMAGE,'rb') as fh:
-                    await context.bot.send_photo(chat_id=update.effective_chat.id,photo=fh,caption=msg,reply_to_message_id=reply.message_id)
-            else:
-                await update.message.reply_text(msg,reply_to_message_id=reply.message_id)
+            await update.message.reply_text(msg, reply_to_message_id=reply.message_id)
         except Exception:
             await update.message.reply_text(msg,reply_to_message_id=reply.message_id)
         # اطلاع خصوصی به همسر هم ارسال می‌شود.
         try:
-            if os.path.exists(MARRIAGE_PANEL_IMAGE):
-                with open(MARRIAGE_PANEL_IMAGE,'rb') as fh:
-                    await context.bot.send_photo(chat_id=spouse.telegram_id,photo=fh,caption=msg)
-            else:
-                await context.bot.send_message(spouse.telegram_id,msg)
+            await context.bot.send_message(spouse.telegram_id, msg)
         except Exception:
             pass
         return True
@@ -10608,13 +10635,40 @@ async def baby_command(update, context):
         session.close()
     await baby_send_panel(update.message,text,kb)
 
+
+async def profile_lock_callback(update, context):
+    q=update.callback_query
+    if not q or not q.from_user: return
+    session=get_session()
+    try:
+        user=session.get(User,q.from_user.id)
+        if not user: return await q.answer('پروفایل پیدا نشد.',show_alert=True)
+        user.fox_profile_locked = 0 if int(user.fox_profile_locked or 0) else 1
+        session.commit(); locked=bool(user.fox_profile_locked)
+        await q.answer('🔒 پروفایل قفل شد.' if locked else '🔓 پروفایل باز شد.',show_alert=True)
+        # کیبورد پنل به‌روز شود، بدون دست‌کاری متن/عکس
+        rows=[]
+        if q.message.reply_markup:
+            for row in q.message.reply_markup.inline_keyboard:
+                new=[]
+                for b in row:
+                    if b.callback_data=='profilelock:toggle':
+                        new.append(InlineKeyboardButton('🔓 باز کردن پروفایل' if locked else '🔒 قفل کردن پروفایل',callback_data='profilelock:toggle'))
+                    else: new.append(b)
+                rows.append(new)
+        await q.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(rows))
+    finally: session.close()
+
 async def roobam_command(update,context):
     if not await require_membership(update,context):return
     target=update.message.reply_to_message.from_user if update.message.reply_to_message and update.message.reply_to_message.from_user else update.effective_user
     target_id=target.id;target_username=getattr(target,'username',None)
     session=get_session()
     try:
-        user=get_or_create_user(session,target);rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0);ref_count=session.query(Referral).filter(Referral.referrer_id==user.telegram_id,Referral.status=='approved').count();ref_rank=session.query(Referral.referrer_id).filter(Referral.status=='approved').group_by(Referral.referrer_id).having(__import__('sqlalchemy').func.count(Referral.id)>ref_count).count()+1
+        user=get_or_create_user(session,target)
+        if update.message.reply_to_message and (update.message.text or '').strip().startswith('روباش') and int(getattr(user,'fox_profile_locked',0) or 0):
+            await update.message.reply_text('این کاربر پروفایل خود را قفل کرده است، از او بخواهید که پروفایلش را باز کند. 🔒🦾', **reply_kwargs(update.message)); return
+        rp=ranking_position(session,'fox_points',user.fox_points or 0);rr=ranking_position(session,'fox_claim_count',user.fox_claim_count or 0);rs=ranking_position(session,'fox_rescued_count',user.fox_rescued_count or 0);ref_count=session.query(Referral).filter(Referral.referrer_id==user.telegram_id,Referral.status=='approved').count();ref_rank=session.query(Referral.referrer_id).filter(Referral.status=='approved').group_by(Referral.referrer_id).having(__import__('sqlalchemy').func.count(Referral.id)>ref_count).count()+1
         lvl=max(1,int(user.level or 1)); claim_count=int(user.fox_claim_count or 0); current_req=user_level_requirement(lvl); user_req=user_level_requirement(lvl+1); user_progress=max(0,claim_count-current_req); needed=max(0,user_req-current_req); n=15; f=n if needed==0 or user_progress>=needed else min(n,int(user_progress/needed*n)); bar='▰'*f+'▱'*(n-f)
         text=(f"╮──「 🦊 پروفایل روبی 🦊 」\n\n┐─ 👤 کاربر : {user_mention(user)}\n‏┘─ 🪪 آیدی : {user.telegram_id}\n\n"+f"┐─ 🦊 روباه : {user.fox_name or 'مکار'}\n┘─ ⚧ جنسیت روباه : {fox_gender_label(user.fox_gender)}\n\n"+f"┐─ 💰 روب پوینت ها : {int(user.fox_points or 0):,} 🪙\n┘─ 🎖️ رتبه ({rp:,})\n"+f"┐─ 🐾 روب روب ها : {int(user.fox_claim_count or 0):,}\n┘─ 🎖️ رتبه ({rr:,})\n\n"+f"┐─ 🦊 روباه های زخمی نجات یافته : {int(user.fox_rescued_count or 0):,}\n┘─ 🎖️ رتبه ({rs:,})\n\n"+f"┘─ 🦉 جغدهای شکارشده : {int(user.owl_catch_count or 0):,}\n\n"+f"┘─ 👑 رتبه رفرال ها : #{ref_rank:,} | {ref_count:,} نفر دعوت تاییدشده\n\n"+education_profile_line(session,user.telegram_id)+f"\n\n╰─ 💍 وضعیت ازدواج : {('متاهل'+active_marriage(session,user.telegram_id).gift_emoji) if active_marriage(session,user.telegram_id) else 'مجرد'}\n╯─ ⭐️ سطح : {lvl} | {max(0, needed-user_progress):,} / {needed:,} {bar}")
         if int(user.telegram_id) in ADMIN_IDS:
@@ -10623,7 +10677,8 @@ async def roobam_command(update,context):
         _act=vip_active_skins(user);_sk=_act[-1] if _act else ''
         skin_path=vip_image_path(_sk,user.fox_gender) if _sk and (user.fox_gender or '') in ('male','female') else None
     finally:session.close()
-    await _send_roobam_panel(update.message,text,label,target_id,target_username,context.bot,skin_path=skin_path)
+    own_profile = (not (update.message.reply_to_message and update.message.reply_to_message.from_user) and (update.message.text or '').strip().startswith('روبام'))
+    await _send_roobam_panel(update.message,text,label,target_id,target_username,context.bot,skin_path=skin_path,profile_locked=int(user.fox_profile_locked or 0) if own_profile else None)
 
 # ---------- دوستان روباهیو 🦊 ----------
 FRIEND_LIMIT = 3
@@ -14961,6 +15016,7 @@ def main():
     app.add_handler(CallbackQueryHandler(lucky_bag_button,pattern=r"^luckybag:(?:open|skip):\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|potion|rest):\d+$"))
     app.add_handler(CallbackQueryHandler(jail_button,pattern=r"^jail:(memory|pay|bank|bankcancel):\d+$"))
+    app.add_handler(CallbackQueryHandler(profile_lock_callback,pattern=r"^profilelock:toggle$"))
     app.add_handler(CallbackQueryHandler(smuggling_button,pattern=r"^smuggle:(plus|minus|all|confirm|claim|oplus|ominus|oall|oconfirm|pickfox|pickowl|menu):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(friend_decision_button,pattern=r"^friend(?:accept|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(friend_request_button,pattern=r"^friend:(?:home|add|view|points|msg|remove):\d+(?::\d+)?$"))

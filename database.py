@@ -63,6 +63,7 @@ class User(Base):
     fox_gender = Column(String, nullable=False, default='')  # '' نامشخص، 'male' مرد، 'female' زن
     fox_skin = Column(String, nullable=False, default='')  # active/purchased fox skin key, e.g. lightning
     fox_skin_active = Column(Integer, nullable=False, default=0)
+    fox_profile_locked = Column(Integer, nullable=False, default=0)
     fox_skins_active = Column(String, nullable=True, default=None)  # کلیدهای اسکین‌های فعال (با کاما)؛ None = داده‌ی قدیمی
     marriage_lock_until = Column(DateTime(timezone=True), nullable=True)
     potion_count = Column(Integer, nullable=False, default=0)
@@ -656,11 +657,12 @@ class ChatBridgeMessage(Base):
 
 
 class BridgeBan(Base):
-    """کاربرانی که پشتیبانی از «روباهیو وصل شو» محروم کرده."""
+    """محرومیت از روباهیو وصل شو؛ expires_at=None یعنی دائمی."""
     __tablename__ = 'bridge_bans'
     user_id = Column(BigInteger, primary_key=True)
     banned_by = Column(BigInteger, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=True)
 
 
 def init_db():
@@ -668,6 +670,10 @@ def init_db():
     with engine.begin() as conn:
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_gift_code_user ON gift_code_redemptions(code_id, user_id)"))
     inspector = inspect(engine)
+    if 'bridge_bans' in inspector.get_table_names():
+        bridge_ban_cols = {c['name'] for c in inspector.get_columns('bridge_bans')}
+        if 'expires_at' not in bridge_ban_cols:
+            with engine.begin() as conn: conn.execute(text(f'ALTER TABLE bridge_bans ADD COLUMN expires_at {DT_SQL_TYPE}'))
     cols = {c['name'] for c in inspector.get_columns('users')}
     injured_cols = {c['name'] for c in inspector.get_columns('injured_foxes')}
     bank_cols = {c['name'] for c in inspector.get_columns('bank_accounts')}
@@ -684,6 +690,7 @@ def init_db():
                     conn.execute(text(f'ALTER TABLE education_progress ADD COLUMN {name} {definition}'))
     additions = {
         'total_earned': 'INTEGER NOT NULL DEFAULT 0',
+        'fox_profile_locked': 'INTEGER NOT NULL DEFAULT 0',
         'name_flag': "VARCHAR NOT NULL DEFAULT ''",
         'name_emoji': "VARCHAR NOT NULL DEFAULT ''",
         'emoji_storage_capacity': 'INTEGER NOT NULL DEFAULT 3',

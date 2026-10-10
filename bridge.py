@@ -349,20 +349,50 @@ def _json(raw):
 def _load_bans():
     s = get_session()
     try:
-        ids = {r[0] for r in s.query(BridgeBan.user_id).all()}
+        now = datetime.now(timezone.utc)
+        rows = s.query(BridgeBan).all()
+        ids = set()
+        for row in rows:
+            expiry = row.expires_at
+            if expiry is None or (expiry.replace(tzinfo=timezone.utc) if expiry.tzinfo is None else expiry) > now:
+                ids.add(row.user_id)
+            else:
+                s.delete(row)
+        s.commit()
     finally:
         s.close()
     _BANNED.clear()
     _BANNED.update(ids)
 
 
-def _set_ban(uid: int, banned: bool, by: int):
+def _is_banned(uid):
+    if uid not in _BANNED: return False
+    s = get_session()
+    try:
+        row = s.get(BridgeBan, int(uid))
+        if not row:
+            _BANNED.discard(uid); return False
+        exp = row.expires_at
+        if exp is not None:
+            exp = exp.replace(tzinfo=timezone.utc) if exp.tzinfo is None else exp
+            if exp <= datetime.now(timezone.utc):
+                s.delete(row); s.commit(); _BANNED.discard(uid); return False
+        return True
+    finally: s.close()
+
+def _set_ban(uid: int, banned: bool, by: int, seconds=None):
     s = get_session()
     try:
         row = s.get(BridgeBan, uid)
-        if banned and not row:
-            s.add(BridgeBan(user_id=uid, banned_by=by))
-        elif not banned and row:
+        if banned:
+            expiry = datetime.now(timezone.utc) + timedelta(seconds=int(seconds)) if seconds else None
+            if not row:
+                s.add(BridgeBan(user_id=uid, banned_by=by, expires_at=expiry))
+            else:
+                row.banned_by = by
+                row.created_at = datetime.now(timezone.utc)
+                row.expires_at = expiry
+        elif row:
             s.delete(row)
         s.commit()
     finally:
@@ -422,7 +452,7 @@ async def handle_text(update, context) -> bool:
     if not chat or not user:
         return False
     reply = {"reply_to_message_id": msg.message_id}
-    if user.id in _BANNED:
+    if _is_banned(user.id):
         await msg.reply_text(BANNED_NOTICE, **reply)
         return True
     if chat.type not in ("group", "supergroup"):
@@ -537,7 +567,8 @@ async def _broadcast(bot, bid):
 async def button(update, context):
     q = update.callback_query
     try:
-        _, action, raw = q.data.split(":")
+        parts = q.data.split(":")
+        _, action, raw = parts[:3]
         rid = int(raw)
     except Exception:  # noqa: BLE001
         await q.answer()
@@ -552,9 +583,36 @@ async def button(update, context):
     elif action == "end":
         await _end_button(q, context, rid)
     elif action == "rep":
-        await _report_bridge(q, context, rid)
+        await q.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ بله، گزارش کن", callback_data=f"brg:repyes:{rid}"), InlineKeyboardButton("❌ انصراف", callback_data="brg:repcancel:0")]]))
+        await q.answer("گزارش این گفت‌وگو را تأیید کن.", show_alert=True)
     elif action == "rm":
+        await q.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ بله، گزارش کن", callback_data=f"brg:rmyes:{rid}"), InlineKeyboardButton("❌ انصراف", callback_data="brg:repcancel:0")]]))
+        await q.answer("گزارش این پیام را تأیید کن.", show_alert=True)
+    elif action == "repyes":
+        await _report_bridge(q, context, rid)
+    elif action == "rmyes":
         await _report_message(q, context, rid)
+    elif action == "repcancel":
+        await q.answer("گزارش لغو شد.")
+        try: await q.edit_message_reply_markup(reply_markup=None)
+        except Exception: pass
+    elif action == "dur":
+        seconds = int(q.data.split(":")[3])
+        if q.from_user.id not in ADMIN_IDS:
+            await q.answer("این دکمه فقط برای پشتیبانیه.", show_alert=True); return
+        _set_ban(rid, True, q.from_user.id, seconds if seconds else None)
+        await q.answer("🚫 محرومیت ثبت شد." if seconds else "🚫 محرومیت دائمی ثبت شد.", show_alert=True)
+        try: await q.edit_message_reply_markup(reply_markup=None)
+        except Exception: pass
+    elif action == "custom":
+        if q.from_user.id not in ADMIN_IDS:
+            await q.answer("این دکمه فقط برای پشتیبانیه.", show_alert=True); return
+        context.user_data["bridge_custom_ban_uid"] = rid
+        await q.answer("مدت را به ساعت بفرست (مثلاً 36).", show_alert=True)
+        try: await context.bot.send_message(chat_id=q.from_user.id, text=f"⏳ مدت محرومیت دلخواه برای کاربر {rid} را به ساعت بفرست (۱ تا ۸۷۶۰).")
+        except Exception: pass
+    elif action == "back":
+        await q.answer("از دکمه محروم کردن دوباره مدت را انتخاب کن.", show_alert=True)
     elif action in ("ban", "unban", "dismiss"):
         await _support_decision(q, context, action, rid)
     else:
@@ -768,6 +826,17 @@ async def _end_button(q, context, bid):
 async def _support_decision(q, context, action, uid):
     if q.from_user.id not in ADMIN_IDS:
         await q.answer("این دکمه فقط برای پشتیبانیه.", show_alert=True)
+        return
+    if action == "duration":
+        # مدت در بخش بعدی با دکمه‌های اختصاصی انتخاب می‌شود.
+        return
+    if action == "ban":
+        await q.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("۱ ساعت", callback_data=f"brg:dur:{uid}:3600"), InlineKeyboardButton("۵ ساعت", callback_data=f"brg:dur:{uid}:18000")],
+            [InlineKeyboardButton("۱۵ ساعت", callback_data=f"brg:dur:{uid}:54000"), InlineKeyboardButton("دلخواه", callback_data=f"brg:custom:{uid}")],
+            [InlineKeyboardButton("دائمی", callback_data=f"brg:dur:{uid}:0"), InlineKeyboardButton("↩️ برگشت", callback_data="brg:back:0")]
+        ]))
+        await q.answer("مدت محرومیت را انتخاب کن.", show_alert=True)
         return
     if action == "dismiss":
         await q.answer("گزارش رد شد.")
@@ -992,7 +1061,7 @@ async def _relay_one(bot, info, chat, user, msg, kind):
         s.close()
 
     # محروم‌شده‌ها پیامشون رد نمی‌شه (و یه پیام قابل‌مشاهده می‌گیرن)
-    if user.id in _BANNED:
+    if _is_banned(user.id):
         if time.time() - _ban_notice.get(user.id, 0) > 600:
             _ban_notice[user.id] = time.time()
             await _notice(bot, chat.id, msg, BANNED_NOTICE, user.id)
@@ -1135,6 +1204,21 @@ async def banner_test(update, context):
             _IMG["file_id"] = m.photo[-1].file_id
     except Exception as e:  # noqa: BLE001
         await msg.reply_text(f"❌ ارسال عکس خطا داد:\n{type(e).__name__}: {e}\n\nمنبع عکس: {origin}")
+
+
+
+async def custom_ban_duration_message(update, context):
+    uid = context.user_data.get("bridge_custom_ban_uid")
+    if not uid or not update.effective_user or update.effective_user.id not in ADMIN_IDS or not update.effective_message or not update.effective_message.text:
+        return False
+    raw = update.effective_message.text.strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
+    if not raw.isdigit() or not (1 <= int(raw) <= 8760):
+        await update.effective_message.reply_text("❌ تعداد ساعت باید عددی بین ۱ تا ۸۷۶۰ باشد.")
+        return True
+    _set_ban(int(uid), True, update.effective_user.id, int(raw) * 3600)
+    context.user_data.pop("bridge_custom_ban_uid", None)
+    await update.effective_message.reply_text(f"✅ محرومیت کاربر {uid} به مدت {int(raw)} ساعت ثبت شد.")
+    return True
 
 
 def register(app):
