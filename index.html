@@ -1514,7 +1514,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     var rows = plinko ? plinko.rows : 14;
     var s = (W - 14) / (rows + 1), dy = s * 1.04, top = s * 1.5, bh = s * 1.55;
     var bTop = top + (rows - 1) * dy + s * 0.75;
-    return { W: W, H: Math.ceil(bTop + bh + 10), s: s, dy: dy, top: top, rows: rows, pr: Math.max(2.4, s * 0.15), br: Math.max(5, s * 0.3), bTop: bTop, bh: bh };
+    return { W: W, H: Math.ceil(bTop + bh + 10), s: s, dy: dy, top: top, rows: rows, pr: Math.max(2.4, s * 0.15), br: Math.max(6.5, s * 0.42), bTop: bTop, bh: bh };
   }
   function plinkoPeg(g, n, k){ return { x: g.W / 2 + (k - n / 2) * g.s, y: g.top + n * g.dy }; }
   function plinkoSlotX(g, k){ return g.W / 2 + (k - g.rows / 2) * g.s; }
@@ -1630,7 +1630,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       var r = plinko.risks[key], used = (plinko.daily_plays && plinko.daily_plays[key]) || 0;
       var b = document.createElement("button"); b.type = "button";
       var t = document.createElement("b"); t.textContent = r.title;
-      var sp = document.createElement("span"); sp.textContent = r.sub + " · " + fa(used) + "/" + fa(r.daily_limit) + " امروز";
+      var sp = document.createElement("span"); sp.textContent = r.sub + " · " + fa(used) + "/" + (plinko.unlimited ? "∞" : fa(r.daily_limit)) + " امروز";
       b.appendChild(t); b.appendChild(sp);
       if (key === plinkoRisk) b.className = "on";
       b.onclick = function(){ if (plinkoBusy) return; plinkoRisk = key; plinkoLanded = -1; hidePlinkoResult(); drawPlinkoRisk(); drawPlinkoMeta(); plinkoDraw(); };
@@ -1672,9 +1672,9 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     row("🧮 دریافتی", fa(r.amount) + " × " + fa(r.mult) + " = " + fa(r.payout));
     row(win ? "📈 سود خالص" : (even ? "➖ سود و زیان" : "📉 زیان خالص"), even ? "۰" : fa(Math.abs(r.profit)) + " روب‌پوینت", win ? "pos" : (even ? "" : "neg"));
     row("💼 موجودی کیف پول", fa(r.balance) + " روب‌پوینت");
-    row("🎯 سهمیه امروز", fa(r.daily_used) + "/" + fa(r.daily_limit));
+    row("🎯 سهمیه امروز", fa(r.daily_used) + "/" + (r.unlimited ? "∞" : fa(r.daily_limit)));
     var again = $("prAgain"); again.textContent = "🔁 پرتاب دوباره (" + fa(r.amount) + ")";
-    again.disabled = r.daily_used >= r.daily_limit;
+    again.disabled = !r.unlimited && r.daily_used >= r.daily_limit;
     $("pResult").style.display = "";
   }
   function loadPlinko(){
@@ -1685,7 +1685,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       if (first && d.default_mode && d.risks[d.default_mode]) plinkoRisk = d.default_mode;
       if (!d.risks[plinkoRisk]) plinkoRisk = Object.keys(d.risks)[0];
       $("pBal").textContent = fa(d.balance);
-      var lims = Object.keys(d.risks).map(function(k){ return d.risks[k].title + " " + fa(d.risks[k].daily_limit); }).join("، ");
+      var lims = Object.keys(d.risks).map(function(k){ return d.risks[k].title + " " + (d.unlimited ? "∞" : fa(d.risks[k].daily_limit)); }).join("، ");
       $("pRule").textContent = d.disabled ? "🛠 کازینو فعلاً غیرفعاله." :
         d.unlocked ? ("حداقل " + fa(d.min_entry) + " و حداکثر " + fa(d.max_entry) + " روب‌پوینت. سهمیه روزانه: " + lims + " بار؛ هر حالت جداگانه و هر روز از نو.") :
         ("🔒 کازینو از سطح " + fa(d.unlock_level) + " باز می‌شه. (سطح تو: " + fa(d.level) + ")");

@@ -2385,6 +2385,13 @@ def _plk_state(context, owner_id):
     return st
 
 
+def _plk_reply_kw(q):
+    """همه‌ی پیام‌های پلینکو روی پیام کاربر ریپلای می‌شن (اگه اون پیام نبود، روی پنل)."""
+    m = q.message
+    rt = getattr(m, 'reply_to_message', None)
+    return {'reply_to_message_id': (rt.message_id if rt else m.message_id), 'allow_sending_without_reply': True}
+
+
 def plinko_guard(session, user):
     """شرط‌های کازینو (همون بمب): بن، زندان، لول، مریضی. متن خطا یا None."""
     if int(getattr(user, 'is_banned', 0) or 0):
@@ -2407,7 +2414,7 @@ def plinko_guard(session, user):
 def plinko_panel(owner_id, st, points, used):
     mode = plinko_core.MODES[st['mode']]
     amount = st.get('amount')
-    lim = mode['daily_limit']
+    lim = '∞' if admin_only(owner_id) else mode['daily_limit']
     txt = ("🔴 پلینکو 🦊\n\n"
            f"🎛 حالت: {mode['title']} ({mode['sub']})\n"
            f"🎯 امروز: {used}/{lim} بار\n"
@@ -2467,7 +2474,7 @@ async def plinko_callback(update, context):
             try: await (msg or q.message).edit_text(txt, reply_markup=kb)
             except Exception: pass
         else:
-            await context.bot.send_message(q.message.chat_id, txt, reply_markup=kb)
+            await context.bot.send_message(q.message.chat_id, txt, reply_markup=kb, **_plk_reply_kw(q))
 
     if action == 'back':
         context.user_data.pop('plinko', None)
@@ -2571,7 +2578,8 @@ async def plinko_play(q, context, owner_id, st, from_result=False):
             if amount < plinko_core.MIN_ENTRY or amount > plinko_core.MAX_ENTRY:
                 await q.answer("مبلغ شرط معتبر نیست.", show_alert=True); return
             used = plinko_core.daily_used(session, uid, mode_key)
-            if used >= mode['daily_limit']:
+            unlimited = admin_only(uid)
+            if not unlimited and used >= mode['daily_limit']:
                 await q.answer(f"⏰ سهمیهٔ امروز حالت «{mode['title']}» تموم شده ({mode['daily_limit']} بار). فردا دوباره بیا.", show_alert=True); return
             if int(user.fox_points or 0) < amount:
                 await q.answer(f"❌ روب‌پوینت کافی نداری. موجودی: {int(user.fox_points or 0):,}", show_alert=True); return
@@ -2598,7 +2606,7 @@ async def plinko_play(q, context, owner_id, st, from_result=False):
         calc = (f"🧮 {amount:,} × {mult:g} = {pay:,} روب‌پوینت\n" +
                 (f"📈 سود خالص: {profit:,}" if profit > 0 else (f"📉 زیان خالص: {abs(profit):,}" if profit < 0 else "➖ سود و زیان: صفر")))
         caption = (f"🔴 پلینکو · حالت {mode['title']}\n\n{plinko_core.result_text(amount, mult, pay)}\n\n{calc}\n"
-                   f"💼 موجودی کیف پول: {balance:,} روب‌پوینت\n🎯 امروز: {used + 1}/{mode['daily_limit']}")
+                   f"💼 موجودی کیف پول: {balance:,} روب‌پوینت\n🎯 امروز: {used + 1}/{'∞' if unlimited else mode['daily_limit']}")
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(f"🔁 دوباره ({amount:,})", callback_data=f"plk:again:{mode_key}-{amount}:{owner_id}")],
             [InlineKeyboardButton("⚙️ تنظیمات", callback_data=f"plk:panel:{owner_id}"), InlineKeyboardButton("🔙 کازینو", callback_data=f"plk:back:{owner_id}")],
@@ -2608,11 +2616,11 @@ async def plinko_play(q, context, owner_id, st, from_result=False):
         try:
             gif = await asyncio.to_thread(plinko_gif.build_gif, path, mode['mult'], amount, pay)
             bio = io.BytesIO(gif); bio.name = "plinko.gif"
-            sent = await context.bot.send_animation(chat_id, animation=bio, caption=caption, reply_markup=kb, width=plinko_gif.LW, height=plinko_gif.LH)
+            sent = await context.bot.send_animation(chat_id, animation=bio, caption=caption, reply_markup=kb, width=plinko_gif.OW, height=plinko_gif.OH, **_plk_reply_kw(q))
         except Exception as exc:
             logger.warning("plinko gif failed: %s", exc)
         if sent is None:
-            await context.bot.send_message(chat_id, caption, reply_markup=kb)
+            await context.bot.send_message(chat_id, caption, reply_markup=kb, **_plk_reply_kw(q))
         if not from_result:
             try: await q.message.delete()
             except Exception: pass

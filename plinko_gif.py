@@ -4,7 +4,9 @@ import math
 
 from PIL import Image, ImageDraw, ImageFont
 
-LW, LH = 360, 500          # اندازه‌ی نهایی
+LW, LH = 360, 500          # مختصات منطقی
+OUT = 1.5                  # ضریب بزرگ‌نمایی خروجی
+OW, OH = int(LW * OUT), int(LH * OUT)   # اندازه‌ی نهایی گیف (۵۴۰×۷۵۰)
 SS = 2                     # سوپرسمپل برای لبه‌های صاف
 ROWS = 14
 
@@ -40,8 +42,8 @@ class _Geom:
         self.s = (LW - 22) / (rows + 1)
         self.top = 66
         self.dy = 23.5
-        self.pr = 3.3
-        self.br = 6.6
+        self.pr = 3.6
+        self.br = 9.2
         self.b_top = self.top + (rows - 1) * self.dy + 16
         self.b_h = 34
 
@@ -171,7 +173,7 @@ def build_gif(path, mult_table, amount, payout, rows=ROWS):
         _ball(ov, x, y, g, trail)
         if banner:
             _banner(od, mult[slot], amount, payout)
-        im = Image.alpha_composite(im, ov).convert("RGB").resize((LW, LH), Image.LANCZOS)
+        im = Image.alpha_composite(im, ov).convert("RGB").resize((OW, OH), Image.LANCZOS)
         frames.append(im)
         durations.append(dur)
         trail.append((x, y))
@@ -202,8 +204,16 @@ def build_gif(path, mult_table, amount, payout, rows=ROWS):
         emit(x, y, 90, hot=True)
     emit(x, y, 3000, hot=True, banner=True)
 
+    # پالت مشترک برای همه‌ی فریم‌ها: بدون دیتر، ثابت و تمیز؛ ضمناً Pillow فقط ناحیه‌ی تغییرکرده رو ذخیره می‌کنه
+    n = len(frames)
+    sample = [frames[i] for i in sorted({0, n // 4, n // 2, (3 * n) // 4, n - 1})]
+    mosaic = Image.new("RGB", (OW, OH * len(sample)))
+    for i, fr in enumerate(sample):
+        mosaic.paste(fr, (0, i * OH))
+    pal = mosaic.quantize(colors=255, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    qframes = [fr.quantize(palette=pal, dither=Image.Dither.NONE) for fr in frames]
     buf = io.BytesIO()
-    frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:], duration=durations, loop=0, optimize=False, disposal=1)
+    qframes[0].save(buf, format="GIF", save_all=True, append_images=qframes[1:], duration=durations, loop=0, optimize=False, disposal=1)
     return buf.getvalue()
 
 

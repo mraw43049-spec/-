@@ -1123,6 +1123,7 @@ def plinko_state(tg_user: dict = Depends(current_telegram_user)):
             "default_mode": _pk.DEFAULT_MODE,
             "risks": {k: {"title": v["title"], "sub": v["sub"], "mult": v["mult"], "daily_limit": v["daily_limit"]} for k, v in _pk.MODES.items()},
             "daily_plays": {k: _pk.daily_used(session, uid, k) for k in _pk.MODES},
+            "unlimited": uid in botmod.ADMIN_IDS,
         }
     finally:
         session.close()
@@ -1154,7 +1155,8 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
         uid = int(user.telegram_id)
         used = _pk.daily_used(session, uid, mode_key)
         daily_limit = int(mode["daily_limit"])
-        if used >= daily_limit:
+        unlimited = uid in botmod.ADMIN_IDS
+        if not unlimited and used >= daily_limit:
             raise HTTPException(status_code=429, detail=f"⏰ سهمیهٔ امروز این حالت تموم شده ({daily_limit} بار در روز). فردا دوباره بیا.")
         now = time.time()
         if now - _plinko_last.get(uid, 0) < PLINKO_COOLDOWN:
@@ -1174,7 +1176,7 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
         used_after = used + 1
         total_assets = int(user.fox_points or 0)
         return {"path": path, "slot": slot, "mult": mult, "amount": amount, "payout": payout, "profit": profit,
-                "balance": total_assets, "daily_used": used_after, "daily_limit": daily_limit,
+                "balance": total_assets, "daily_used": used_after, "daily_limit": daily_limit, "unlimited": unlimited,
                 "mode": mode_key, "message": _pk.result_text(amount, mult, payout)}
     except HTTPException:
         session.rollback()
