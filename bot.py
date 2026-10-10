@@ -2479,7 +2479,7 @@ def plinko_panel(owner_id, st, points, used):
            f"💰 موجودی کیف پول: {points:,} روب‌پوینت\n"
            f"💵 مبلغ شرط: {(f'{amount:,} روب‌پوینت') if amount else 'انتخاب نشده ❌'}\n\n"
            "ضریب خانه‌ها (از چپ به راست):\n" + " | ".join(f"{m:g}×" for m in mode['mult']) +
-           f"\n\nحداقل شرط {plinko_core.MIN_ENTRY:,} و سقف {plinko_core.MAX_ENTRY:,} روب‌پوینت.\n"
+           f"\n\nحداقل شرط {plinko_core.MIN_ENTRY:,} و سقف {mode['max_entry']:,} روب‌پوینت.\n"
            "⛔️ فقط خودت می‌تونی روی این پنل بزنی.")
     rows = []
     rows.append([InlineKeyboardButton(("✅ " if k == st['mode'] else "") + v['title'], callback_data=f"plk:mode:{k}:{owner_id}")
@@ -2554,11 +2554,14 @@ async def plinko_callback(update, context):
     if action == 'mode':
         if arg in plinko_core.MODES:
             st['mode'] = arg
+            cap = plinko_core.MODES[arg]['max_entry']
+            if st.get('amount') and int(st['amount']) > cap:
+                st['amount'] = cap      # مبلغ از سقف حالت جدید بیشتر بود → روی سقف همون حالت می‌ذاریم
         await q.answer(); await show_panel(); return
     if action == 'amt':
         try: a = int(arg)
         except Exception: await q.answer(); return
-        st['amount'] = a if plinko_core.MIN_ENTRY <= a <= plinko_core.MAX_ENTRY else st.get('amount')
+        st['amount'] = a if plinko_core.MIN_ENTRY <= a <= plinko_core.MODES[st['mode']]['max_entry'] else st.get('amount')
         await q.answer(); await show_panel(); return
     if action == 'custom':
         st['awaiting'] = 'amount'
@@ -2567,7 +2570,7 @@ async def plinko_callback(update, context):
         try:
             await q.message.edit_text(
                 "🔴 پلینکو 🦊\n\n💰 مبلغ شرط رو بفرست (روب‌پوینت).\n"
-                f"حداقل: {plinko_core.MIN_ENTRY:,} · سقف: {plinko_core.MAX_ENTRY:,}\n"
+                f"حداقل: {plinko_core.MIN_ENTRY:,} · سقف حالت {plinko_core.MODES[st['mode']]['title']}: {plinko_core.MODES[st['mode']]['max_entry']:,}\n"
                 "مثال: 50k / 50کا / 2م / 200000\n\n👇 همین‌جا فقط عدد رو بفرست.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data=f"plk:cancel:{owner_id}")]]))
         except Exception: pass
@@ -2603,8 +2606,9 @@ async def handle_plinko_entry_text(update, context):
         if amount <= 0: raise ValueError
     except Exception:
         await update.message.reply_text("❌ مبلغ نامعتبره؛ یک عدد بفرست (مثلاً 5000 یا 50k).", **reply_kwargs(update.message)); return True
-    if amount < plinko_core.MIN_ENTRY or amount > plinko_core.MAX_ENTRY:
-        await update.message.reply_text(f"❌ مبلغ باید بین {plinko_core.MIN_ENTRY:,} و {plinko_core.MAX_ENTRY:,} روب‌پوینت باشه.", **reply_kwargs(update.message)); return True
+    _cap = plinko_core.MODES[st['mode']]['max_entry']
+    if amount < plinko_core.MIN_ENTRY or amount > _cap:
+        await update.message.reply_text(f"❌ مبلغ باید بین {plinko_core.MIN_ENTRY:,} و {_cap:,} روب‌پوینت باشه (سقف حالت {plinko_core.MODES[st['mode']]['title']}).", **reply_kwargs(update.message)); return True
     st['amount'] = amount; st['awaiting'] = None
     txt, kb = _plk_panel_data(st['owner_id'], st)
     try:
@@ -2630,8 +2634,8 @@ async def plinko_play(q, context, owner_id, st, from_result=False):
             err = plinko_guard(session, user)
             if err:
                 await q.answer(err, show_alert=True); return
-            if amount < plinko_core.MIN_ENTRY or amount > plinko_core.MAX_ENTRY:
-                await q.answer("مبلغ شرط معتبر نیست.", show_alert=True); return
+            if amount < plinko_core.MIN_ENTRY or amount > mode['max_entry']:
+                await q.answer(f"مبلغ شرط معتبر نیست. سقف حالت {mode['title']}: {mode['max_entry']:,} روب‌پوینت.", show_alert=True); return
             used = plinko_core.daily_used(session, uid, mode_key)
             unlimited = admin_only(uid)
             if not unlimited and used >= mode['daily_limit']:

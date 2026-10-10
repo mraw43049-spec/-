@@ -261,8 +261,9 @@ button:disabled::after,.lb-close::after{display:none}
 .bsteps div.cur{border-color:#ffc46b;background:#2a2a12}
 .bres{text-align:center;font-weight:900;margin:8px 0;min-height:22px}
 /* پلینکو 🔴 */
-.plinko-canvas{width:100%;display:block;border-radius:22px;background:radial-gradient(ellipse at 50% 38%,#2a2c52 0%,#161934 52%,#0c0e22 100%);direction:ltr}
-#plinkoCard{background:linear-gradient(160deg,#141733,#0d1024 65%);border:1px solid #3a3f78;box-shadow:0 10px 35px #0006}
+.plinko-canvas{width:100%;display:block;border-radius:18px;background:radial-gradient(ellipse at 50% 38%,#2a2c52 0%,#161934 52%,#0c0e22 100%);direction:ltr}
+#plinkoCard{background:linear-gradient(160deg,#141733,#0d1024 65%);border:1px solid #3a3f78;box-shadow:0 10px 35px #0006;padding:12px 6px 14px}
+#plinkoCard .p-head,#plinkoCard .p-modes,#plinkoCard .p-last,#plinkoCard .p-bet,#plinkoCard #pRule,#plinkoCard .muted{margin-left:6px;margin-right:6px}
 .p-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 .p-title{font-size:24px;font-weight:900;color:#fff;text-shadow:0 0 18px #7c6cff66}
 .p-bal{padding:8px 14px;border-radius:999px;background:#10142b;border:1px solid #3a3f78;color:#ffd45e;font-weight:900;font-size:15px;direction:ltr}
@@ -272,8 +273,8 @@ button:disabled::after,.lb-close::after{display:none}
 .p-modes button span{font-size:11.5px;color:#9aa0d6}
 .p-modes button.on{border-color:#ffc93d;background:linear-gradient(160deg,#3a2c14,#241a0c);box-shadow:0 0 18px #ffc93d33}
 .p-modes button.on b{color:#ffd45e}.p-modes button.on span{color:#f3d58a}
-.p-board{border-radius:24px;background:#10132a;border:1px solid #2f3466;padding:10px 10px 12px}
-.p-board-top{display:flex;justify-content:space-between;color:#aeb4ec;font-weight:800;font-size:13px;padding:2px 8px 8px}
+.p-board{border-radius:22px;background:#10132a;border:1px solid #2f3466;padding:8px 0 8px}
+.p-board-top{display:flex;justify-content:space-between;color:#aeb4ec;font-weight:800;font-size:13px;padding:2px 14px 8px}
 .p-wrap{position:relative}
 .p-result{position:absolute;left:8%;right:8%;top:50%;transform:translateY(-52%);background:linear-gradient(165deg,#1d2150f2,#0b0e24f7);border:1.5px solid #ffc93d;border-radius:22px;padding:16px 14px 12px;text-align:center;box-shadow:0 0 40px #000c,0 0 26px #ffc93d44;animation:prPop .35s cubic-bezier(.2,1.4,.4,1);backdrop-filter:blur(3px)}
 @keyframes prPop{from{opacity:0;transform:translateY(-45%) scale(.82)}to{opacity:1;transform:translateY(-52%) scale(1)}}
@@ -1512,9 +1513,9 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   function plinkoGeom(){
     var cv = $("pCanvas"), W = (cv && cv.clientWidth) || 320;
     var rows = plinko ? plinko.rows : 14;
-    var s = (W - 14) / (rows + 1), dy = s * 1.04, top = s * 1.5, bh = s * 1.55;
-    var bTop = top + (rows - 1) * dy + s * 0.75;
-    return { W: W, H: Math.ceil(bTop + bh + 10), s: s, dy: dy, top: top, rows: rows, pr: Math.max(2.4, s * 0.15), br: Math.max(6.5, s * 0.42), bTop: bTop, bh: bh };
+    var s = (W - 6) / (rows + 1), dy = s * 1.22, top = s * 1.7, bh = s * 1.7;
+    var bTop = top + (rows - 1) * dy + s * 0.85;
+    return { W: W, H: Math.ceil(bTop + bh + 12), s: s, dy: dy, top: top, rows: rows, pr: Math.max(2.8, s * 0.17), br: Math.max(7.5, s * 0.46), bTop: bTop, bh: bh };
   }
   function plinkoPeg(g, n, k){ return { x: g.W / 2 + (k - n / 2) * g.s, y: g.top + n * g.dy }; }
   function plinkoSlotX(g, k){ return g.W / 2 + (k - g.rows / 2) * g.s; }
@@ -1569,20 +1570,20 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     // دنباله و توپ
     if (trail) for (var t = 0; t < trail.length; t++) {
       var a = (t + 1) / (trail.length + 1);
-      c.fillStyle = "rgba(255,190,70," + (0.28 * a) + ")";
+      c.fillStyle = "rgba(255,214,80," + (0.30 * a) + ")";
       c.beginPath(); c.arc(trail[t].x, trail[t].y, g.br * (0.45 + 0.4 * a), 0, Math.PI * 2); c.fill();
     }
     if (ball) {
       var br = g.br, gl = c.createRadialGradient(ball.x, ball.y, br * 0.5, ball.x, ball.y, br * 2.6);
-      gl.addColorStop(0, "rgba(255,190,60,.55)"); gl.addColorStop(1, "rgba(255,190,60,0)");
+      gl.addColorStop(0, "rgba(255,215,90,.62)"); gl.addColorStop(1, "rgba(255,215,90,0)");
       c.fillStyle = gl; c.beginPath(); c.arc(ball.x, ball.y, br * 2.6, 0, Math.PI * 2); c.fill();
       var bg = c.createRadialGradient(ball.x - br * 0.35, ball.y - br * 0.4, br * 0.1, ball.x, ball.y, br);
-      bg.addColorStop(0, "#fff5c8"); bg.addColorStop(0.45, "#ffc12e"); bg.addColorStop(1, "#d97a0a");
+      bg.addColorStop(0, "#fffbe3"); bg.addColorStop(0.35, "#ffd84a"); bg.addColorStop(0.75, "#e6b422"); bg.addColorStop(1, "#a87a0c");
       c.beginPath(); c.arc(ball.x, ball.y, br, 0, Math.PI * 2); c.fillStyle = bg; c.fill();
     } else if (plinkoLanded >= 0) {
       var bx = plinkoSlotX(g, plinkoLanded), by = g.bTop + g.bh * 0.5, r2 = g.br * 0.9;
       var b2 = c.createRadialGradient(bx - r2 * 0.35, by - r2 * 0.4, r2 * 0.1, bx, by, r2);
-      b2.addColorStop(0, "#fff5c8"); b2.addColorStop(0.45, "#ffc12e"); b2.addColorStop(1, "#d97a0a");
+      b2.addColorStop(0, "#fffbe3"); b2.addColorStop(0.35, "#ffd84a"); b2.addColorStop(0.75, "#e6b422"); b2.addColorStop(1, "#a87a0c");
       c.beginPath(); c.arc(bx, by - g.bh * 0.22, r2, 0, Math.PI * 2); c.fillStyle = b2; c.fill();
     }
   }
@@ -1638,14 +1639,34 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     });
     drawPlinkoMeta();
   }
+  function plinkoMax(){ var r = plinkoCur(); return (r && r.max_entry) || (plinko && plinko.max_entry) || 0; }
+  function drawPlinkoChips(){
+    var chips = $("pChips"); if (!chips || !plinko) return;
+    chips.innerHTML = "";
+    var cap = plinkoMax();
+    [1000, 5000, 25000, 100000, 500000, 1000000, 2500000, 5000000].forEach(function(v){
+      if (v < plinko.min_entry || v > cap) return;
+      var b = document.createElement("button"); b.type = "button"; b.textContent = fa(v); b.setAttribute("data-v", v);
+      b.onclick = function(){ if (!plinkoBusy) setPlinkoAmt(v); }; chips.appendChild(b);
+    });
+  }
+  function drawPlinkoRule(){
+    if (!plinko) return;
+    var lims = Object.keys(plinko.risks).map(function(k){ return plinko.risks[k].title + " " + (plinko.unlimited ? "∞" : fa(plinko.risks[k].daily_limit)); }).join("، ");
+    $("pRule").textContent = plinko.disabled ? "🛠 کازینو فعلاً غیرفعاله." :
+      plinko.unlocked ? ("حداقل " + fa(plinko.min_entry) + " و حداکثر " + fa(plinkoMax()) + " روب‌پوینت در این حالت. سهمیه روزانه: " + lims + " بار؛ هر حالت جداگانه و هر روز از نو.") :
+      ("🔒 کازینو از سطح " + fa(plinko.unlock_level) + " باز می‌شه. (سطح تو: " + fa(plinko.level) + ")");
+  }
   function drawPlinkoMeta(){
     var r = plinkoCur(); if (!r) return;
     $("pModeName").textContent = "صفحه " + r.title;
     $("pRowsName").textContent = "ردیف " + fa(plinko.rows);
+    drawPlinkoChips(); drawPlinkoRule();
+    if (plinkoAmt) setPlinkoAmt(plinkoAmt);      // اگه مبلغ از سقف این حالت بیشتر بود، میاد روی سقف
   }
   function setPlinkoAmt(v){
     v = Math.floor(Number(v) || 0);
-    if (plinko) { v = Math.min(v, plinko.max_entry); }
+    if (plinko) { v = Math.min(v, plinkoMax()); }
     plinkoAmt = v; $("pAmt").value = v ? v : "";
     $("pAmtShow").textContent = v ? fa(v) + " روب‌پوینت" : "—";
     var bs = $("pChips").children, i;
@@ -1685,17 +1706,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       if (first && d.default_mode && d.risks[d.default_mode]) plinkoRisk = d.default_mode;
       if (!d.risks[plinkoRisk]) plinkoRisk = Object.keys(d.risks)[0];
       $("pBal").textContent = fa(d.balance);
-      var lims = Object.keys(d.risks).map(function(k){ return d.risks[k].title + " " + (d.unlimited ? "∞" : fa(d.risks[k].daily_limit)); }).join("، ");
-      $("pRule").textContent = d.disabled ? "🛠 کازینو فعلاً غیرفعاله." :
-        d.unlocked ? ("حداقل " + fa(d.min_entry) + " و حداکثر " + fa(d.max_entry) + " روب‌پوینت. سهمیه روزانه: " + lims + " بار؛ هر حالت جداگانه و هر روز از نو.") :
-        ("🔒 کازینو از سطح " + fa(d.unlock_level) + " باز می‌شه. (سطح تو: " + fa(d.level) + ")");
       $("pDrop").disabled = !d.unlocked || d.disabled;
-      var chips = $("pChips"); chips.innerHTML = "";
-      [1000, 5000, 25000, 100000, 500000, 1000000].forEach(function(v){
-        if (v < d.min_entry || v > d.max_entry) return;
-        var b = document.createElement("button"); b.type = "button"; b.textContent = fa(v); b.setAttribute("data-v", v);
-        b.onclick = function(){ if (!plinkoBusy) setPlinkoAmt(v); }; chips.appendChild(b);
-      });
       if (!plinkoAmt) setPlinkoAmt(Math.max(d.min_entry, 1000)); else setPlinkoAmt(plinkoAmt);
       if (d.cooldown_left > 0 && plinkoCdLeft() < d.cooldown_left) plinkoCdStart(d.cooldown_left);
       drawPlinkoRisk(); drawPlinkoLast(); plinkoDraw(); stamp();
@@ -1713,7 +1724,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       if (a) { a.disabled = true; a.textContent = "⏳ " + fa(left) + " ثانیه"; }
     } else {
       clearInterval(plinkoCdTimer); plinkoCdTimer = null;
-      if (b) { b.disabled = plinkoBusy; b.textContent = "🔴 توپ رو رها کن"; }
+      if (b) { b.disabled = plinkoBusy || !plinko || !plinko.unlocked || !!plinko.disabled; b.textContent = "🔴 توپ رو رها کن"; }
       if (a) { a.disabled = false; a.textContent = "🔁 پرتاب دوباره"; }
     }
   }
@@ -1727,7 +1738,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     if (plinkoCdLeft() > 0) { toast("⏳ " + fa(plinkoCdLeft()) + " ثانیه‌ی دیگه می‌تونی دوباره بازی کنی.", false); return; }
     var amt = plinkoAmt;
     if (!amt || amt < plinko.min_entry) { toast("حداقل مبلغ ورودی " + fa(plinko.min_entry) + " روب‌پوینته.", false); return; }
-    if (amt > plinko.max_entry) { toast("سقف مبلغ ورودی " + fa(plinko.max_entry) + " روب‌پوینته.", false); return; }
+    if (amt > plinkoMax()) { toast("سقف مبلغ ورودی این حالت " + fa(plinkoMax()) + " روب‌پوینته.", false); return; }
     plinkoBusy = true; $("pDrop").disabled = true; hidePlinkoResult(); plinkoLanded = -1;
     api("/api/plinko/drop", "POST", { amount: amt, risk: plinkoRisk }).then(function(r){
       $("pBal").textContent = fa(r.balance - r.payout);          // ورودی همون لحظه کم می‌شه

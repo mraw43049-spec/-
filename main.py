@@ -1121,7 +1121,7 @@ def plinko_state(tg_user: dict = Depends(current_telegram_user)):
             "balance": int(user.fox_points or 0),
             "rows": PLINKO_ROWS,
             "default_mode": _pk.DEFAULT_MODE,
-            "risks": {k: {"title": v["title"], "sub": v["sub"], "mult": v["mult"], "daily_limit": v["daily_limit"]} for k, v in _pk.MODES.items()},
+            "risks": {k: {"title": v["title"], "sub": v["sub"], "mult": v["mult"], "daily_limit": v["daily_limit"], "max_entry": v["max_entry"]} for k, v in _pk.MODES.items()},
             "daily_plays": {k: _pk.daily_used(session, uid, k) for k in _pk.MODES},
             "unlimited": uid in botmod.ADMIN_IDS,
             "cooldown_left": _pk.cooldown_left(session, uid), "cooldown_total": int(_pk.COOLDOWN),
@@ -1151,8 +1151,8 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
         amount = int(body.amount or 0)
         if amount < PLINKO_MIN_ENTRY:
             raise HTTPException(status_code=400, detail=f"❌ حداقل مبلغ ورودی پلینکو {PLINKO_MIN_ENTRY:,} روب‌پوینته.")
-        if amount > PLINKO_MAX_ENTRY:
-            raise HTTPException(status_code=400, detail=f"❌ سقف مبلغ ورودی پلینکو {PLINKO_MAX_ENTRY:,} روب‌پوینته.")
+        if amount > int(mode["max_entry"]):
+            raise HTTPException(status_code=400, detail=f"❌ سقف مبلغ ورودی پلینکو در حالت {mode['title']} {int(mode['max_entry']):,} روب‌پوینته.")
         uid = int(user.telegram_id)
         used = _pk.daily_used(session, uid, mode_key)
         daily_limit = int(mode["daily_limit"])

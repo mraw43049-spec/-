@@ -246,7 +246,7 @@ def build_gif(path, mult_table, amount, payout, rows=ROWS):
             t = f / nf
             x = x0 + (x1 - x0) * t
             y = y0 + (y1 - y0) * t * t - hop * 4 * t * (1 - t)
-            emit(x, y, 38)
+            emit(x, y, 34)
         if pidx is not None:
             n = pidx
             kk = sum(path[:pidx])

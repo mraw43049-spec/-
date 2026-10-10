@@ -9,17 +9,19 @@ from sqlalchemy import text
 
 ROWS = 14                      # ۱۴ ردیف میخ → ۱۵ خانه
 MIN_ENTRY = int(os.environ.get("PLINKO_MIN_ENTRY", "1000") or 1000)
-MAX_ENTRY = int(os.environ.get("PLINKO_MAX_ENTRY", "5000000") or 5000000)
+MAX_ENTRY_CALM = int(os.environ.get("PLINKO_MAX_ENTRY_CALM", "2500000") or 2500000)    # سقف شرط حالت آرام
+MAX_ENTRY_WILD = int(os.environ.get("PLINKO_MAX_ENTRY_WILD", "5000000") or 5000000)    # سقف شرط حالت وحشی
+MAX_ENTRY = max(MAX_ENTRY_CALM, MAX_ENTRY_WILD)   # بزرگ‌ترین سقف (برای کدهای قدیمی)
 COOLDOWN = float(os.environ.get("PLINKO_COOLDOWN", "45") or 45)   # ثانیه؛ فاصله‌ی بعد از «اتمام» بازی تا پرتاب بعدی
-ANIM_SECONDS = float(os.environ.get("PLINKO_ANIM_SECONDS", "7") or 7)  # مدت نمایش گیف/انیمیشن؛ شمارش ۴۵ ثانیه بعد از تموم شدنش شروع می‌شه
+ANIM_SECONDS = float(os.environ.get("PLINKO_ANIM_SECONDS", "4") or 4)  # مدت نمایش گیف/انیمیشن؛ شمارش ۴۵ ثانیه بعد از تموم شدنش شروع می‌شه
 
-# ضرایب ۱۵ خانه (از چپ به راست). بازگشت به بازیکن: آرام ≈ ۹۸٫۵٪ ، وحشی ≈ ۹۵٫۳٪
+# ضرایب ۱۵ خانه (از چپ به راست). بازگشت به بازیکن: آرام ≈ ۹۸٫۵٪ ، وحشی ≈ ۵۹٪ (از وسط به بیرون: ۰،۰،۰ ← ۱ ← ۱٫۵ ← ۲ ← ۵ ← ۱۲ ← ۱۲)
 # سهمیه‌ی روزانه: آرام ۱۵ ، وحشی ۵۰ ؛ پشتیبانی (ADMIN_IDS) نامحدود
 MODES = {
-    "calm": {"title": "آرام", "sub": "ضریب‌های ملایم", "daily_limit": 15,
+    "calm": {"title": "آرام", "sub": "ضریب‌های ملایم", "daily_limit": 15, "max_entry": MAX_ENTRY_CALM,
              "mult": [7.5, 4, 2.5, 1.6, 1.3, 1.1, 1, 0.4, 1, 1.1, 1.3, 1.6, 2.5, 4, 7.5]},
-    "wild": {"title": "وحشی", "sub": "ضریب‌های درخشان", "daily_limit": 50,
-             "mult": [12, 20, 12, 5, 2, 1.3, 0, 0, 0, 1.3, 2, 5, 12, 20, 12]},
+    "wild": {"title": "وحشی", "sub": "ضریب‌های درخشان", "daily_limit": 50, "max_entry": MAX_ENTRY_WILD,
+             "mult": [12, 12, 5, 2, 1.5, 1, 0, 0, 0, 1, 1.5, 2, 5, 12, 12]},
 }
 DEFAULT_MODE = "wild"
 
