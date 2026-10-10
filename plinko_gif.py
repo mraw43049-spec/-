@@ -19,17 +19,18 @@ def _font(size):
 
 
 def _bucket_colors(m):
+    """رنگ خانه‌ها: پالت پاییزی (قرمز شرابی ← نارنجی ← طلایی ← قهوه‌ای)."""
     if m >= 10:
-        return (232, 72, 150), (150, 36, 108)
+        return (222, 62, 52), (136, 30, 36)
     if m >= 4:
-        return (200, 84, 214), (120, 48, 150)
+        return (236, 112, 36), (150, 62, 24)
     if m >= 1.5:
-        return (150, 100, 232), (88, 62, 160)
+        return (240, 164, 48), (158, 100, 28)
     if m >= 1:
-        return (62, 190, 190), (30, 112, 124)
+        return (214, 178, 84), (130, 98, 44)
     if m > 0:
-        return (88, 120, 150), (50, 70, 96)
-    return (70, 78, 104), (38, 42, 62)
+        return (150, 108, 76), (88, 60, 44)
+    return (86, 64, 56), (48, 34, 32)
 
 
 def _fmt(m):
@@ -54,23 +55,74 @@ class _Geom:
         return LW / 2 + (k - self.rows / 2) * self.s
 
 
+_LEAF_COLS = [(214, 84, 36), (232, 140, 40), (196, 52, 40), (240, 180, 60), (150, 74, 34), (176, 104, 40)]
+
+
+def _leaf(img, cx, cy, size, ang, col, alpha):
+    """یک برگ پاییزی (بیضی نوک‌دار + رگ‌برگ) با چرخش دلخواه."""
+    pts = []
+    for i in range(0, 25):
+        t = i / 24
+        x = (t * 2 - 1) * size
+        w = math.sin(t * math.pi) ** 0.9 * size * 0.52
+        pts.append((x, -w))
+    for i in range(24, -1, -1):
+        t = i / 24
+        x = (t * 2 - 1) * size
+        w = math.sin(t * math.pi) ** 0.9 * size * 0.52
+        pts.append((x, w))
+    ca, sa = math.cos(ang), math.sin(ang)
+    rot = [(cx + x * ca - y * sa, cy + x * sa + y * ca) for x, y in pts]
+    lay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(lay)
+    ld.polygon(rot, fill=col + (alpha,))
+    ex, ey = cx + size * 1.25 * ca, cy + size * 1.25 * sa
+    sx, sy = cx - size * ca, cy - size * sa
+    ld.line([(sx, sy), (ex, ey)], fill=(70, 36, 20, min(255, alpha + 30)), width=max(1, int(size * 0.07)))
+    dark = tuple(max(0, c - 70) for c in col) + (min(255, alpha + 20),)
+    ld.line([(sx + (ex - sx) * 0.04, sy + (ey - sy) * 0.04), (cx + size * ca * 0.92, cy + size * sa * 0.92)], fill=dark, width=max(1, int(size * 0.06)))
+    img.alpha_composite(lay)
+
+
 def _background(g, mult):
-    img = Image.new("RGB", (LW * SS, LH * SS), (10, 13, 30))
+    # آسمان غروب پاییزی: بالا بنفش‌قهوه‌ای تیره ← وسط شرابی/نارنجی ← پایین قهوه‌ای تیره
+    img = Image.new("RGB", (LW * SS, LH * SS), (30, 16, 18))
     d = ImageDraw.Draw(img)
-    # گرادیان عمودی + هاله‌ی مرکزی
+    top, mid, bot = (38, 20, 30), (92, 36, 28), (30, 18, 14)
     for y in range(LH * SS):
         t = y / (LH * SS)
-        d.line([(0, y), (LW * SS, y)], fill=(int(12 + 10 * t), int(14 + 6 * t), int(36 - 8 * t)))
-    halo = Image.new("RGBA", (LW * SS, LH * SS), (0, 0, 0, 0))
+        if t < 0.55:
+            u = t / 0.55
+            c = tuple(int(top[j] * (1 - u) + mid[j] * u) for j in range(3))
+        else:
+            u = (t - 0.55) / 0.45
+            c = tuple(int(mid[j] * (1 - u) + bot[j] * u) for j in range(3))
+        d.line([(0, y), (LW * SS, y)], fill=c)
+    img = img.convert("RGBA")
+    # هاله‌ی گرم (خورشید غروب) پشت میخ‌ها
+    halo = Image.new("RGBA", img.size, (0, 0, 0, 0))
     hd = ImageDraw.Draw(halo)
-    cx, cy = LW * SS / 2, (g.top + 6 * g.dy) * SS
-    for i in range(14, 0, -1):
-        rr = i * 15 * SS
-        hd.ellipse([cx - rr * 0.9, cy - rr * 1.15, cx + rr * 0.9, cy + rr * 1.0], fill=(70, 60, 150, 5))
-    img = Image.alpha_composite(img.convert("RGBA"), halo)
+    cx, cy = LW * SS / 2, (g.top + 7 * g.dy) * SS
+    for i in range(40, 0, -1):
+        rr = i * 5.6 * SS
+        hd.ellipse([cx - rr * 0.95, cy - rr * 1.1, cx + rr * 0.95, cy + rr * 0.95], fill=(255, 150, 50, 3))
+    img = Image.alpha_composite(img, halo)
+    # برگ‌های پاییزی پخش‌شده (ثابت و تکرارپذیر)
+    import random as _r
+    rnd = _r.Random(1024)
+    for i in range(34):
+        side_bias = rnd.random()
+        x = rnd.uniform(6, LW - 6)
+        y = rnd.uniform(14, LH - 10)
+        sz = rnd.uniform(5.5, 11) * SS
+        _leaf(img, x * SS, y * SS, sz, rnd.uniform(0, math.tau), rnd.choice(_LEAF_COLS), int(rnd.uniform(60, 120)))
+    # چند برگ درشت‌تر کنار قاب
+    for (x, y, a) in [(22, 62, 0.6), (LW - 24, 88, 2.4), (18, LH - 96, 4.0), (LW - 20, LH - 70, 5.3), (30, 190, 1.3), (LW - 30, 250, 3.6)]:
+        _leaf(img, x * SS, y * SS, 15 * SS, a, rnd.choice(_LEAF_COLS), 150)
     d = ImageDraw.Draw(img)
     # عنوان
-    d.text((LW * SS / 2, 26 * SS), "PLINKO", font=_font(30 * SS), fill=(255, 214, 102), anchor="mm")
+    d.text((LW * SS / 2 + 1.5 * SS, 26 * SS + 1.5 * SS), "PLINKO", font=_font(30 * SS), fill=(40, 14, 10), anchor="mm")
+    d.text((LW * SS / 2, 26 * SS), "PLINKO", font=_font(30 * SS), fill=(255, 190, 80), anchor="mm")
     for n in range(g.rows):
         for k in range(n + 1):
             x, y = g.peg(n, k)
@@ -87,8 +139,8 @@ def _peg(d, x, y, g, glow):
         for i in range(5, 0, -1):
             a = int(60 * glow * (6 - i) / 5)
             rr = r + i * 2.2 * SS * glow
-            d.ellipse([x - rr, y - rr, x + rr, y + rr], fill=(255, 220, 130, a))
-    col = (255, 238, 190) if glow > 0.3 else (176, 150, 255)
+            d.ellipse([x - rr, y - rr, x + rr, y + rr], fill=(255, 200, 90, a))
+    col = (255, 236, 180) if glow > 0.3 else (236, 188, 120)
     d.ellipse([x - r, y - r, x + r, y + r], fill=col)
     d.ellipse([x - r * 0.55, y - r * 0.6, x + r * 0.1, y - r * 0.05], fill=(255, 255, 255))
 

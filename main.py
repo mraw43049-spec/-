@@ -1101,7 +1101,7 @@ PLINKO_ROWS = _pk.ROWS
 PLINKO_MIN_ENTRY = _pk.MIN_ENTRY
 PLINKO_MAX_ENTRY = _pk.MAX_ENTRY
 PLINKO_COOLDOWN = _pk.COOLDOWN
-_plinko_last: dict = {}      # uid -> زمان آخرین پرتاب
+# فاصله‌ی ۴۵ ثانیه‌ای بعد از هر بازی تو دیتابیس نگه داشته می‌شه (plinko_core.cooldown_*) تا بین ربات و مینی‌اپ مشترک باشه
 
 
 @app.get("/api/plinko")
@@ -1124,6 +1124,7 @@ def plinko_state(tg_user: dict = Depends(current_telegram_user)):
             "risks": {k: {"title": v["title"], "sub": v["sub"], "mult": v["mult"], "daily_limit": v["daily_limit"]} for k, v in _pk.MODES.items()},
             "daily_plays": {k: _pk.daily_used(session, uid, k) for k in _pk.MODES},
             "unlimited": uid in botmod.ADMIN_IDS,
+            "cooldown_left": _pk.cooldown_left(session, uid), "cooldown_total": int(_pk.COOLDOWN),
         }
     finally:
         session.close()
@@ -1158,9 +1159,9 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
         unlimited = uid in botmod.ADMIN_IDS
         if not unlimited and used >= daily_limit:
             raise HTTPException(status_code=429, detail=f"⏰ سهمیهٔ امروز این حالت تموم شده ({daily_limit} بار در روز). فردا دوباره بیا.")
-        now = time.time()
-        if now - _plinko_last.get(uid, 0) < PLINKO_COOLDOWN:
-            raise HTTPException(status_code=429, detail="⏳ یه لحظه صبر کن تا توپ قبلی بیفته.")
+        wait_left = _pk.cooldown_left(session, uid)
+        if wait_left > 0:
+            raise HTTPException(status_code=429, detail=f"⏳ بعد از هر بازی پلینکو باید صبر کنی؛ {wait_left} ثانیه‌ی دیگه می‌تونی دوباره بازی کنی.")
         if int(user.fox_points or 0) < amount:
             raise HTTPException(status_code=400, detail="❌ روب‌پوینت کافی نداری.")
         path, slot = _pk.roll()
@@ -1168,16 +1169,15 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
         payout = _pk.payout(amount, mult)
         user.fox_points = int(user.fox_points or 0) - amount + payout
         _pk.daily_inc(session, uid, mode_key)
+        _pk.cooldown_start(session, uid)
         session.commit()
-        if len(_plinko_last) > 50000:
-            _plinko_last.clear()
-        _plinko_last[uid] = now
         profit = payout - amount
         used_after = used + 1
         total_assets = int(user.fox_points or 0)
         return {"path": path, "slot": slot, "mult": mult, "amount": amount, "payout": payout, "profit": profit,
                 "balance": total_assets, "daily_used": used_after, "daily_limit": daily_limit, "unlimited": unlimited,
-                "mode": mode_key, "message": _pk.result_text(amount, mult, payout)}
+                "mode": mode_key, "message": _pk.result_text(amount, mult, payout),
+                "cooldown": int(_pk.COOLDOWN)}
     except HTTPException:
         session.rollback()
         raise

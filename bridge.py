@@ -67,7 +67,7 @@ logger = logging.getLogger(__name__)
 
 BRIDGE_TALK_SECONDS = 30 * 60        # مدت گفت و گو بعد از وصل شدن
 BRIDGE_SEARCH_TTL = 60 * 60          # اگه تا یک ساعت هیچ گپی در رو باز نکرد جستجو تموم می‌شه
-BRIDGE_REQUEST_COOLDOWN = 3 * 60     # فاصله‌ی دو درخواست پشت‌سرهم از یک گپ (ضد اسپم)
+BRIDGE_REQUEST_COOLDOWN = 2 * 60     # بعد از پایان هر اتصال، هر دو گپ ۲ دقیقه باید صبر کنن تا دوباره درخواست بدن
 RETENTION_SECONDS = 7 * 24 * 3600    # لاگ پیام‌ها (برای گزارش) یک هفته نگه داشته می‌شه
 REACTION = "🕊"
 
@@ -412,13 +412,16 @@ async def handle_text(update, context) -> bool:
         if cur and cur.status == "searching":
             await msg.reply_text("🔎 جستجو هنوز ادامه داره؛ اگه نمی‌خوای، دکمه‌ی «لغو جستجو» رو بزن.", **reply)
             return True
-        last = (s.query(ChatBridge).filter(ChatBridge.chat_id == chat.id)
-                .order_by(ChatBridge.id.desc()).first())
-        if last and last.created_at:
-            gone = (now_utc() - aware(last.created_at)).total_seconds()
+        # ۲ دقیقه صبر از لحظه‌ی «پایان» آخرین اتصال (چه این گپ درخواست داده بود چه اونور) — نه از لحظه‌ی درخواست
+        last = (s.query(ChatBridge)
+                .filter((ChatBridge.chat_id == chat.id) | (ChatBridge.partner_chat_id == chat.id))
+                .filter(ChatBridge.ended_at.isnot(None))
+                .order_by(ChatBridge.ended_at.desc()).first())
+        if last and last.ended_at:
+            gone = (now_utc() - aware(last.ended_at)).total_seconds()
             if gone < BRIDGE_REQUEST_COOLDOWN:
-                left = int(BRIDGE_REQUEST_COOLDOWN - gone)
-                await msg.reply_text(f"⏳ {left // 60} دقیقه و {left % 60} ثانیه‌ی دیگه می‌تونی دوباره درخواست بدی.", **reply)
+                left = max(1, int(BRIDGE_REQUEST_COOLDOWN - gone + 0.999))
+                await msg.reply_text(f"⏳ بعد از پایان گفت و گو باید صبر کنی؛ {left // 60} دقیقه و {left % 60} ثانیه‌ی دیگه می‌تونی دوباره درخواست بدی.", **reply)
                 return True
         req = ChatBridge(chat_id=chat.id, chat_title=chat.title or "گپ", requester_id=user.id,
                          status="searching", expires_at=now_utc() + timedelta(seconds=BRIDGE_SEARCH_TTL))

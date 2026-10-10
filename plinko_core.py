@@ -2,6 +2,7 @@
 نتیجه همیشه سمت سرور و با random امن تعیین می‌شه؛ مینی‌اپ و گیف فقط همون مسیر رو نمایش می‌دن."""
 import os
 import random
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy import text
@@ -9,7 +10,8 @@ from sqlalchemy import text
 ROWS = 14                      # ۱۴ ردیف میخ → ۱۵ خانه
 MIN_ENTRY = int(os.environ.get("PLINKO_MIN_ENTRY", "1000") or 1000)
 MAX_ENTRY = int(os.environ.get("PLINKO_MAX_ENTRY", "5000000") or 5000000)
-COOLDOWN = float(os.environ.get("PLINKO_COOLDOWN", "2") or 2)     # ثانیه؛ ضد اسپم
+COOLDOWN = float(os.environ.get("PLINKO_COOLDOWN", "45") or 45)   # ثانیه؛ فاصله‌ی بعد از «اتمام» بازی تا پرتاب بعدی
+ANIM_SECONDS = float(os.environ.get("PLINKO_ANIM_SECONDS", "6") or 6)  # مدت نمایش گیف/انیمیشن؛ شمارش ۴۵ ثانیه بعد از تموم شدنش شروع می‌شه
 
 # ضرایب ۱۵ خانه (از چپ به راست). بازگشت به بازیکن: آرام ≈ ۹۸٫۵٪ ، وحشی ≈ ۹۵٫۳٪
 # سهمیه‌ی روزانه: آرام ۱۵ ، وحشی ۵۰ ؛ پشتیبانی (ADMIN_IDS) نامحدود
@@ -37,9 +39,24 @@ def payout(amount: int, mult: float) -> int:
 def ensure_table(engine):
     try:
         with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE IF NOT EXISTS plinko_cooldown (user_id BIGINT PRIMARY KEY, ready_at DOUBLE PRECISION NOT NULL DEFAULT 0)"))
             conn.execute(text("CREATE TABLE IF NOT EXISTS plinko_daily_plays (user_id BIGINT NOT NULL, risk VARCHAR(8) NOT NULL, play_day VARCHAR(10) NOT NULL, plays INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, risk, play_day))"))
     except Exception as exc:  # noqa: BLE001
         print(f"[plinko] daily counter table init failed: {exc}")
+
+
+def cooldown_left(session, uid: int) -> int:
+    """ثانیه‌های باقی‌مونده تا پرتاب بعدی (مشترک بین ربات و مینی‌اپ؛ تو دیتابیس ذخیره می‌شه)."""
+    ready = session.execute(text("SELECT ready_at FROM plinko_cooldown WHERE user_id=:uid"), {"uid": int(uid)}).scalar()
+    left = float(ready or 0) - time.time()
+    return int(left) + 1 if left > 0 else 0
+
+
+def cooldown_start(session, uid: int):
+    """بعد از هر پرتاب صدا زده می‌شه: ۴۵ ثانیه بعد از اتمام انیمیشن می‌تونه دوباره بازی کنه."""
+    ready = time.time() + ANIM_SECONDS + COOLDOWN
+    session.execute(text("INSERT INTO plinko_cooldown (user_id, ready_at) VALUES (:uid, :r) ON CONFLICT (user_id) DO UPDATE SET ready_at = :r"),
+                    {"uid": int(uid), "r": ready})
 
 
 def today() -> str:

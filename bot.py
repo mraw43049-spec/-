@@ -2564,9 +2564,6 @@ async def plinko_play(q, context, owner_id, st, from_result=False):
     try:
         mode_key, amount = st['mode'], int(st['amount'])
         mode = plinko_core.MODES[mode_key]
-        loop_now = asyncio.get_event_loop().time()
-        if loop_now - _PLK_LAST.get(uid, -999) < plinko_core.COOLDOWN:
-            await q.answer("⏳ یه لحظه صبر کن تا توپ قبلی بیفته.", show_alert=True); return
         session = get_session()
         try:
             user = session.query(User).filter(User.telegram_id == uid).with_for_update().first()
@@ -2581,6 +2578,9 @@ async def plinko_play(q, context, owner_id, st, from_result=False):
             unlimited = admin_only(uid)
             if not unlimited and used >= mode['daily_limit']:
                 await q.answer(f"⏰ سهمیهٔ امروز حالت «{mode['title']}» تموم شده ({mode['daily_limit']} بار). فردا دوباره بیا.", show_alert=True); return
+            wait_left = plinko_core.cooldown_left(session, uid)
+            if wait_left > 0:
+                await q.answer(f"⏳ بعد از هر بازی پلینکو باید صبر کنی؛ {wait_left} ثانیه‌ی دیگه می‌تونی دوباره بازی کنی.", show_alert=True); return
             if int(user.fox_points or 0) < amount:
                 await q.answer(f"❌ روب‌پوینت کافی نداری. موجودی: {int(user.fox_points or 0):,}", show_alert=True); return
             path, slot = plinko_core.roll()
@@ -2588,11 +2588,11 @@ async def plinko_play(q, context, owner_id, st, from_result=False):
             pay = plinko_core.payout(amount, mult)
             user.fox_points = int(user.fox_points or 0) - amount + pay
             plinko_core.daily_inc(session, uid, mode_key)
+            plinko_core.cooldown_start(session, uid)
             balance = int(user.fox_points or 0)
             session.commit()
         finally:
             session.close()
-        _PLK_LAST[uid] = loop_now
         await q.answer("🔴 توپ پرتاب شد!")
         # پنل/دکمه‌های قبلی بسته می‌شن تا دو بار کلیک نشه
         try:
@@ -2606,7 +2606,8 @@ async def plinko_play(q, context, owner_id, st, from_result=False):
         calc = (f"🧮 {amount:,} × {mult:g} = {pay:,} روب‌پوینت\n" +
                 (f"📈 سود خالص: {profit:,}" if profit > 0 else (f"📉 زیان خالص: {abs(profit):,}" if profit < 0 else "➖ سود و زیان: صفر")))
         caption = (f"🔴 پلینکو · حالت {mode['title']}\n\n{plinko_core.result_text(amount, mult, pay)}\n\n{calc}\n"
-                   f"💼 موجودی کیف پول: {balance:,} روب‌پوینت\n🎯 امروز: {used + 1}/{'∞' if unlimited else mode['daily_limit']}")
+                   f"💼 موجودی کیف پول: {balance:,} روب‌پوینت\n🎯 امروز: {used + 1}/{'∞' if unlimited else mode['daily_limit']}\n"
+                   f"⏳ پلینکوی بعدی {int(plinko_core.COOLDOWN)} ثانیه‌ی دیگه")
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(f"🔁 دوباره ({amount:,})", callback_data=f"plk:again:{mode_key}-{amount}:{owner_id}")],
             [InlineKeyboardButton("⚙️ تنظیمات", callback_data=f"plk:panel:{owner_id}"), InlineKeyboardButton("🔙 کازینو", callback_data=f"plk:back:{owner_id}")],

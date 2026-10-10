@@ -1697,14 +1697,34 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
         b.onclick = function(){ if (!plinkoBusy) setPlinkoAmt(v); }; chips.appendChild(b);
       });
       if (!plinkoAmt) setPlinkoAmt(Math.max(d.min_entry, 1000)); else setPlinkoAmt(plinkoAmt);
+      if (d.cooldown_left > 0 && plinkoCdLeft() < d.cooldown_left) plinkoCdStart(d.cooldown_left);
       drawPlinkoRisk(); drawPlinkoLast(); plinkoDraw(); stamp();
     }).catch(function(e){ if (!e.gate) toast(e.message, false); });
   }
   $("pAmt").addEventListener("input", function(){ var v = Math.floor(Number($("pAmt").value) || 0); plinkoAmt = v; $("pAmtShow").textContent = v ? fa(v) + " روب‌پوینت" : "—"; var bs = $("pChips").children, i; for (i = 0; i < bs.length; i++) bs[i].className = (Number(bs[i].getAttribute("data-v")) === v) ? "on" : ""; });
   $("pHalf").onclick = function(){ if (!plinkoBusy) setPlinkoAmt(Math.max(plinko ? plinko.min_entry : 1, Math.floor(plinkoAmt / 2))); };
   $("pDouble").onclick = function(){ if (!plinkoBusy) setPlinkoAmt(plinkoAmt * 2); };
+  var plinkoCdEnd = 0, plinkoCdTimer = null;
+  function plinkoCdLeft(){ return Math.max(0, Math.ceil((plinkoCdEnd - Date.now()) / 1000)); }
+  function plinkoCdTick(){
+    var left = plinkoCdLeft(), b = $("pDrop"), a = $("prAgain");
+    if (left > 0) {
+      if (b && !plinkoBusy) { b.disabled = true; b.textContent = "⏳ " + fa(left) + " ثانیه تا پرتاب بعدی"; }
+      if (a) { a.disabled = true; a.textContent = "⏳ " + fa(left) + " ثانیه"; }
+    } else {
+      clearInterval(plinkoCdTimer); plinkoCdTimer = null;
+      if (b) { b.disabled = plinkoBusy; b.textContent = "🔴 توپ رو رها کن"; }
+      if (a) { a.disabled = false; a.textContent = "🔁 پرتاب دوباره"; }
+    }
+  }
+  function plinkoCdStart(sec){
+    plinkoCdEnd = Date.now() + sec * 1000;
+    if (plinkoCdTimer) clearInterval(plinkoCdTimer);
+    plinkoCdTimer = setInterval(plinkoCdTick, 500); plinkoCdTick();
+  }
   function plinkoThrow(){
     if (plinkoBusy || !plinko) return;
+    if (plinkoCdLeft() > 0) { toast("⏳ " + fa(plinkoCdLeft()) + " ثانیه‌ی دیگه می‌تونی دوباره بازی کنی.", false); return; }
     var amt = plinkoAmt;
     if (!amt || amt < plinko.min_entry) { toast("حداقل مبلغ ورودی " + fa(plinko.min_entry) + " روب‌پوینته.", false); return; }
     if (amt > plinko.max_entry) { toast("سقف مبلغ ورودی " + fa(plinko.max_entry) + " روب‌پوینته.", false); return; }
@@ -1718,6 +1738,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
         showPlinkoResult(r);
         try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(r.profit > 0 ? "success" : "warning"); } catch(e){}
         plinkoBusy = false; $("pDrop").disabled = false;
+        plinkoCdStart(r.cooldown || 45);          // ۴۵ ثانیه بعد از اتمام بازی
       });
     }).catch(function(e){
       plinkoBusy = false; $("pDrop").disabled = false; toast(e.message, false); loadPlinko();
