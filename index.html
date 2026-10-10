@@ -261,9 +261,45 @@ button:disabled::after,.lb-close::after{display:none}
 .bsteps div.cur{border-color:#ffc46b;background:#2a2a12}
 .bres{text-align:center;font-weight:900;margin:8px 0;min-height:22px}
 /* پلینکو 🔴 */
-.plinko-canvas{width:100%;display:block;border-radius:20px;background:radial-gradient(ellipse at 50% 0%,#194f61 0%,#111b3d 48%,#080d1b 100%);border:1px solid #3e8ca7;margin:10px 0 12px;direction:ltr;box-shadow:0 12px 32px #0008,inset 0 0 30px #40d9ff12}
-#plinkoCard{background:linear-gradient(155deg,#101d32,#0b1325 60%,#12251f);border:1px solid #2e6880;box-shadow:0 10px 35px #0005}
-#plinkoCard .section-title{font-size:19px;color:#a5f3fc;text-shadow:0 0 18px #22d3ee40}
+.plinko-canvas{width:100%;display:block;border-radius:22px;background:radial-gradient(ellipse at 50% 38%,#2a2c52 0%,#161934 52%,#0c0e22 100%);direction:ltr}
+#plinkoCard{background:linear-gradient(160deg,#141733,#0d1024 65%);border:1px solid #3a3f78;box-shadow:0 10px 35px #0006}
+.p-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.p-title{font-size:24px;font-weight:900;color:#fff;text-shadow:0 0 18px #7c6cff66}
+.p-bal{padding:8px 14px;border-radius:999px;background:#10142b;border:1px solid #3a3f78;color:#ffd45e;font-weight:900;font-size:15px;direction:ltr}
+.p-modes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.p-modes button{padding:12px 6px;border-radius:18px;border:1.5px solid #343a6e;background:#12152c;color:#cfd3f5;font-family:inherit;line-height:1.5;text-align:center}
+.p-modes button b{display:block;font-size:19px;color:#fff}
+.p-modes button span{font-size:11.5px;color:#9aa0d6}
+.p-modes button.on{border-color:#ffc93d;background:linear-gradient(160deg,#3a2c14,#241a0c);box-shadow:0 0 18px #ffc93d33}
+.p-modes button.on b{color:#ffd45e}.p-modes button.on span{color:#f3d58a}
+.p-board{border-radius:24px;background:#10132a;border:1px solid #2f3466;padding:10px 10px 12px}
+.p-board-top{display:flex;justify-content:space-between;color:#aeb4ec;font-weight:800;font-size:13px;padding:2px 8px 8px}
+.p-wrap{position:relative}
+.p-result{position:absolute;left:8%;right:8%;top:50%;transform:translateY(-52%);background:linear-gradient(165deg,#1d2150f2,#0b0e24f7);border:1.5px solid #ffc93d;border-radius:22px;padding:16px 14px 12px;text-align:center;box-shadow:0 0 40px #000c,0 0 26px #ffc93d44;animation:prPop .35s cubic-bezier(.2,1.4,.4,1);backdrop-filter:blur(3px)}
+@keyframes prPop{from{opacity:0;transform:translateY(-45%) scale(.82)}to{opacity:1;transform:translateY(-52%) scale(1)}}
+.pr-emoji{font-size:30px;line-height:1}
+.pr-mult{font-size:44px;font-weight:900;color:#ffd45e;text-shadow:0 0 22px #ffc93d88;line-height:1.2;direction:ltr}
+.pr-mult.lose{color:#ff8a9a;text-shadow:0 0 22px #ff4d6d66}
+.pr-msg{font-size:14.5px;font-weight:800;color:#fff;margin:2px 0 10px;line-height:1.7}
+.pr-lines{text-align:right;background:#0a0c1ccc;border:1px solid #2c3160;border-radius:14px;padding:6px 12px;margin-bottom:12px}
+.pr-row{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed #2c316088;font-size:13px}
+.pr-row:last-child{border-bottom:0}.pr-row span{color:#aeb4ec}.pr-row b{color:#fff}
+.pr-row b.pos{color:#5ef0a8}.pr-row b.neg{color:#ff8a9a}
+.pr-close{margin-top:8px;background:none;border:0;color:#9aa0d6;font-family:inherit;font-size:12.5px;padding:6px 12px}
+.p-last{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:12px 0;padding:12px 16px;border-radius:18px;background:#10132a;border:1px solid #2f3466}
+.p-last-chips{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-start;direction:ltr}
+.p-chip{padding:4px 9px;border-radius:10px;font-weight:900;font-size:12.5px;color:#fff}
+.p-bet{border-radius:22px;background:#10132a;border:1px solid #2f3466;padding:14px}
+.p-bet-top{display:flex;justify-content:space-between;align-items:center;color:#d6daf8;font-weight:800;margin-bottom:10px}
+.p-bet-top b{color:#ffd45e;font-size:17px}
+.p-chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;direction:ltr}
+.p-chips button{flex:0 0 auto;padding:11px 18px;border-radius:999px;border:1.5px solid #343a6e;background:#161a38;color:#fff;font-weight:900;font-family:inherit;font-size:14px}
+.p-chips button.on{background:#f4b73a;border-color:#f4b73a;color:#2a1a04}
+.p-ctrl{display:grid;grid-template-columns:64px 1fr 64px;gap:8px;margin-bottom:12px}
+.p-small{border-radius:16px;border:1.5px solid #343a6e;background:#161a38;color:#fff;font-weight:900;font-size:17px;font-family:inherit}
+.p-ctrl input{width:100%;box-sizing:border-box;text-align:center;border-radius:16px;border:1.5px solid #343a6e;background:#0a0c1c;color:#fff;font-weight:800;font-size:15px;padding:12px 6px;font-family:inherit}
+.p-drop{width:100%;font-size:17px;padding:14px;background:linear-gradient(180deg,#ffd45e,#f0a91f)!important;color:#2a1a04!important;border:0!important;box-shadow:0 8px 22px #f0a91f44}
+.p-drop:disabled{opacity:.55}
 .prisk{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0}
 .prisk button{border:1px solid #38516e;background:linear-gradient(145deg,#1a2b45,#111c30);color:#eaf7ff;border-radius:14px;padding:11px 3px;font-weight:900;font-size:12.5px;font-family:inherit;box-shadow:0 4px 10px #0003;transition:transform .15s,border-color .15s}
 .prisk button:active{transform:scale(.97)}
@@ -590,16 +626,38 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     <div class="muted" style="margin-top:8px;line-height:1.9">۱۲ خانه داریم و ۳ تاش بمبه. هر خانه‌ی سالم پاداشش رو بالا می‌بره؛ بمب پیدا کنی همه‌چی می‌سوزه.</div>
   </div>
   <div id="plinkoCard" class="card" style="display:none">
-    <div class="section-title">🔴 پلینکو</div>
-    <div class="bomb-top"><span>💰 موجودی: <b id="pBal">—</b></span><span class="muted">۱۰ ردیف</span></div>
-    <canvas id="pCanvas" class="plinko-canvas" width="320" height="360"></canvas>
-    <div class="prisk" id="pRisk"></div>
-    <div class="bomb-amt"><input id="pAmt" type="number" inputmode="numeric" placeholder="مبلغ ورودی" autocomplete="off"></div>
-    <div class="chips" id="pChips"></div>
-    <button id="pDrop" class="action" style="width:100%">🔴 توپ رو رها کن</button>
-    <div id="pRes" class="bres"></div>
+    <div class="p-head">
+      <div class="p-bal">🪙 <b id="pBal">—</b></div>
+      <div class="p-title">🔴 پلینکو</div>
+    </div>
+    <div class="p-modes" id="pRisk"></div>
+    <div class="p-board">
+      <div class="p-board-top"><span id="pModeName">صفحه وحشی</span><span id="pRowsName">ردیف ۱۴</span></div>
+      <div class="p-wrap">
+        <canvas id="pCanvas" class="plinko-canvas" width="320" height="420"></canvas>
+        <div id="pResult" class="p-result" style="display:none">
+          <div class="pr-emoji" id="prEmoji">🎉</div>
+          <div class="pr-mult" id="prMult">×۰</div>
+          <div class="pr-msg" id="prMsg"></div>
+          <div class="pr-lines" id="prLines"></div>
+          <button id="prAgain" class="action" style="width:100%">🔁 پرتاب دوباره</button>
+          <button id="prClose" class="pr-close" type="button">بستن</button>
+        </div>
+      </div>
+    </div>
+    <div class="p-last"><span class="muted" style="margin:0">نتیجه آخر</span><div id="pLast" class="p-last-chips"><span class="muted" style="margin:0">منتظر توپ بعدی</span></div></div>
+    <div class="p-bet">
+      <div class="p-bet-top"><span>مبلغ بازی</span><b id="pAmtShow">—</b></div>
+      <div class="p-chips" id="pChips"></div>
+      <div class="p-ctrl">
+        <button id="pHalf" class="p-small" type="button">½</button>
+        <input id="pAmt" type="number" inputmode="numeric" placeholder="مبلغ دلخواه" autocomplete="off">
+        <button id="pDouble" class="p-small" type="button">2×</button>
+      </div>
+      <button id="pDrop" class="action p-drop">🔴 توپ رو رها کن</button>
+    </div>
     <div class="muted" id="pRule" style="line-height:1.9"></div>
-    <div class="muted" style="margin-top:6px;line-height:1.9">توپ از بالا می‌افته و تو هر ردیف تصادفی چپ یا راست می‌ره. هر چی خونه‌ی نهایی به لبه‌ها نزدیک‌تر باشه ضریبش بیشتره، ولی احتمالش کمتره!</div>
+    <div class="muted" style="margin-top:6px;line-height:1.9">توپ از بالا می‌افته و تو هر ردیف تصادفی چپ یا راست می‌ره. خانه‌های لبه ضریب بیشتری دارن ولی احتمالشون کمه!</div>
   </div>
 </section>
 
@@ -1442,122 +1500,232 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   };
 
   // ---------- پلینکو 🔴 ----------
-  var plinko = null, plinkoBusy = false, plinkoRisk = "mid", plinkoLanded = -1;
+  var plinko = null, plinkoBusy = false, plinkoRisk = "wild", plinkoLanded = -1, plinkoAmt = 0, plinkoHist = [], plinkoFlash = [], plinkoLastResult = null;
+  function plkColors(m){
+    if (m >= 10) return ["#e84896", "#96246c"];
+    if (m >= 4)  return ["#c854d6", "#783096"];
+    if (m >= 1.5) return ["#9664e8", "#583ea0"];
+    if (m >= 1)  return ["#3ebebe", "#1e707c"];
+    if (m > 0)   return ["#5878a0", "#324660"];
+    return ["#464e68", "#262a3e"];
+  }
   function plinkoGeom(){
     var cv = $("pCanvas"), W = (cv && cv.clientWidth) || 320;
-    var rows = plinko ? plinko.rows : 10;
-    var s = W / (rows + 2), dy = s * 0.92, top = s * 0.95, slotH = s * 0.9;
-    var yR = top + rows * dy;
-    return { W: W, H: Math.ceil(yR - slotH * 0.4 + slotH + 6), s: s, dy: dy, top: top, rows: rows, slotH: slotH };
+    var rows = plinko ? plinko.rows : 14;
+    var s = (W - 14) / (rows + 1), dy = s * 1.04, top = s * 1.5, bh = s * 1.55;
+    var bTop = top + (rows - 1) * dy + s * 0.75;
+    return { W: W, H: Math.ceil(bTop + bh + 10), s: s, dy: dy, top: top, rows: rows, pr: Math.max(2.4, s * 0.15), br: Math.max(5, s * 0.3), bTop: bTop, bh: bh };
   }
-  function plinkoPos(g, n, k){ return { x: g.W / 2 + (k - n / 2) * g.s, y: g.top + n * g.dy }; }
-  function plinkoDraw(ball){
+  function plinkoPeg(g, n, k){ return { x: g.W / 2 + (k - n / 2) * g.s, y: g.top + n * g.dy }; }
+  function plinkoSlotX(g, k){ return g.W / 2 + (k - g.rows / 2) * g.s; }
+  function plinkoRoundRect(c, x, y, w, h, r){
+    c.beginPath(); c.moveTo(x + r, y); c.lineTo(x + w - r, y); c.quadraticCurveTo(x + w, y, x + w, y + r);
+    c.lineTo(x + w, y + h - r); c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    c.lineTo(x + r, y + h); c.quadraticCurveTo(x, y + h, x, y + h - r); c.lineTo(x, y + r); c.quadraticCurveTo(x, y, x + r, y); c.closePath();
+  }
+  function plinkoDraw(ball, trail){
     var cv = $("pCanvas"); if (!cv) return;
     var g = plinkoGeom(), dpr = window.devicePixelRatio || 1;
     var pw = Math.round(g.W * dpr), ph = Math.round(g.H * dpr);
     if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; cv.style.height = g.H + "px"; }
     var c = cv.getContext("2d");
     c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, g.W, g.H);
-    var n, k, p;
-    c.fillStyle = "#cfe9db";
+    var n, k, p, now = performance.now();
+    // هاله‌ی مرکزی
+    var halo = c.createRadialGradient(g.W / 2, g.top + g.dy * 6, 10, g.W / 2, g.top + g.dy * 6, g.W * 0.62);
+    halo.addColorStop(0, "rgba(120,100,255,.20)"); halo.addColorStop(1, "rgba(120,100,255,0)");
+    c.fillStyle = halo; c.fillRect(0, 0, g.W, g.H);
+    // میخ‌ها
     for (n = 0; n < g.rows; n++) for (k = 0; k <= n; k++) {
-      p = plinkoPos(g, n, k); c.beginPath(); c.arc(p.x, p.y, g.s * 0.085, 0, Math.PI * 2); c.fill();
+      p = plinkoPeg(g, n, k);
+      var fl = 0, i;
+      for (i = 0; i < plinkoFlash.length; i++) if (plinkoFlash[i].n === n && plinkoFlash[i].k === k) fl = Math.max(0, 1 - (now - plinkoFlash[i].t) / 380);
+      if (fl > 0) {
+        var gg = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, g.pr * 4.2);
+        gg.addColorStop(0, "rgba(255,226,140," + (0.85 * fl) + ")"); gg.addColorStop(1, "rgba(255,226,140,0)");
+        c.fillStyle = gg; c.beginPath(); c.arc(p.x, p.y, g.pr * 4.2, 0, Math.PI * 2); c.fill();
+      }
+      var pg = c.createRadialGradient(p.x - g.pr * 0.35, p.y - g.pr * 0.4, g.pr * 0.1, p.x, p.y, g.pr);
+      pg.addColorStop(0, fl > 0.2 ? "#fffbe6" : "#e4d8ff"); pg.addColorStop(1, fl > 0.2 ? "#ffd45e" : "#8d6cf0");
+      c.fillStyle = pg; c.beginPath(); c.arc(p.x, p.y, g.pr * (1 + 0.35 * fl), 0, Math.PI * 2); c.fill();
     }
+    // خانه‌ها
     var mult = (plinko && plinko.risks[plinkoRisk]) ? plinko.risks[plinkoRisk].mult : [];
     c.textAlign = "center"; c.textBaseline = "middle";
-    c.font = "800 " + Math.max(9, Math.round(g.s * 0.36)) + "px sans-serif";
+    var fs = Math.max(7.5, Math.round(g.s * 0.4));
     for (k = 0; k <= g.rows; k++) {
-      p = plinkoPos(g, g.rows, k);
-      var m = mult[k], w = g.s * 0.86, x0 = p.x - w / 2, y0 = p.y - g.slotH * 0.4, r = Math.min(7, w / 3);
-      c.beginPath();
-      c.moveTo(x0 + r, y0); c.lineTo(x0 + w - r, y0); c.quadraticCurveTo(x0 + w, y0, x0 + w, y0 + r);
-      c.lineTo(x0 + w, y0 + g.slotH - r); c.quadraticCurveTo(x0 + w, y0 + g.slotH, x0 + w - r, y0 + g.slotH);
-      c.lineTo(x0 + r, y0 + g.slotH); c.quadraticCurveTo(x0, y0 + g.slotH, x0, y0 + g.slotH - r);
-      c.lineTo(x0, y0 + r); c.quadraticCurveTo(x0, y0, x0 + r, y0); c.closePath();
-      c.fillStyle = m === undefined ? "#2c4a3c" : m >= 3 ? "#ffb000" : m >= 1 ? "#2fbf7a" : "#a8402f";
-      if (k === plinkoLanded) { c.save(); c.shadowColor = "#ffffff"; c.shadowBlur = 14; c.fill(); c.restore(); c.lineWidth = 2; c.strokeStyle = "#fff"; c.stroke(); }
-      else c.fill();
-      if (m !== undefined) { c.fillStyle = m >= 3 ? "#2a1204" : "#fff"; c.fillText(String(m), p.x, y0 + g.slotH / 2 + 0.5); }
+      var m = mult[k], cx = plinkoSlotX(g, k), w = g.s - 2.6, x0 = cx - w / 2, y0 = g.bTop;
+      var cols = m === undefined ? ["#33405a", "#222b40"] : plkColors(m), hot = (k === plinkoLanded);
+      var lg = c.createLinearGradient(0, y0, 0, y0 + g.bh); lg.addColorStop(0, cols[0]); lg.addColorStop(1, cols[1]);
+      if (hot) { c.save(); c.shadowColor = "#ffffff"; c.shadowBlur = 18; }
+      plinkoRoundRect(c, x0, y0, w, g.bh, Math.min(8, w / 3)); c.fillStyle = lg; c.fill();
+      if (hot) { c.restore(); c.lineWidth = 2; c.strokeStyle = "#fff"; c.stroke(); }
+      else { c.lineWidth = 1; c.strokeStyle = "rgba(255,255,255,.28)"; c.stroke(); }
+      if (m !== undefined) {
+        var label = String(m) + "×", f2 = label.length <= 3 ? fs : (label.length === 4 ? fs * 0.86 : fs * 0.74);
+        c.font = "800 " + f2 + "px sans-serif"; c.fillStyle = "#fff"; c.fillText(label, cx, y0 + g.bh / 2 + 0.5);
+      }
+    }
+    // دنباله و توپ
+    if (trail) for (var t = 0; t < trail.length; t++) {
+      var a = (t + 1) / (trail.length + 1);
+      c.fillStyle = "rgba(255,190,70," + (0.28 * a) + ")";
+      c.beginPath(); c.arc(trail[t].x, trail[t].y, g.br * (0.45 + 0.4 * a), 0, Math.PI * 2); c.fill();
     }
     if (ball) {
-      var br = g.s * 0.2, grd = c.createRadialGradient(ball.x - br * 0.35, ball.y - br * 0.35, br * 0.1, ball.x, ball.y, br);
-      grd.addColorStop(0, "#fff3c4"); grd.addColorStop(1, "#ff9a3c");
-      c.beginPath(); c.arc(ball.x, ball.y, br, 0, Math.PI * 2); c.fillStyle = grd; c.fill();
+      var br = g.br, gl = c.createRadialGradient(ball.x, ball.y, br * 0.5, ball.x, ball.y, br * 2.6);
+      gl.addColorStop(0, "rgba(255,190,60,.55)"); gl.addColorStop(1, "rgba(255,190,60,0)");
+      c.fillStyle = gl; c.beginPath(); c.arc(ball.x, ball.y, br * 2.6, 0, Math.PI * 2); c.fill();
+      var bg = c.createRadialGradient(ball.x - br * 0.35, ball.y - br * 0.4, br * 0.1, ball.x, ball.y, br);
+      bg.addColorStop(0, "#fff5c8"); bg.addColorStop(0.45, "#ffc12e"); bg.addColorStop(1, "#d97a0a");
+      c.beginPath(); c.arc(ball.x, ball.y, br, 0, Math.PI * 2); c.fillStyle = bg; c.fill();
+    } else if (plinkoLanded >= 0) {
+      var bx = plinkoSlotX(g, plinkoLanded), by = g.bTop + g.bh * 0.5, r2 = g.br * 0.9;
+      var b2 = c.createRadialGradient(bx - r2 * 0.35, by - r2 * 0.4, r2 * 0.1, bx, by, r2);
+      b2.addColorStop(0, "#fff5c8"); b2.addColorStop(0.45, "#ffc12e"); b2.addColorStop(1, "#d97a0a");
+      c.beginPath(); c.arc(bx, by - g.bh * 0.22, r2, 0, Math.PI * 2); c.fillStyle = b2; c.fill();
     }
   }
   function plinkoAnimate(path, slot, done){
-    var STEP = 300, start = null, finished = false;
-    plinkoLanded = -1;
+    var g = plinkoGeom(), rows = path.length, kk = 0, i;
+    var way = [{ x: g.W / 2, y: g.top - g.s * 1.4, peg: null }];
+    for (i = 0; i < rows; i++) {
+      var pp = plinkoPeg(g, i, kk);
+      way.push({ x: pp.x, y: pp.y - (g.pr + g.br - 1), peg: { n: i, k: kk } });
+      kk += path[i];
+    }
+    way.push({ x: plinkoSlotX(g, slot), y: g.bTop + g.bh * 0.5 - g.bh * 0.22, peg: null });
+    var DUR = []; for (i = 0; i < way.length - 1; i++) DUR.push(i === 0 ? 260 : (i === way.length - 2 ? 330 : 175));
+    var start = null, finished = false, seg = 0, segStart = 0, trail = [], lastPush = 0;
+    plinkoLanded = -1; plinkoFlash = [];
     function frame(now){
       if (finished) return;
-      if (start === null) start = now;
-      var g = plinkoGeom(), rows = path.length, el = now - start;
-      var i = Math.min(rows, Math.floor(el / STEP)), kk = 0, j;
-      for (j = 0; j < i; j++) kk += path[j];
-      var off = g.s * 0.27, a = plinkoPos(g, i, kk), pos;
-      if (i >= rows) { pos = { x: a.x, y: a.y }; }
-      else {
-        var f = (el - i * STEP) / STEP, b = plinkoPos(g, i + 1, kk + path[i]);
-        var offB = (i + 1 >= rows) ? 0 : off;
-        pos = { x: a.x + (b.x - a.x) * f,
-                y: (a.y - off) + ((b.y - offB) - (a.y - off)) * f - Math.sin(Math.PI * f) * g.s * 0.3 };
+      if (start === null) { start = now; segStart = now; }
+      g = plinkoGeom();
+      // آرایش مجدد نقاط اگه اندازه عوض شد
+      var a = way[seg], b = way[seg + 1], t = Math.min(1, (now - segStart) / DUR[seg]);
+      var hop = (seg > 0 && seg < way.length - 2) ? g.s * 0.22 : 0;
+      var pos = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t * t - hop * 4 * t * (1 - t) };
+      if (now - lastPush > 28) { trail.push({ x: pos.x, y: pos.y }); if (trail.length > 5) trail.shift(); lastPush = now; }
+      if (t >= 1) {
+        if (b.peg) plinkoFlash.push({ n: b.peg.n, k: b.peg.k, t: now });
+        seg++; segStart = now;
+        if (seg >= way.length - 1) {
+          finished = true; plinkoLanded = slot; plinkoFlash = []; plinkoDraw(null, null);
+          try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred("light"); } catch(e){}
+          done(); return;
+        }
+        try { tg && tg.HapticFeedback && tg.HapticFeedback.selectionChanged && tg.HapticFeedback.selectionChanged(); } catch(e){}
       }
-      if (i >= rows && el >= rows * STEP + 150) {
-        finished = true; plinkoLanded = slot; plinkoDraw(null); done(); return;
-      }
-      plinkoDraw(pos);
+      plinkoDraw(pos, trail);
       requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);
   }
+  function plinkoCur(){ return plinko && plinko.risks[plinkoRisk]; }
   function drawPlinkoRisk(){
     var box = $("pRisk"); box.innerHTML = "";
     if (!plinko) return;
     Object.keys(plinko.risks).forEach(function(key){
-      var b = document.createElement("button"); var used = (plinko.daily_plays && plinko.daily_plays[key]) || 0; var lim = plinko.risks[key].daily_limit || ({low:7,mid:5,high:10}[key]); b.textContent = plinko.risks[key].title + "\n" + used + "/" + lim + " امروز"; b.style.whiteSpace = "pre-line";
+      var r = plinko.risks[key], used = (plinko.daily_plays && plinko.daily_plays[key]) || 0;
+      var b = document.createElement("button"); b.type = "button";
+      var t = document.createElement("b"); t.textContent = r.title;
+      var sp = document.createElement("span"); sp.textContent = r.sub + " · " + fa(used) + "/" + fa(r.daily_limit) + " امروز";
+      b.appendChild(t); b.appendChild(sp);
       if (key === plinkoRisk) b.className = "on";
-      b.onclick = function(){ if (plinkoBusy) return; plinkoRisk = key; plinkoLanded = -1; drawPlinkoRisk(); plinkoDraw(); };
+      b.onclick = function(){ if (plinkoBusy) return; plinkoRisk = key; plinkoLanded = -1; hidePlinkoResult(); drawPlinkoRisk(); drawPlinkoMeta(); plinkoDraw(); };
       box.appendChild(b);
     });
+    drawPlinkoMeta();
+  }
+  function drawPlinkoMeta(){
+    var r = plinkoCur(); if (!r) return;
+    $("pModeName").textContent = "صفحه " + r.title;
+    $("pRowsName").textContent = "ردیف " + fa(plinko.rows);
+  }
+  function setPlinkoAmt(v){
+    v = Math.floor(Number(v) || 0);
+    if (plinko) { v = Math.min(v, plinko.max_entry); }
+    plinkoAmt = v; $("pAmt").value = v ? v : "";
+    $("pAmtShow").textContent = v ? fa(v) + " روب‌پوینت" : "—";
+    var bs = $("pChips").children, i;
+    for (i = 0; i < bs.length; i++) bs[i].className = (Number(bs[i].getAttribute("data-v")) === v) ? "on" : "";
+  }
+  function drawPlinkoLast(){
+    var box = $("pLast"); box.innerHTML = "";
+    if (!plinkoHist.length) { var e = document.createElement("span"); e.className = "muted"; e.style.margin = "0"; e.textContent = "منتظر توپ بعدی"; box.appendChild(e); return; }
+    plinkoHist.slice(-6).reverse().forEach(function(m){
+      var sp = document.createElement("span"); sp.className = "p-chip"; sp.textContent = m + "×"; sp.style.background = plkColors(m)[1]; sp.style.border = "1px solid " + plkColors(m)[0]; box.appendChild(sp);
+    });
+  }
+  function hidePlinkoResult(){ $("pResult").style.display = "none"; }
+  function showPlinkoResult(r){
+    plinkoLastResult = r;
+    var win = r.profit > 0, even = r.profit === 0;
+    $("prEmoji").textContent = win ? (r.mult >= 5 ? "🤑" : "🎉") : (even ? "😐" : "😢");
+    var pm = $("prMult"); pm.textContent = "×" + r.mult; pm.className = "pr-mult" + (win || even ? "" : " lose");
+    $("prMsg").textContent = r.message;
+    var L = $("prLines"); L.innerHTML = "";
+    function row(k, v, cls){ var d = document.createElement("div"); d.className = "pr-row"; var a = document.createElement("span"); a.textContent = k; var b = document.createElement("b"); b.textContent = v; if (cls) b.className = cls; d.appendChild(a); d.appendChild(b); L.appendChild(d); }
+    row("💵 مبلغ شرط", fa(r.amount) + " روب‌پوینت");
+    row("✖️ ضریب", "×" + fa(r.mult));
+    row("🧮 دریافتی", fa(r.amount) + " × " + fa(r.mult) + " = " + fa(r.payout));
+    row(win ? "📈 سود خالص" : (even ? "➖ سود و زیان" : "📉 زیان خالص"), even ? "۰" : fa(Math.abs(r.profit)) + " روب‌پوینت", win ? "pos" : (even ? "" : "neg"));
+    row("💼 موجودی کیف پول", fa(r.balance) + " روب‌پوینت");
+    row("🎯 سهمیه امروز", fa(r.daily_used) + "/" + fa(r.daily_limit));
+    var again = $("prAgain"); again.textContent = "🔁 پرتاب دوباره (" + fa(r.amount) + ")";
+    again.disabled = r.daily_used >= r.daily_limit;
+    $("pResult").style.display = "";
   }
   function loadPlinko(){
     if (plinkoBusy) return Promise.resolve();
     return api("/api/plinko").then(function(d){
+      var first = !plinko;
       plinko = d;
+      if (first && d.default_mode && d.risks[d.default_mode]) plinkoRisk = d.default_mode;
       if (!d.risks[plinkoRisk]) plinkoRisk = Object.keys(d.risks)[0];
       $("pBal").textContent = fa(d.balance);
+      var lims = Object.keys(d.risks).map(function(k){ return d.risks[k].title + " " + fa(d.risks[k].daily_limit); }).join("، ");
       $("pRule").textContent = d.disabled ? "🛠 کازینو فعلاً غیرفعاله." :
-        d.unlocked ? ("حداقل " + fa(d.min_entry) + " و حداکثر " + fa(d.max_entry) + " روب‌پوینت. سهمیه روزانه: کم‌ریسک ۷، متوسط ۵، پرریسک ۱۰ بار؛ هر سطح جداگانه و هر روز از نو.") :
+        d.unlocked ? ("حداقل " + fa(d.min_entry) + " و حداکثر " + fa(d.max_entry) + " روب‌پوینت. سهمیه روزانه: " + lims + " بار؛ هر حالت جداگانه و هر روز از نو.") :
         ("🔒 کازینو از سطح " + fa(d.unlock_level) + " باز می‌شه. (سطح تو: " + fa(d.level) + ")");
       $("pDrop").disabled = !d.unlocked || d.disabled;
       var chips = $("pChips"); chips.innerHTML = "";
-      [1000, 5000, 20000, 100000].forEach(function(v){
+      [1000, 5000, 25000, 100000, 500000, 1000000].forEach(function(v){
         if (v < d.min_entry || v > d.max_entry) return;
-        var b = document.createElement("button"); b.textContent = fa(v);
-        b.onclick = function(){ $("pAmt").value = v; }; chips.appendChild(b);
+        var b = document.createElement("button"); b.type = "button"; b.textContent = fa(v); b.setAttribute("data-v", v);
+        b.onclick = function(){ if (!plinkoBusy) setPlinkoAmt(v); }; chips.appendChild(b);
       });
-      drawPlinkoRisk(); plinkoDraw(); stamp();
-    }).catch(function(e){ if (!e.gate) $("pRes").textContent = "خطا: " + e.message; });
+      if (!plinkoAmt) setPlinkoAmt(Math.max(d.min_entry, 1000)); else setPlinkoAmt(plinkoAmt);
+      drawPlinkoRisk(); drawPlinkoLast(); plinkoDraw(); stamp();
+    }).catch(function(e){ if (!e.gate) toast(e.message, false); });
   }
-  $("pDrop").onclick = function(){
+  $("pAmt").addEventListener("input", function(){ var v = Math.floor(Number($("pAmt").value) || 0); plinkoAmt = v; $("pAmtShow").textContent = v ? fa(v) + " روب‌پوینت" : "—"; var bs = $("pChips").children, i; for (i = 0; i < bs.length; i++) bs[i].className = (Number(bs[i].getAttribute("data-v")) === v) ? "on" : ""; });
+  $("pHalf").onclick = function(){ if (!plinkoBusy) setPlinkoAmt(Math.max(plinko ? plinko.min_entry : 1, Math.floor(plinkoAmt / 2))); };
+  $("pDouble").onclick = function(){ if (!plinkoBusy) setPlinkoAmt(plinkoAmt * 2); };
+  function plinkoThrow(){
     if (plinkoBusy || !plinko) return;
-    var amt = parseInt($("pAmt").value, 10);
+    var amt = plinkoAmt;
     if (!amt || amt < plinko.min_entry) { toast("حداقل مبلغ ورودی " + fa(plinko.min_entry) + " روب‌پوینته.", false); return; }
     if (amt > plinko.max_entry) { toast("سقف مبلغ ورودی " + fa(plinko.max_entry) + " روب‌پوینته.", false); return; }
-    plinkoBusy = true; $("pDrop").disabled = true; $("pRes").textContent = ""; plinkoLanded = -1;
+    plinkoBusy = true; $("pDrop").disabled = true; hidePlinkoResult(); plinkoLanded = -1;
     api("/api/plinko/drop", "POST", { amount: amt, risk: plinkoRisk }).then(function(r){
       $("pBal").textContent = fa(r.balance - r.payout);          // ورودی همون لحظه کم می‌شه
       plinkoAnimate(r.path, r.slot, function(){
         plinko.balance = r.balance; $("pBal").textContent = fa(r.balance);
         if (!plinko.daily_plays) plinko.daily_plays = {}; plinko.daily_plays[plinkoRisk] = r.daily_used;
-        $("pRes").textContent = r.message; drawPlinkoRisk(); toast(r.message, r.profit >= 0);
-        try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(r.profit > 0 ? "medium" : "light"); } catch(e){}
+        plinkoHist.push(r.mult); drawPlinkoLast(); drawPlinkoRisk();
+        showPlinkoResult(r);
+        try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(r.profit > 0 ? "success" : "warning"); } catch(e){}
         plinkoBusy = false; $("pDrop").disabled = false;
       });
     }).catch(function(e){
       plinkoBusy = false; $("pDrop").disabled = false; toast(e.message, false); loadPlinko();
     });
-  };
+  }
+  $("pDrop").onclick = plinkoThrow;
+  $("prAgain").onclick = function(){ hidePlinkoResult(); plinkoThrow(); };
+  $("prClose").onclick = hidePlinkoResult;
   window.addEventListener("resize", function(){ if (bombMode === "plinko" && !plinkoBusy) plinkoDraw(); });
 
   // ---------- روباهیو درس ----------

@@ -1778,8 +1778,9 @@ async def casino_command(update, context):
         [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
         [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
         [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
+        [InlineKeyboardButton("🔴 پلینکو",callback_data=f"plk:open:{owner_id}")],
     ])
-    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۱۲ خانه · ۳ بمب رندوم\n┘─ هر خانه‌ی سالم: ۲۵٪ اضافه روی مبلغ ورودی (تجمعی)؛ با بمب، جایزه صفر\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۱۲ خانه · ۳ بمب رندوم\n┘─ هر خانه‌ی سالم: ۲۵٪ اضافه روی مبلغ ورودی (تجمعی)؛ با بمب، جایزه صفر\n\n🔴 پلینکو\n┘─ یک‌نفره · ۱۴ ردیف · حالت آرام و وحشی · نتیجه به‌صورت گیف\n┘─ ضریب تا ۲۰ برابر مبلغ شرط!\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
@@ -2360,7 +2361,264 @@ def _casino_menu_kb(owner_id):
         [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
         [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
         [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
+        [InlineKeyboardButton("🔴 پلینکو",callback_data=f"plk:open:{owner_id}")],
     ])
+
+
+# ── 🔴 پلینکو (کازینو) ──
+# گفتن «کازینو» → دکمه‌ی «🔴 پلینکو» → انتخاب حالت (آرام/وحشی) و مبلغ → پرتاب → نتیجه به‌صورت گیف.
+import plinko_core
+import plinko_gif
+
+from database import engine as _plk_engine
+plinko_core.ensure_table(_plk_engine)
+PLK_AMOUNTS = [1000, 5000, 25000, 100000, 500000]
+_PLK_BUSY = set()
+_PLK_LAST = {}
+
+
+def _plk_state(context, owner_id):
+    st = context.user_data.get('plinko')
+    if not st or st.get('owner_id') != owner_id:
+        st = {'owner_id': owner_id, 'mode': plinko_core.DEFAULT_MODE, 'amount': None, 'awaiting': None}
+        context.user_data['plinko'] = st
+    return st
+
+
+def plinko_guard(session, user):
+    """شرط‌های کازینو (همون بمب): بن، زندان، لول، مریضی. متن خطا یا None."""
+    if int(getattr(user, 'is_banned', 0) or 0):
+        return "⛔ دسترسی‌ات به ربات بسته شده."
+    ju = getattr(user, 'jail_until', None)
+    if ju and now_utc() < aware(ju):
+        return "⛓️ زندانی هستی! تا پایان حبس از کازینو محرومی."
+    if int(user.level or 1) < CASINO_UNLOCK_LEVEL:
+        return f"🔒 کازینو روبی از سطح {CASINO_UNLOCK_LEVEL} باز می‌شود. (سطح تو: {int(user.level or 1)})"
+    try:
+        sync_fox_sickness(user)
+    except Exception:
+        pass
+    if user.fox_sick_since:
+        session.commit()
+        return "🤒 روباهت مریضه؛ اول درمانش کن."
+    return None
+
+
+def plinko_panel(owner_id, st, points, used):
+    mode = plinko_core.MODES[st['mode']]
+    amount = st.get('amount')
+    lim = mode['daily_limit']
+    txt = ("🔴 پلینکو 🦊\n\n"
+           f"🎛 حالت: {mode['title']} ({mode['sub']})\n"
+           f"🎯 امروز: {used}/{lim} بار\n"
+           f"💰 موجودی کیف پول: {points:,} روب‌پوینت\n"
+           f"💵 مبلغ شرط: {(f'{amount:,} روب‌پوینت') if amount else 'انتخاب نشده ❌'}\n\n"
+           "ضریب خانه‌ها (از چپ به راست):\n" + " | ".join(f"{m:g}×" for m in mode['mult']) +
+           f"\n\nحداقل شرط {plinko_core.MIN_ENTRY:,} و سقف {plinko_core.MAX_ENTRY:,} روب‌پوینت.\n"
+           "⛔️ فقط خودت می‌تونی روی این پنل بزنی.")
+    rows = []
+    rows.append([InlineKeyboardButton(("✅ " if k == st['mode'] else "") + v['title'], callback_data=f"plk:mode:{k}:{owner_id}")
+                 for k, v in plinko_core.MODES.items()])
+    row = []
+    for a in PLK_AMOUNTS:
+        row.append(InlineKeyboardButton(("✅ " if amount == a else "") + f"{a:,}", callback_data=f"plk:amt:{a}:{owner_id}"))
+        if len(row) == 3:
+            rows.append(row); row = []
+    if row: rows.append(row)
+    rows.append([InlineKeyboardButton("✏️ مبلغ دلخواه", callback_data=f"plk:custom:{owner_id}")])
+    if amount:
+        rows.append([InlineKeyboardButton("🎯 پرتاب توپ", callback_data=f"plk:drop:{owner_id}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"plk:back:{owner_id}")])
+    return txt, InlineKeyboardMarkup(rows)
+
+
+def _plk_panel_data(user_id, st):
+    session = get_session()
+    try:
+        u = session.get(User, user_id)
+        pts = int(u.fox_points or 0) if u else 0
+        used = plinko_core.daily_used(session, user_id, st['mode'])
+    finally:
+        session.close()
+    return plinko_panel(user_id, st, pts, used)
+
+
+async def plinko_callback(update, context):
+    q = update.callback_query
+    parts = q.data.split(":")
+    if len(parts) < 3:
+        return
+    try:
+        owner_id = int(parts[-1])
+    except ValueError:
+        return
+    action = parts[1]
+    arg = parts[2] if len(parts) == 4 else None
+    if q.from_user.id != owner_id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.", show_alert=True); return
+    if not await require_membership(update, context): return
+    if CASINO_DISABLED:
+        await q.answer("🃏 کازینو روبی فعلاً غیرفعال است و در حال تعمیر می‌باشد 🛠", show_alert=True); return
+    st = _plk_state(context, owner_id)
+
+    async def show_panel(edit=True, msg=None):
+        txt, kb = _plk_panel_data(owner_id, st)
+        if edit:
+            try: await (msg or q.message).edit_text(txt, reply_markup=kb)
+            except Exception: pass
+        else:
+            await context.bot.send_message(q.message.chat_id, txt, reply_markup=kb)
+
+    if action == 'back':
+        context.user_data.pop('plinko', None)
+        await q.answer()
+        try: await q.message.edit_text('🃏 کازینو روبی🦊\n\n❗️ قمار مورد نظر را انتخاب کن:', reply_markup=_casino_menu_kb(owner_id))
+        except Exception: pass
+        return
+    if action == 'open':
+        session = get_session()
+        try:
+            user = get_or_create_user(session, q.from_user)
+            err = plinko_guard(session, user)
+        finally: session.close()
+        if err:
+            await q.answer(err, show_alert=True); return
+        await q.answer()
+        st['awaiting'] = None
+        await show_panel(); return
+    if action == 'mode':
+        if arg in plinko_core.MODES:
+            st['mode'] = arg
+        await q.answer(); await show_panel(); return
+    if action == 'amt':
+        try: a = int(arg)
+        except Exception: await q.answer(); return
+        st['amount'] = a if plinko_core.MIN_ENTRY <= a <= plinko_core.MAX_ENTRY else st.get('amount')
+        await q.answer(); await show_panel(); return
+    if action == 'custom':
+        st['awaiting'] = 'amount'
+        st['chat_id'] = q.message.chat_id; st['message_id'] = q.message.message_id
+        await q.answer()
+        try:
+            await q.message.edit_text(
+                "🔴 پلینکو 🦊\n\n💰 مبلغ شرط رو بفرست (روب‌پوینت).\n"
+                f"حداقل: {plinko_core.MIN_ENTRY:,} · سقف: {plinko_core.MAX_ENTRY:,}\n"
+                "مثال: 50k / 50کا / 2م / 200000\n\n👇 همین‌جا فقط عدد رو بفرست.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data=f"plk:cancel:{owner_id}")]]))
+        except Exception: pass
+        return
+    if action == 'cancel':
+        st['awaiting'] = None
+        await q.answer(); await show_panel(); return
+    if action == 'panel':        # از زیر گیف نتیجه: تنظیمات
+        await q.answer()
+        try: await q.message.edit_reply_markup(reply_markup=None)
+        except Exception: pass
+        await show_panel(edit=False); return
+    if action in ('drop', 'again'):
+        if action == 'again' and arg and '-' in arg:
+            m_, a_ = arg.split('-', 1)
+            if m_ in plinko_core.MODES:
+                st['mode'] = m_
+            try: st['amount'] = int(a_)
+            except Exception: pass
+        if not st.get('amount'):
+            await q.answer("اول مبلغ شرط رو انتخاب کن.", show_alert=True); return
+        await plinko_play(q, context, owner_id, st, from_result=(action == 'again'))
+        return
+
+
+async def handle_plinko_entry_text(update, context):
+    st = context.user_data.get('plinko')
+    if not st or st.get('awaiting') != 'amount' or update.effective_user.id != st.get('owner_id'):
+        return False
+    if not await require_membership(update, context): return True
+    try:
+        amount = parse_amount(update.message.text)
+        if amount <= 0: raise ValueError
+    except Exception:
+        await update.message.reply_text("❌ مبلغ نامعتبره؛ یک عدد بفرست (مثلاً 5000 یا 50k).", **reply_kwargs(update.message)); return True
+    if amount < plinko_core.MIN_ENTRY or amount > plinko_core.MAX_ENTRY:
+        await update.message.reply_text(f"❌ مبلغ باید بین {plinko_core.MIN_ENTRY:,} و {plinko_core.MAX_ENTRY:,} روب‌پوینت باشه.", **reply_kwargs(update.message)); return True
+    st['amount'] = amount; st['awaiting'] = None
+    txt, kb = _plk_panel_data(st['owner_id'], st)
+    try:
+        await context.bot.edit_message_text(chat_id=st['chat_id'], message_id=st['message_id'], text=txt, reply_markup=kb)
+    except Exception:
+        await update.message.reply_text(txt, reply_markup=kb)
+    return True
+
+
+async def plinko_play(q, context, owner_id, st, from_result=False):
+    uid = owner_id
+    if uid in _PLK_BUSY:
+        await q.answer("⏳ توپ قبلی هنوز در حال سقوطه.", show_alert=True); return
+    _PLK_BUSY.add(uid)
+    try:
+        mode_key, amount = st['mode'], int(st['amount'])
+        mode = plinko_core.MODES[mode_key]
+        loop_now = asyncio.get_event_loop().time()
+        if loop_now - _PLK_LAST.get(uid, -999) < plinko_core.COOLDOWN:
+            await q.answer("⏳ یه لحظه صبر کن تا توپ قبلی بیفته.", show_alert=True); return
+        session = get_session()
+        try:
+            user = session.query(User).filter(User.telegram_id == uid).with_for_update().first()
+            if not user:
+                await q.answer("اول ربات رو استارت کن.", show_alert=True); return
+            err = plinko_guard(session, user)
+            if err:
+                await q.answer(err, show_alert=True); return
+            if amount < plinko_core.MIN_ENTRY or amount > plinko_core.MAX_ENTRY:
+                await q.answer("مبلغ شرط معتبر نیست.", show_alert=True); return
+            used = plinko_core.daily_used(session, uid, mode_key)
+            if used >= mode['daily_limit']:
+                await q.answer(f"⏰ سهمیهٔ امروز حالت «{mode['title']}» تموم شده ({mode['daily_limit']} بار). فردا دوباره بیا.", show_alert=True); return
+            if int(user.fox_points or 0) < amount:
+                await q.answer(f"❌ روب‌پوینت کافی نداری. موجودی: {int(user.fox_points or 0):,}", show_alert=True); return
+            path, slot = plinko_core.roll()
+            mult = float(mode['mult'][slot])
+            pay = plinko_core.payout(amount, mult)
+            user.fox_points = int(user.fox_points or 0) - amount + pay
+            plinko_core.daily_inc(session, uid, mode_key)
+            balance = int(user.fox_points or 0)
+            session.commit()
+        finally:
+            session.close()
+        _PLK_LAST[uid] = loop_now
+        await q.answer("🔴 توپ پرتاب شد!")
+        # پنل/دکمه‌های قبلی بسته می‌شن تا دو بار کلیک نشه
+        try:
+            if from_result:
+                await q.message.edit_reply_markup(reply_markup=None)
+            else:
+                await q.message.edit_text("🔴 پلینکو 🦊\n\n⚪ توپ در حال سقوطه…")
+        except Exception:
+            pass
+        profit = pay - amount
+        calc = (f"🧮 {amount:,} × {mult:g} = {pay:,} روب‌پوینت\n" +
+                (f"📈 سود خالص: {profit:,}" if profit > 0 else (f"📉 زیان خالص: {abs(profit):,}" if profit < 0 else "➖ سود و زیان: صفر")))
+        caption = (f"🔴 پلینکو · حالت {mode['title']}\n\n{plinko_core.result_text(amount, mult, pay)}\n\n{calc}\n"
+                   f"💼 موجودی کیف پول: {balance:,} روب‌پوینت\n🎯 امروز: {used + 1}/{mode['daily_limit']}")
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"🔁 دوباره ({amount:,})", callback_data=f"plk:again:{mode_key}-{amount}:{owner_id}")],
+            [InlineKeyboardButton("⚙️ تنظیمات", callback_data=f"plk:panel:{owner_id}"), InlineKeyboardButton("🔙 کازینو", callback_data=f"plk:back:{owner_id}")],
+        ])
+        chat_id = q.message.chat_id
+        sent = None
+        try:
+            gif = await asyncio.to_thread(plinko_gif.build_gif, path, mode['mult'], amount, pay)
+            bio = io.BytesIO(gif); bio.name = "plinko.gif"
+            sent = await context.bot.send_animation(chat_id, animation=bio, caption=caption, reply_markup=kb, width=plinko_gif.LW, height=plinko_gif.LH)
+        except Exception as exc:
+            logger.warning("plinko gif failed: %s", exc)
+        if sent is None:
+            await context.bot.send_message(chat_id, caption, reply_markup=kb)
+        if not from_result:
+            try: await q.message.delete()
+            except Exception: pass
+    finally:
+        _PLK_BUSY.discard(uid)
+
 
 def _ruby_games_menu_kb(owner_id):
     return InlineKeyboardMarkup([
@@ -12834,6 +13092,7 @@ async def text_router(update, context):
     if await handle_fox_rename_text(update, context): return
     if await handle_marriage_text(update, context): return
     if await handle_edu_question_text(update, context): return
+    if await handle_plinko_entry_text(update, context): return
     if await handle_casino_entry_text(update, context): return
     if await handle_market_text(update, context): return
     if await handle_city_donate_text(update, context): return
@@ -14567,6 +14826,7 @@ def main():
     app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|feed|upgrade):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
     app.add_handler(CallbackQueryHandler(referral_admin_button,pattern=r"^ref:(approve|reject):\d+$"))
+    app.add_handler(CallbackQueryHandler(plinko_callback,pattern=r"^plk:(?:open|mode|amt|custom|cancel|panel|drop|again|back):(?:[A-Za-z0-9_-]+:)?\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+$"))
     app.add_handler(CallbackQueryHandler(casino_setup_callback,pattern=r"^csetup:(?:amount|cancelamount|count|cancelcount|back):(?:xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+$"))
     app.add_handler(CallbackQueryHandler(casino_setup_callback,pattern=r"^csetup:setcount:(?:xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+:\d+$"))

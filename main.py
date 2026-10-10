@@ -1090,44 +1090,18 @@ def bomb_cashout(tg_user: dict = Depends(current_telegram_user)):
 
 
 # ---------------------------------------------------------------------------
-# کازینو: پلینکو 🔴
-# نتیجه (مسیر توپ) کاملاً سمت سرور و با random امن تعیین می‌شه؛ مینی‌اپ فقط همون مسیر رو انیمیشن می‌کنه.
-# شرط‌ها (لول کازینو، زندان، بن، مریضی) همون بمب‌ه. ورودی/سقف/ضرایب از بالای همین بخش قابل تنظیمه
-# یا با متغیرهای PLINKO_MIN_ENTRY / PLINKO_MAX_ENTRY / PLINKO_COOLDOWN تو Railway.
+# کازینو: پلینکو 🔴 (۱۴ ردیف، ۱۵ خانه؛ حالت آرام و وحشی)
+# منطق و ضرایب تو plinko_core.py ـه و با کازینوی ربات مشترکه. نتیجه سمت سرور تعیین می‌شه.
+# ورودی/سقف/فاصله با PLINKO_MIN_ENTRY / PLINKO_MAX_ENTRY / PLINKO_COOLDOWN تو Railway قابل تنظیمه.
 # ---------------------------------------------------------------------------
-import random as _plinko_random_mod
+import plinko_core as _pk
 
-PLINKO_ROWS = 10
-PLINKO_MIN_ENTRY = int(os.environ.get("PLINKO_MIN_ENTRY", "1000") or 1000)
-PLINKO_MAX_ENTRY = int(os.environ.get("PLINKO_MAX_ENTRY", "200000") or 200000)
-PLINKO_COOLDOWN = float(os.environ.get("PLINKO_COOLDOWN", "2") or 2)     # ثانیه؛ فقط برای جلوگیری از اسپم
-
-# ضرایب ۱۱ خانه (از چپ به راست)؛ بازگشت به بازیکن حدود ۹۴ تا ۹۶ درصد
-PLINKO_RISKS = {
-    "low":  {"title": "🟢 کم‌ریسک",   "mult": [5.6, 2.0, 1.3, 1.1, 1.0, 0.5, 1.0, 1.1, 1.3, 2.0, 5.6]},
-    "mid":  {"title": "🟡 متوسط",     "mult": [14.0, 4.0, 1.8, 1.1, 0.7, 0.6, 0.7, 1.1, 1.8, 4.0, 14.0]},
-    "high": {"title": "🔴 پرریسک",    "mult": [50.0, 9.0, 3.0, 1.0, 0.3, 0.2, 0.3, 1.0, 3.0, 9.0, 50.0]},
-}
-_plinko_rng = _plinko_random_mod.SystemRandom()
+_pk.ensure_table(engine)
+PLINKO_ROWS = _pk.ROWS
+PLINKO_MIN_ENTRY = _pk.MIN_ENTRY
+PLINKO_MAX_ENTRY = _pk.MAX_ENTRY
+PLINKO_COOLDOWN = _pk.COOLDOWN
 _plinko_last: dict = {}      # uid -> زمان آخرین پرتاب
-PLINKO_DAILY_LIMITS = {"low": 7, "mid": 5, "high": 10}
-# جدول جداگانه؛ شمارنده‌ها بعد از restart/redeploy هم باقی می‌مانند.
-try:
-    with engine.begin() as _conn:
-        _conn.execute(text("CREATE TABLE IF NOT EXISTS plinko_daily_plays (user_id BIGINT NOT NULL, risk VARCHAR(8) NOT NULL, play_day VARCHAR(10) NOT NULL, plays INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, risk, play_day))"))
-except Exception as _plinko_table_error:
-    print(f"[plinko] daily counter table init failed: {_plinko_table_error}")
-
-
-
-def _plinko_roll(rows=PLINKO_ROWS):
-    """مسیر توپ: هر ردیف ۰=چپ یا ۱=راست؛ خانه‌ی نهایی = تعداد راست‌ها."""
-    path = [_plinko_rng.getrandbits(1) for _ in range(rows)]
-    return path, sum(path)
-
-
-def _plinko_payout(amount: int, mult: float) -> int:
-    return int(amount * mult + 1e-9)
 
 
 @app.get("/api/plinko")
@@ -1138,6 +1112,7 @@ def plinko_state(tg_user: dict = Depends(current_telegram_user)):
         user = session.query(User).filter(User.telegram_id == tg_user["id"]).first()
         if not user:
             raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+        uid = int(user.telegram_id)
         return {
             "unlocked": int(user.level or 1) >= botmod.CASINO_UNLOCK_LEVEL,
             "unlock_level": botmod.CASINO_UNLOCK_LEVEL, "level": int(user.level or 1),
@@ -1145,8 +1120,9 @@ def plinko_state(tg_user: dict = Depends(current_telegram_user)):
             "min_entry": PLINKO_MIN_ENTRY, "max_entry": PLINKO_MAX_ENTRY,
             "balance": int(user.fox_points or 0),
             "rows": PLINKO_ROWS,
-            "risks": {k: {"title": v["title"], "mult": v["mult"], "daily_limit": PLINKO_DAILY_LIMITS[k]} for k, v in PLINKO_RISKS.items()},
-            "daily_plays": {k: int((session.execute(text("SELECT plays FROM plinko_daily_plays WHERE user_id=:uid AND risk=:risk AND play_day=:day"), {"uid": int(user.telegram_id), "risk": k, "day": datetime.now(timezone.utc).date().isoformat()}).scalar() or 0)) for k in PLINKO_DAILY_LIMITS},
+            "default_mode": _pk.DEFAULT_MODE,
+            "risks": {k: {"title": v["title"], "sub": v["sub"], "mult": v["mult"], "daily_limit": v["daily_limit"]} for k, v in _pk.MODES.items()},
+            "daily_plays": {k: _pk.daily_used(session, uid, k) for k in _pk.MODES},
         }
     finally:
         session.close()
@@ -1154,7 +1130,7 @@ def plinko_state(tg_user: dict = Depends(current_telegram_user)):
 
 class PlinkoDrop(BaseModel):
     amount: int
-    risk: str = "mid"
+    risk: str = _pk.DEFAULT_MODE
 
 
 @app.post("/api/plinko/drop")
@@ -1166,47 +1142,40 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
         if getattr(botmod, "CASINO_DISABLED", False):
             raise HTTPException(status_code=403, detail=getattr(botmod, "CASINO_DISABLED_TEXT", "کازینو فعلاً غیرفعاله."))
         _bomb_guard(botmod, session, user)
-        risk = PLINKO_RISKS.get(str(body.risk or "mid"))
-        if not risk:
-            raise HTTPException(status_code=400, detail="سطح ریسک نامعتبره.")
+        mode_key = str(body.risk or _pk.DEFAULT_MODE)
+        mode = _pk.MODES.get(mode_key)
+        if not mode:
+            raise HTTPException(status_code=400, detail="حالت بازی نامعتبره.")
         amount = int(body.amount or 0)
         if amount < PLINKO_MIN_ENTRY:
             raise HTTPException(status_code=400, detail=f"❌ حداقل مبلغ ورودی پلینکو {PLINKO_MIN_ENTRY:,} روب‌پوینته.")
         if amount > PLINKO_MAX_ENTRY:
             raise HTTPException(status_code=400, detail=f"❌ سقف مبلغ ورودی پلینکو {PLINKO_MAX_ENTRY:,} روب‌پوینته.")
         uid = int(user.telegram_id)
-        today = datetime.now(timezone.utc).date().isoformat()
-        used = int(session.execute(text("SELECT plays FROM plinko_daily_plays WHERE user_id=:uid AND risk=:risk AND play_day=:day"), {"uid": uid, "risk": str(body.risk or "mid"), "day": today}).scalar() or 0)
-        daily_limit = PLINKO_DAILY_LIMITS[str(body.risk or "mid")]
+        used = _pk.daily_used(session, uid, mode_key)
+        daily_limit = int(mode["daily_limit"])
         if used >= daily_limit:
-            raise HTTPException(status_code=429, detail=f"⏰ سهمیهٔ امروز این سطح ریسک تموم شده ({daily_limit} بار در روز). فردا دوباره بیا.")
+            raise HTTPException(status_code=429, detail=f"⏰ سهمیهٔ امروز این حالت تموم شده ({daily_limit} بار در روز). فردا دوباره بیا.")
         now = time.time()
         if now - _plinko_last.get(uid, 0) < PLINKO_COOLDOWN:
             raise HTTPException(status_code=429, detail="⏳ یه لحظه صبر کن تا توپ قبلی بیفته.")
         if int(user.fox_points or 0) < amount:
             raise HTTPException(status_code=400, detail="❌ روب‌پوینت کافی نداری.")
-        path, slot = _plinko_roll()
-        mult = float(risk["mult"][slot])
-        payout = _plinko_payout(amount, mult)
+        path, slot = _pk.roll()
+        mult = float(mode["mult"][slot])
+        payout = _pk.payout(amount, mult)
         user.fox_points = int(user.fox_points or 0) - amount + payout
-        session.execute(text("INSERT INTO plinko_daily_plays (user_id, risk, play_day, plays) VALUES (:uid, :risk, :day, 1) ON CONFLICT (user_id, risk, play_day) DO UPDATE SET plays = plinko_daily_plays.plays + 1"), {"uid": uid, "risk": str(body.risk or "mid"), "day": today})
+        _pk.daily_inc(session, uid, mode_key)
         session.commit()
         if len(_plinko_last) > 50000:
             _plinko_last.clear()
         _plinko_last[uid] = now
         profit = payout - amount
-        if profit > 0:
-            msg = f"🎉 ضریب ×{mult:g}! {profit:,} روب‌پوینت سود کردی."
-        elif profit == 0:
-            msg = f"😐 ضریب ×{mult:g}؛ پولت برگشت."
-        else:
-            msg = f"😢 ضریب ×{mult:g}؛ {abs(profit):,} روب‌پوینت باختی."
         used_after = used + 1
         total_assets = int(user.fox_points or 0)
-        breakdown = f"🧮 محاسبه: {amount:,} × {mult:g} = {payout:,} روب‌پوینت دریافتی\n" + (f"📈 سود خالص: {profit:,}" if profit > 0 else (f"📉 زیان خالص: {abs(profit):,}" if profit < 0 else "➖ سود و زیان: صفر")) + f"\n💼 دارایی کل کیف پول: {total_assets:,} روب‌پوینت\n🎯 سهمیهٔ امروزِ این ریسک: {used_after}/{daily_limit}"
-        return {"path": path, "slot": slot, "mult": mult, "payout": payout, "profit": profit,
+        return {"path": path, "slot": slot, "mult": mult, "amount": amount, "payout": payout, "profit": profit,
                 "balance": total_assets, "daily_used": used_after, "daily_limit": daily_limit,
-                "message": msg + "\n" + breakdown}
+                "mode": mode_key, "message": _pk.result_text(amount, mult, payout)}
     except HTTPException:
         session.rollback()
         raise
