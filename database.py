@@ -397,8 +397,9 @@ class RubySmuggling(Base):
     duration_seconds = Column(Integer, nullable=False)
     started_at = Column(DateTime(timezone=True), nullable=False)
     completes_at = Column(DateTime(timezone=True), nullable=False)
-    status = Column(String, nullable=False, default='pending')  # pending | success | caught
+    status = Column(String, nullable=False, default='pending')  # pending | ready | success | caught
     reward = Column(Integer, nullable=False, default=0)
+    kind = Column(String, nullable=False, default='fox')        # fox = روباه زخمی | owl = جغد پیر
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -757,6 +758,10 @@ def init_db():
             conn.execute(text("ALTER TABLE ruby_lucky_bags ADD COLUMN skipped_user_ids VARCHAR"))
         if 'last_card_transfer_at' not in bank_cols:
             conn.execute(text(f'ALTER TABLE bank_accounts ADD COLUMN last_card_transfer_at {DT_SQL_TYPE}'))
+        if 'ruby_smuggling' in inspector.get_table_names():
+            smuggle_cols = {c['name'] for c in inspector.get_columns('ruby_smuggling')}
+            if 'kind' not in smuggle_cols:
+                conn.execute(text("ALTER TABLE ruby_smuggling ADD COLUMN kind VARCHAR NOT NULL DEFAULT 'fox'"))
         if 'ruby_babies' in inspector.get_table_names():
             baby_cols = {c['name'] for c in inspector.get_columns('ruby_babies')}
             if 'last_milk_at' not in baby_cols:

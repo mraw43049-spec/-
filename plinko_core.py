@@ -11,7 +11,7 @@ ROWS = 14                      # ۱۴ ردیف میخ → ۱۵ خانه
 MIN_ENTRY = int(os.environ.get("PLINKO_MIN_ENTRY", "1000") or 1000)
 MAX_ENTRY = int(os.environ.get("PLINKO_MAX_ENTRY", "5000000") or 5000000)
 COOLDOWN = float(os.environ.get("PLINKO_COOLDOWN", "45") or 45)   # ثانیه؛ فاصله‌ی بعد از «اتمام» بازی تا پرتاب بعدی
-ANIM_SECONDS = float(os.environ.get("PLINKO_ANIM_SECONDS", "6") or 6)  # مدت نمایش گیف/انیمیشن؛ شمارش ۴۵ ثانیه بعد از تموم شدنش شروع می‌شه
+ANIM_SECONDS = float(os.environ.get("PLINKO_ANIM_SECONDS", "7") or 7)  # مدت نمایش گیف/انیمیشن؛ شمارش ۴۵ ثانیه بعد از تموم شدنش شروع می‌شه
 
 # ضرایب ۱۵ خانه (از چپ به راست). بازگشت به بازیکن: آرام ≈ ۹۸٫۵٪ ، وحشی ≈ ۹۵٫۳٪
 # سهمیه‌ی روزانه: آرام ۱۵ ، وحشی ۵۰ ؛ پشتیبانی (ADMIN_IDS) نامحدود

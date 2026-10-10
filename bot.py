@@ -415,6 +415,7 @@ SMUGGLING_UNLOCK_LEVEL = 8
 SMUGGLING_MIN = 3
 SMUGGLING_MAX = 15
 SMUGGLING_PRICE_PER_FOX = 5000
+SMUGGLING_PRICE_PER_OWL = 7000       # سقف دستمزد هر جغد پیرِ قاچاق‌شده
 SMUGGLING_BASE_SECONDS = 60 * 60
 SMUGGLING_EXTRA_PER_FOX = 20 * 60
 SMUGGLING_FINE = 25000
@@ -1212,21 +1213,33 @@ async def complete_smuggling(session, record):
         record.status='success'; record.reward=0; session.commit(); return None
     if random.random()*100 < smuggling_risk_percent(record.count):
         record.status='caught'
-        record.reward=vip_smuggle_refund(user, int(record.count)*SMUGGLING_PRICE_PER_FOX)   # اسکین خون‌آشامی: ۲۵٪ برمی‌گردد
+        record.reward=vip_smuggle_refund(user, int(record.count)*smuggling_price(record))   # اسکین خون‌آشامی: ۲۵٪ برمی‌گردد
         if record.reward > 0:
             user.fox_points=int(user.fox_points or 0)+int(record.reward)
         user.jail_until=now_utc()+timedelta(seconds=SMUGGLING_JAIL_SECONDS)
-        user.jail_reason='قاچاق کردن روباه های بی گناه'
+        user.jail_reason=('قاچاق کردن جغدهای پیر و بدبخت' if getattr(record,'kind','fox')=='owl' else 'قاچاق کردن روباه های بی گناه')
         user.jail_fine=SMUGGLING_FINE
         user.jail_arrested_at=now_utc()
         session.commit()
         return ('caught',user,record)
-    record.status='ready'; record.reward=int(record.count)*SMUGGLING_PRICE_PER_FOX
+    record.status='ready'; record.reward=int(record.count)*smuggling_price(record)
     session.commit()
     return ('success',user,record)
 
 
+def smuggling_price(rec_or_kind):
+    kind=rec_or_kind if isinstance(rec_or_kind,str) else getattr(rec_or_kind,'kind','fox')
+    return SMUGGLING_PRICE_PER_OWL if kind=='owl' else SMUGGLING_PRICE_PER_FOX
+
+
+def smuggling_stock(user,kind):
+    return int(user.owl_catch_count or 0) if kind=='owl' else int(user.injured_fox_stock or 0)
+
+
 def smuggling_success_text(rec):
+    if getattr(rec,'kind','fox')=='owl':
+        return (f"🦉 قاچاق جغد پیر با موفقیت انجام شد! 🥷\n\n🦉 {rec.count} جغد قاچاق شد.\n"
+                f"💰 دستمزد: {int(rec.reward):,} روب‌پوینت 🪙\n\n👇 برای گرفتن دستمزد دکمه‌ی زیر رو بزن")
     return (f"🦊 قاچاق روباهیو با موفقیت انجام شد! 🥷\n\n🥩 {rec.count} روباه قاچاق شد.\n"
             f"💰 دستمزد: {int(rec.reward):,} روب‌پوینت 🪙\n\n👇 برای گرفتن دستمزد دکمه‌ی زیر رو بزن")
 
@@ -1237,31 +1250,63 @@ def smuggling_success_keyboard(user_id, rec_id):
 
 def smuggling_caught_text(rec):
     refund=int(rec.reward or 0)
-    return ("روباه زرنگ و باهوش فکر کردی با قاچاق هم نوعات موفق میشی؟ تو گیر افتادی🚔⛓️\n\n"
-            "برای دیدن سلولت بنویس «زندان روبی».")+(f"\n\n🧛🏻‍♀️ اسکین خون‌آشامی: {refund:,} روب‌پوینت (۲۵٪ مبلغ قاچاق) به حسابت برگشت." if refund else "")
+    if getattr(rec,'kind','fox')=='owl':
+        base=("فکر کردی با قاچاق کردن این جغدای پیر و بدبخت به جایی میرسی؟ تو گیر افتادی🚔⛓️\n\n"
+              "برای دیدن سلولت بنویس «زندان روبی».")
+    else:
+        base=("روباه زرنگ و باهوش فکر کردی با قاچاق هم نوعات موفق میشی؟ تو گیر افتادی🚔⛓️\n\n"
+              "برای دیدن سلولت بنویس «زندان روبی».")
+    return base+(f"\n\n🧛🏻‍♀️ اسکین خون‌آشامی: {refund:,} روب‌پوینت (۲۵٪ مبلغ قاچاق) به حسابت برگشت." if refund else "")
 
 
 def smuggling_status_text(user,record):
     left=max(0,int((aware(record.completes_at)-now_utc()).total_seconds()))
-    return (f"🦊 قاچاق روباهیو 🥷\\n\\n✨ تعداد روباه های قاچاقی : {record.count} / {SMUGGLING_MAX}\\n"
-            f"🩹 تعداد کل روباه های زخمی : {int(user.injured_fox_stock or 0)}\\n\\n"
-            f"⏳ زمان باقی‌مانده : {jail_duration_text(left)}\\n\\n"
-            "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد").replace("\\n", "\n")
+    if getattr(record,'kind','fox')=='owl':
+        return (f"🦉 قاچاق جغد پیر 🥷\n\n✨ تعداد جغدهای قاچاقی : {record.count} / {SMUGGLING_MAX}\n"
+                f"🦉 تعداد کل جغدهای تو : {int(user.owl_catch_count or 0)}\n\n"
+                f"⏳ زمان باقی‌مانده : {jail_duration_text(left)}\n\n"
+                "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد")
+    return (f"🦊 قاچاق روباهیو 🥷\n\n✨ تعداد روباه های قاچاقی : {record.count} / {SMUGGLING_MAX}\n"
+            f"🩹 تعداد کل روباه های زخمی : {int(user.injured_fox_stock or 0)}\n\n"
+            f"⏳ زمان باقی‌مانده : {jail_duration_text(left)}\n\n"
+            "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد")
 
 
-def smuggling_select_text(user,count):
+def smuggling_select_text(user,count,kind='fox'):
     duration=SMUGGLING_BASE_SECONDS+(count-SMUGGLING_MIN)*SMUGGLING_EXTRA_PER_FOX
-    return (f"🦊 قاچاق روباهیو 🥷\\n\\n✨ تعداد روباه های قاچاقی : {count} / {SMUGGLING_MAX}\\n"
-            f"🩹 تعداد کل روباه های زخمی : {int(user.injured_fox_stock or 0)}\\n\\n"
-            f"⏳ زمان مورد نیاز قاچاق : {jail_duration_text(duration)}\\n\\n"
-            "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد\\n\\n"
-            "➕ جهت افزودن تعداد روباه های قاچاقی\\n➖ جهت کاهش تعداد روباه های قاچاقی\\n➰ جهت افزودن تمامی روباه های قاچاقی").replace("\\n", "\n")
+    if kind=='owl':
+        return (f"🦉 قاچاق جغد پیر 🥷\n\n✨ تعداد جغدهای قاچاقی : {count} / {SMUGGLING_MAX}\n"
+                f"🦉 تعداد کل جغدهای تو : {int(user.owl_catch_count or 0)}\n\n"
+                f"⏳ زمان مورد نیاز قاچاق : {jail_duration_text(duration)}\n\n"
+                "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد\n\n"
+                "➕ جهت افزودن تعداد جغدهای قاچاقی\n➖ جهت کاهش تعداد جغدهای قاچاقی\n➰ جهت افزودن تمامی جغدهای قاچاقی")
+    return (f"🦊 قاچاق روباهیو 🥷\n\n✨ تعداد روباه های قاچاقی : {count} / {SMUGGLING_MAX}\n"
+            f"🩹 تعداد کل روباه های زخمی : {int(user.injured_fox_stock or 0)}\n\n"
+            f"⏳ زمان مورد نیاز قاچاق : {jail_duration_text(duration)}\n\n"
+            "┘─ ❓ اگه گیر بیوفتی، میوفتی زندان و هیچی گیرت نمیاد\n\n"
+            "➕ جهت افزودن تعداد روباه های قاچاقی\n➖ جهت کاهش تعداد روباه های قاچاقی\n➰ جهت افزودن تمامی روباه های قاچاقی")
 
 
-def smuggling_keyboard(user_id,count):
+def smuggling_menu_text(user):
+    return ("🥷 قاچاق روبی\n\nچی رو می‌خوای قاچاق کنی؟\n\n"
+            f"🩹 روباه زخمی: {int(user.injured_fox_stock or 0)} تا\n"
+            f"🦉 جغد پیر: {int(user.owl_catch_count or 0)} تا\n\n"
+            f"✨ حداقل {SMUGGLING_MIN} و حداکثر {SMUGGLING_MAX} تا در هر قاچاق.")
+
+
+def smuggling_menu_keyboard(user_id):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕",callback_data=f"smuggle:plus:{user_id}:{count}"),InlineKeyboardButton("➖",callback_data=f"smuggle:minus:{user_id}:{count}"),InlineKeyboardButton("➰",callback_data=f"smuggle:all:{user_id}:{count}")],
-        [InlineKeyboardButton("✅ تایید قاچاق",callback_data=f"smuggle:confirm:{user_id}:{count}")],
+        [InlineKeyboardButton("🦊 قاچاق روباه زخمی",callback_data=f"smuggle:pickfox:{user_id}:0")],
+        [InlineKeyboardButton("🦉 قاچاق جغد پیر",callback_data=f"smuggle:pickowl:{user_id}:0")],
+    ])
+
+
+def smuggling_keyboard(user_id,count,kind='fox'):
+    p='o' if kind=='owl' else ''
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕",callback_data=f"smuggle:{p}plus:{user_id}:{count}"),InlineKeyboardButton("➖",callback_data=f"smuggle:{p}minus:{user_id}:{count}"),InlineKeyboardButton("➰",callback_data=f"smuggle:{p}all:{user_id}:{count}")],
+        [InlineKeyboardButton("✅ تایید قاچاق",callback_data=f"smuggle:{p}confirm:{user_id}:{count}")],
+        [InlineKeyboardButton("🔙 بازگشت",callback_data=f"smuggle:menu:{user_id}:0")],
     ])
 
 
@@ -1282,11 +1327,7 @@ async def smuggling_command(update,context):
                     await update.message.reply_text(smuggling_caught_text(result[2]),**reply_kwargs(update.message)); return
             # موفق (و هنوز دستمزد گرفته نشده)
             await update.message.reply_text(smuggling_success_text(pending),reply_markup=smuggling_success_keyboard(user.telegram_id,pending.id),**reply_kwargs(update.message)); return
-        stock=int(user.injured_fox_stock or 0)
-        if stock<SMUGGLING_MIN:
-            await update.message.reply_text(f"🩹 فقط {stock} روباه زخمی آماده برای قاچاق داری.\\n❌ حداقل {SMUGGLING_MIN} روباه لازم است.".replace("\\n","\n"),**reply_kwargs(update.message)); return
-        count=SMUGGLING_MIN
-        await update.message.reply_text(smuggling_select_text(user,count),reply_markup=smuggling_keyboard(user.telegram_id,count),**reply_kwargs(update.message))
+        await update.message.reply_text(smuggling_menu_text(user),reply_markup=smuggling_menu_keyboard(user.telegram_id),**reply_kwargs(update.message))
     finally: session.close()
 
 
@@ -1297,6 +1338,12 @@ async def smuggling_button(update,context):
     _,action,owner_s,count_s=parts; owner_id=int(owner_s); count=int(count_s)
     if q.from_user.id!=owner_id:
         await q.answer("⛔ این پنل برای کاربر دیگری است.",show_alert=True);return
+    # جغد: همون دکمه‌ها با پیشوند o (oplus/ominus/oall/oconfirm) ؛ انتخاب نوع: pickfox / pickowl ؛ برگشت به منو: menu
+    kind='fox'
+    if action in ('oplus','ominus','oall','oconfirm','pickowl'):
+        kind='owl'; action={'oplus':'plus','ominus':'minus','oall':'all','oconfirm':'confirm','pickowl':'pick'}[action]
+    elif action=='pickfox':
+        action='pick'
     session=get_session()
     try:
         user=get_or_create_user(session,q.from_user)
@@ -1315,20 +1362,31 @@ async def smuggling_button(update,context):
             return
         if session.query(RubySmuggling).filter(RubySmuggling.user_id==owner_id,RubySmuggling.status.in_(('pending','ready'))).first():
             await q.answer("⏳ یک قاچاق در جریان داری؛ برای دیدن وضعیتش بنویس «قاچاق روبی».",show_alert=True);return
-        stock=int(user.injured_fox_stock or 0)
+        if action=='menu':
+            await q.answer()
+            await q.message.edit_text(smuggling_menu_text(user),reply_markup=smuggling_menu_keyboard(owner_id));return
+        stock=smuggling_stock(user,kind)
+        noun='جغد' if kind=='owl' else 'روباه زخمی'
+        if action=='pick':
+            if stock<SMUGGLING_MIN:
+                await q.answer(f"{'🦉' if kind=='owl' else '🩹'} فقط {stock} {noun} داری.\n❌ حداقل {SMUGGLING_MIN} تا لازمه.",show_alert=True);return
+            await q.answer()
+            count=SMUGGLING_MIN
+            await q.message.edit_text(smuggling_select_text(user,count,kind),reply_markup=smuggling_keyboard(owner_id,count,kind));return
         if action in ('plus','minus','all'):
             if action=='plus': count=min(SMUGGLING_MAX,count+1)
             elif action=='minus': count=max(SMUGGLING_MIN,count-1)
             else: count=min(SMUGGLING_MAX,stock)
             await q.answer()
-            await q.message.edit_text(smuggling_select_text(user,count),reply_markup=smuggling_keyboard(owner_id,count));return
+            await q.message.edit_text(smuggling_select_text(user,count,kind),reply_markup=smuggling_keyboard(owner_id,count,kind));return
         if action=='confirm':
             if count<SMUGGLING_MIN or count>SMUGGLING_MAX or count>stock:
-                await q.answer("❌ تعداد روباه کافی نیست یا خارج از محدوده است.",show_alert=True);return
+                await q.answer("❌ تعداد کافی نیست یا خارج از محدوده است.",show_alert=True);return
             duration=SMUGGLING_BASE_SECONDS+(count-SMUGGLING_MIN)*SMUGGLING_EXTRA_PER_FOX
             started=now_utc(); complete=started+timedelta(seconds=duration)
-            user.injured_fox_stock=stock-count
-            rec=RubySmuggling(user_id=owner_id,count=count,risk_percent=smuggling_risk_percent(count),duration_seconds=duration,started_at=started,completes_at=complete,status='pending',created_at=started)
+            if kind=='owl': user.owl_catch_count=stock-count
+            else: user.injured_fox_stock=stock-count
+            rec=RubySmuggling(user_id=owner_id,count=count,risk_percent=smuggling_risk_percent(count),duration_seconds=duration,started_at=started,completes_at=complete,status='pending',kind=kind,created_at=started)
             session.add(rec);session.commit()
             await q.answer("🥷 قاچاق شروع شد!")
             await q.message.edit_text(smuggling_status_text(user,rec))
@@ -1351,7 +1409,7 @@ GUIDE_TOPICS = [
     ("👤 روبام / روباش", "پروفایل روبی خودت یا کاربری که روی پیامش ریپلای کرده‌ای."),
     ("🏆 لیدر برد", "رتبه‌بندی ۱۰۰ نفر برتر در بخش‌های روب‌پوینت، روباه زخمی، شکار، روب روب و بیشترین پاسخ درست درس."),
     ("🎡 گردونه / چرخ شانس", "روزی یک‌بار؛ جایزه به‌صورت تصادفی انتخاب می‌شود."),
-    ("🥷 قاچاق روباهیو", "از لول ۸ فعال است؛ ۳ تا ۱۵ روباه زخمی را قاچاق کن. هر روباه ۵٬۰۰۰ روب‌پوینت ارزش دارد؛ هر چی روباه بیشتری قاچاق کنی ریسک گیر افتادنت بیشتر می‌شه و زمان هم طولانی‌تر می‌شه. بعد از پایان زمان باید دوباره بنویسی «قاچاق روبی» تا نتیجه رو ببینی و دستمزدت رو بگیری."),
+    ("🥷 قاچاق روباهیو", "از لول ۸ فعال است؛ ۳ تا ۱۵ روباه زخمی یا جغد پیر را قاچاق کن. هر روباه ۵٬۰۰۰ و هر جغد ۷٬۰۰۰ روب‌پوینت ارزش دارد؛ هر چی تعداد بیشتری قاچاق کنی ریسک گیر افتادنت بیشتر می‌شه و زمان هم طولانی‌تر می‌شه. بعد از پایان زمان باید دوباره بنویسی «قاچاق روبی» تا نتیجه رو ببینی و دستمزدت رو بگیری."),
     ("⛓️ زندان روبی", "اگر در قاچاق گیر بیفتی یا اسپم شدید کنی، موقتاً زندانی می‌شوی. در زندان فقط پنل زندان، خاطره و پرداخت جریمه فعال است."),
     ("➕ افزودن ربات به گروه", f"فقط گروه‌های بالای {MIN_GROUP_MEMBERS} عضو قابل قبولن؛ در غیر این صورت روباهیو خودش از گروه خارج می‌شه."),
 ]
@@ -2614,14 +2672,26 @@ async def plinko_play(q, context, owner_id, st, from_result=False):
         ])
         chat_id = q.message.chat_id
         sent = None
+        wait_caption = f"🔴 پلینکو · حالت {mode['title']}\n\n⚪ توپ در حال سقوطه…"
         try:
             gif = await asyncio.to_thread(plinko_gif.build_gif, path, mode['mult'], amount, pay)
             bio = io.BytesIO(gif); bio.name = "plinko.gif"
-            sent = await context.bot.send_animation(chat_id, animation=bio, caption=caption, reply_markup=kb, width=plinko_gif.OW, height=plinko_gif.OH, **_plk_reply_kw(q))
+            # اول فقط گیف می‌آد (بدون نتیجه)؛ متن نتیجه و دکمه‌ها بعد از تموم شدن انیمیشن جایگزین کپشن می‌شن
+            sent = await context.bot.send_animation(chat_id, animation=bio, caption=wait_caption, width=plinko_gif.OW, height=plinko_gif.OH, **_plk_reply_kw(q))
         except Exception as exc:
             logger.warning("plinko gif failed: %s", exc)
         if sent is None:
             await context.bot.send_message(chat_id, caption, reply_markup=kb, **_plk_reply_kw(q))
+        else:
+            async def _reveal(msg=sent):
+                await asyncio.sleep(plinko_core.ANIM_SECONDS)
+                try:
+                    await context.bot.edit_message_caption(chat_id, msg.message_id, caption=caption, reply_markup=kb)
+                except Exception as exc2:
+                    logger.warning("plinko reveal edit failed: %s", exc2)
+                    try: await context.bot.send_message(chat_id, caption, reply_markup=kb, reply_to_message_id=msg.message_id, allow_sending_without_reply=True)
+                    except Exception: pass
+            context.application.create_task(_reveal())
         if not from_result:
             try: await q.message.delete()
             except Exception: pass
@@ -14878,7 +14948,7 @@ def main():
     app.add_handler(CallbackQueryHandler(lucky_bag_button,pattern=r"^luckybag:(?:open|skip):\d+$"))
     app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|potion|rest):\d+$"))
     app.add_handler(CallbackQueryHandler(jail_button,pattern=r"^jail:(memory|pay|bank|bankcancel):\d+$"))
-    app.add_handler(CallbackQueryHandler(smuggling_button,pattern=r"^smuggle:(plus|minus|all|confirm|claim):\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(smuggling_button,pattern=r"^smuggle:(plus|minus|all|confirm|claim|oplus|ominus|oall|oconfirm|pickfox|pickowl|menu):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(friend_decision_button,pattern=r"^friend(?:accept|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(friend_request_button,pattern=r"^friend:(?:home|add|view|points|msg|remove):\d+(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(leaderboard_button,pattern=r"^lb:"))
