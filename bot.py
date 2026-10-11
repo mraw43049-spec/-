@@ -4881,20 +4881,39 @@ async def handle_bank_text(update, context):
     if not action: return False
     context.user_data.pop('bank_action',None)
     if not await require_membership(update,context): return True
+    ref=context.user_data.get('bank_panel_ref')
+    back_kb=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{update.effective_user.id}')]])
+    async def show(text, kb=None):
+        # همه‌ی مراحل (مبلغ، تأیید، خطا) توی همون پنل بانک ویرایش می‌شن؛ اگه پنل در دسترس نبود پیام تازه می‌ره.
+        if ref:
+            try:
+                await context.bot.edit_message_text(chat_id=ref[0],message_id=ref[1],text=text,reply_markup=kb)
+                return
+            except BadRequest as e:
+                if 'not modified' in str(e).lower(): return
+                logger.warning('bank panel edit failed: %s',e)
+            except Exception as e:
+                logger.warning('bank panel edit failed: %s',e)
+        await update.message.reply_text(text,reply_markup=kb,**reply_kwargs(update.message))
+    async def retry(text):
+        context.user_data['bank_action']=action
+        await show(text,back_kb)
+    err=None
     session=get_session()
     try:
         user=get_or_create_user(session,update.effective_user); account=session.query(BankAccount).filter(BankAccount.user_id==user.telegram_id).first()
-        if not account: await update.message.reply_text('ابتدا بانک روبی را افتتاح کن.',**reply_kwargs(update.message)); return True
+        if not account: await show('ابتدا بانک روبی را افتتاح کن.'); return True
         if action=='deposit':
             amount=parse_amount(update.message.text)
-            if amount<=0 or user.fox_points<amount: await update.message.reply_text('❌ روب‌پوینت کافی نیست.',**reply_kwargs(update.message)); return True
+            if amount<=0 or user.fox_points<amount:
+                await retry('❌ روب‌پوینت کافی نیست.\n\n➕ مبلغ واریز را دوباره بفرست.'); return True
             # مرحله‌ی تایید: تا «بله» نزنه چیزی واریز نمی‌شود
             context.user_data['pending_bank_deposit']=amount
             kb=InlineKeyboardMarkup([[
                 InlineKeyboardButton('✅ بله',callback_data=f'bankdep:yes:{user.telegram_id}'),
                 InlineKeyboardButton('❌ خیر',callback_data=f'bankdep:no:{user.telegram_id}')
             ]])
-            await update.message.reply_text(f'🦊 واریز به بانک 🏦\n\n❓ آیا از واریز {amount:,} روب‌پوینت به حساب بانکی خود مطمئن هستید؟\n\n💳 حساب: {account.account_number}\n💰 موجودی کیف پول: {int(user.fox_points or 0):,} روب‌پوینت',reply_markup=kb,**reply_kwargs(update.message)); return True
+            await show(f'🦊 واریز به بانک 🏦\n\n❓ آیا از واریز {amount:,} روب‌پوینت به حساب بانکی خود مطمئن هستید؟\n\n💳 حساب: {account.account_number}\n💰 موجودی کیف پول: {int(user.fox_points or 0):,} روب‌پوینت',kb); return True
         else:
             parts=update.message.text.split()
             if len(parts)!=2: raise ValueError
@@ -4904,18 +4923,12 @@ async def handle_bank_text(update, context):
                 raise ValueError
             left=seconds_left(account.last_card_transfer_at, BANK_CARD_TRANSFER_COOLDOWN)
             if left:
-                await update.message.reply_text(
-                    f'⏳ کارت به کارت بعدی {format_duration(left)} دیگر فعال می‌شود.',
-                    **reply_kwargs(update.message)
-                )
+                await show(f'⏳ کارت به کارت بعدی {format_duration(left)} دیگر فعال می‌شود.',back_kb)
                 return True
             fee=max(1, int(amount * BANK_CARD_TRANSFER_FEE_RATE))
             total=amount+fee
             if account.balance < total:
-                await update.message.reply_text(
-                    f'❌ موجودی بانک کافی نیست.\n💰 مبلغ انتقال: {amount:,}\n💳 کارمزد 5٪: {fee:,}\n📌 مجموع برداشت: {total:,} روب‌پوینت',
-                    **reply_kwargs(update.message)
-                )
+                await show(f'❌ موجودی بانک کافی نیست.\n💰 مبلغ انتقال: {amount:,}\n💳 کارمزد 5٪: {fee:,}\n📌 مجموع برداشت: {total:,} روب‌پوینت',back_kb)
                 return True
             target_user=session.get(User,target.user_id)
             context.user_data['pending_bank_transfer']={
@@ -4932,11 +4945,11 @@ async def handle_bank_text(update, context):
                  f'📤 مجموع کسر از بانک: {total:,} روب‌پوینت\n'
                  f'💳 حساب مقصد: {dest}\n👤 گیرنده: {user_mention(target_user)}\n'
                  f'⏱ محدودیت: هر 5 دقیقه یک کارت به کارت')
-            await update.message.reply_text(msg,reply_markup=kb,**reply_kwargs(update.message)); return True
+            await show(msg,kb); return True
     except Exception:
-        session.rollback(); msg='❌ فرمت یا موجودی/حساب مقصد نادرست است.'
+        session.rollback(); err='❌ فرمت یا موجودی/حساب مقصد نادرست است.'
     finally: session.close()
-    await update.message.reply_text(msg,**reply_kwargs(update.message)); return True
+    await retry(err); return True
 
 async def handle_fox_rename_text(update, context):
     if not context.user_data.get("fox_rename"):
@@ -6752,9 +6765,8 @@ async def bank_button(update,context):
             await q.answer('ابتدا شعبه بانک را افتتاح کن.',show_alert=True); return
         apply_bank_interest(account,session); session.commit()
         if action=='withdraw':
-            kb=InlineKeyboardMarkup([[InlineKeyboardButton('25٪',callback_data=f'bank:w:{uid}:25'),InlineKeyboardButton('50٪',callback_data=f'bank:w:{uid}:50')],[InlineKeyboardButton('75٪',callback_data=f'bank:w:{uid}:75'),InlineKeyboardButton('100٪',callback_data=f'bank:w:{uid}:100')]])
-            _clean,_ents=bank_send_kwargs(user,account,'\n\n➖ درصد برداشت را انتخاب کن:')
-            await q.answer(); await q.message.edit_text(_clean,reply_markup=kb,entities=_ents); return
+            kb=InlineKeyboardMarkup([[InlineKeyboardButton('25٪',callback_data=f'bank:w:{uid}:25'),InlineKeyboardButton('50٪',callback_data=f'bank:w:{uid}:50')],[InlineKeyboardButton('75٪',callback_data=f'bank:w:{uid}:75'),InlineKeyboardButton('100٪',callback_data=f'bank:w:{uid}:100')],[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{uid}')]])
+            await q.answer(); await q.message.edit_text('❗️ برای مدیریت حساب بانکی از گزینه‌های زیر استفاده کن.\n\n➖ درصد برداشت را انتخاب کن:',reply_markup=kb); return
         if action=='w': return
         if action=='back':
             context.user_data.pop('bank_action',None)
@@ -6762,13 +6774,11 @@ async def bank_button(update,context):
             _clean,_ents=bank_send_kwargs(user,account)
             await q.message.edit_text(_clean,reply_markup=bank_keyboard(account),entities=_ents); return
         if action=='deposit':
-            context.user_data['bank_action']='deposit'; await q.answer()
-            _clean,_ents=bank_send_kwargs(user,account,'\n\n➕ مبلغ واریز را در جواب همین پنل بفرست.\nمثال: 50k / 50کا / 50میل / 50م / 50m')
-            await q.message.edit_text(_clean,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{uid}')]]),entities=_ents); return
+            context.user_data['bank_action']='deposit'; context.user_data['bank_panel_ref']=(q.message.chat_id,q.message.message_id); await q.answer()
+            await q.message.edit_text('➕ مبلغ واریز را در جواب همین پنل بفرست.\nمثال: 50k / 50کا / 50میل / 50م / 50m',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{uid}')]])); return
         if action=='transfer':
-            context.user_data['bank_action']='transfer'; await q.answer()
-            _clean,_ents=bank_send_kwargs(user,account,'\n\n🦊 کارت به کارت روبی 💳\n\n🔺 مبلغ و شماره حساب مقصد را در جواب همین پنل بفرست.\nمثال: 500 123456789000\n\n⏱ هر 5 دقیقه یک‌بار · کارمزد 5٪')
-            await q.message.edit_text(_clean,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{uid}')]]),entities=_ents); return
+            context.user_data['bank_action']='transfer'; context.user_data['bank_panel_ref']=(q.message.chat_id,q.message.message_id); await q.answer()
+            await q.message.edit_text('🦊 کارت به کارت روبی 💳\n\n🔺 مبلغ و شماره حساب مقصد را در جواب همین پنل بفرست.\nمثال: 500 123456789000\n\n⏱ هر 5 دقیقه یک‌بار · کارمزد 5٪',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 بازگشت',callback_data=f'bank:back:{uid}')]])); return
         if action=='transactions':
             rows=session.query(BankTransaction).filter(BankTransaction.account_number==account.account_number).order_by(BankTransaction.id.desc()).limit(10).all()
             txt='📃 آخرین تراکنش‌ها\n\n' + ('\n'.join(f"{r.created_at:%Y-%m-%d %H:%M} | {('به حساب ' + str(r.counterparty_user_id)) if r.direction in ('card_out','card_transfer_out') else ('از حساب ' + str(r.counterparty_user_id)) if r.counterparty_user_id else r.description or r.direction} | {r.amount:,} 🪙" for r in rows[:3]) if rows else 'تراکنشی ثبت نشده است.')
@@ -7913,7 +7923,7 @@ def jail_block_text(user):
 # نشون داده می‌شه که کاربر واقعاً بخواد از یک دستور/بخش ربات استفاده کنه.
 _JAIL_ACTIVE_FLOW_FLAGS = (
     'admin_action', 'baby_collect_confirm', 'baby_name_mid', 'bank_action',
-    'city_donate_chat_id', 'city_donate_message_id', 'friend_action', 'friend_add_owner',
+    'city_donate_chat_id', 'city_donate_message_id', 'pending_city_donation', 'friend_action', 'friend_add_owner',
     'gift_code_flow', 'jail_memory_wait', 'marriage_abort_confirm', 'marriage_accept_confirm',
     'marriage_continue_confirm', 'marriage_divorce_confirm', 'marriage_proposal',
     'marriage_proposal_confirm', 'marriage_transfer_confirm', 'marriage_transfer_mid',
@@ -10062,6 +10072,7 @@ def marriage_panel(session, viewer):
         else:
             lines += ["", f"⏳ رابطه بعدی: {format_duration(left)}"]
         rows.append([InlineKeyboardButton("💰 انتقال روب‌پوینت به همسر", callback_data=f"marriage:transfer:{m.id}")])
+        rows.append([InlineKeyboardButton("بوس همسر💋", callback_data=f"marriage:kiss:{m.id}")])
         if baby:
             rows.append([InlineKeyboardButton("🍼 نینی روبی", callback_data=f"marriage:babyview:{m.id}")])
         if m.pregnancy_started_at and m.pregnancy_decision == "pending" and not m.baby_id:
@@ -10253,6 +10264,18 @@ async def marriage_callback(update, context):
         m=session.get(RubyMarriage,mid)
         if not m or m.status!='active' or not marriage_is_member(m,uid): return await q.answer('این ازدواج دیگر فعال نیست.',show_alert=True)
         if action=='noop': return await q.answer(f'⏳ {format_duration(marriage_relation_left(m))} تا رابطه بعدی.',show_alert=True)
+        if action=='kiss':
+            msg,_err,spouse=await marriage_do_action(session,context,user,m,'بوسه')
+            if _err: return await q.answer(_err,show_alert=True)
+            await q.answer('💋')
+            try: await q.message.reply_text(msg, reply_to_message_id=q.message.message_id)
+            except Exception:
+                try: await context.bot.send_message(q.message.chat_id,msg)
+                except Exception: pass
+            try:
+                if spouse and int(spouse.telegram_id)!=int(q.message.chat_id): await context.bot.send_message(spouse.telegram_id,msg)
+            except Exception: pass
+            text2,kb2=marriage_panel(session,user); await marriage_edit_panel(q,text2,kb2); return
         if action=='transfer':
             context.user_data['marriage_transfer_mid']=mid
             context.user_data['marriage_transfer_panel_ref']=(q.message.chat_id,q.message.message_id)
@@ -10449,6 +10472,47 @@ async def marriage_callback(update, context):
     finally:
         session.close()
 
+async def marriage_do_action(session, context, user, m, text):
+    """حال/بوسه/بغل را اعمال می‌کند؛ (msg, error, spouse) برمی‌گرداند. هم برای ریپلای متنی و هم دکمه‌ی بوس همسر."""
+    spouse_id=marriage_spouse_id(m,user.telegram_id)
+    left=marriage_relation_left(m)
+    if left: return None, f'⏳ رابطه بعدی {format_duration(left)} دیگر.', None
+    spouse=session.get(User,spouse_id)
+    actor=user
+    # فقط همان لحظه‌ای که بارداری/تولد واقعاً اتفاق می‌افتد پیام مخصوصش نمایش داده می‌شود؛
+    # بعد از تولد، رابطه روی ۵۰ می‌ماند و این‌طوری همان پیام دوباره و دوباره تکرار نمی‌شود.
+    just_pregnant=False; just_born=False
+    m.relation=int(m.relation or 0)+1
+    m.last_relation_at=now_utc()
+    if m.relation>=PREGNANCY_RELATION and not m.pregnancy_started_at and not m.baby_id:
+        m.pregnancy_started_at=now_utc(); m.pregnancy_gender=random.choice(['male','female']); m.pregnancy_decision='pending'; just_pregnant=True
+    if m.relation>=BIRTH_RELATION and m.pregnancy_started_at and m.pregnancy_decision=='continue' and not m.baby_id:
+        baby=RubyBaby(marriage_id=m.id,name='نینی روباه',gender=m.pregnancy_gender or random.choice(['male','female']),level=1,belly=1,belly_capacity=1,points=0,last_hunger_at=now_utc(),last_production_at=now_utc()); session.add(baby); session.flush(); m.baby_id=baby.id; just_born=True
+    # بعد از سقط قبلی: با ۳۰ تا حال/بوسه/بغل جدید، یک نینی روباه تازه مستقیم ساخته می‌شود.
+    if m.pregnancy_decision=='aborted' and not m.baby_id:
+        m.post_abort_actions=int(m.post_abort_actions or 0)+1
+        if m.post_abort_actions>=POST_ABORT_BIRTH_ACTIONS:
+            m.post_abort_actions=0
+            m.pregnancy_gender=random.choice(['male','female'])
+            m.pregnancy_decision='continue'
+            m.pregnancy_started_at=now_utc()
+            baby=RubyBaby(marriage_id=m.id,name='نینی روباه',gender=m.pregnancy_gender,level=1,belly=1,belly_capacity=1,points=0,last_hunger_at=now_utc(),last_production_at=now_utc()); session.add(baby); session.flush(); m.baby_id=baby.id; just_born=True
+    session.commit()
+    target_word='خانومیش' if actor.fox_gender=='male' else 'شوشوییش'
+    msg=random.choice(MARRIAGE_TEMPLATES[text]).format(actor=user_mention(actor),target_word=target_word)
+    msg += f"\n\n💞 میزان رابطه: {int(m.relation)}"
+    if just_pregnant:
+        msg += f"\n\n🤰 {user_mention(spouse)}، شما از روباه {user_mention(actor)} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
+        try:
+            await context.bot.send_message(m.female_id, f"🤰 شما از روباه {user_mention(session.get(User,m.male_id))} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}\n\nبرای تصمیم‌گیری وارد «ازدواج روبی» شو.")
+        except Exception: pass
+    if just_born:
+        msg += f"\n\n🎉 نینی روباه شما متولد شد! 🍼\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
+        for _uid in (m.male_id,m.female_id):
+            try: await context.bot.send_message(_uid, f"🎉 نینی روباه شما متولد شد!\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}")
+            except Exception: pass
+    return msg, None, spouse
+
 async def handle_marriage_text(update, context):
     if not update.message or not update.message.text: return False
     text=update.message.text.strip()
@@ -10581,44 +10645,10 @@ async def handle_marriage_text(update, context):
             except Exception:
                 pass
             return True
-        left=marriage_relation_left(m)
-        if left:
-            await update.message.reply_text(f'⏳ رابطه بعدی {format_duration(left)} دیگر.')
+        msg, _err, spouse = await marriage_do_action(session, context, user, m, text)
+        if _err:
+            await update.message.reply_text(_err)
             return True
-        spouse=session.get(User,spouse_id)
-        actor=user
-        # فقط همان لحظه‌ای که بارداری/تولد واقعاً اتفاق می‌افتد پیام مخصوصش نمایش داده می‌شود؛
-        # بعد از تولد، رابطه روی ۵۰ می‌ماند و این‌طوری همان پیام دوباره و دوباره تکرار نمی‌شود.
-        just_pregnant=False; just_born=False
-        m.relation=int(m.relation or 0)+1
-        m.last_relation_at=now_utc()
-        if m.relation>=PREGNANCY_RELATION and not m.pregnancy_started_at and not m.baby_id:
-            m.pregnancy_started_at=now_utc(); m.pregnancy_gender=random.choice(['male','female']); m.pregnancy_decision='pending'; just_pregnant=True
-        if m.relation>=BIRTH_RELATION and m.pregnancy_started_at and m.pregnancy_decision=='continue' and not m.baby_id:
-            baby=RubyBaby(marriage_id=m.id,name='نینی روباه',gender=m.pregnancy_gender or random.choice(['male','female']),level=1,belly=1,belly_capacity=1,points=0,last_hunger_at=now_utc(),last_production_at=now_utc()); session.add(baby); session.flush(); m.baby_id=baby.id; just_born=True
-        # بعد از سقط قبلی: با ۳۰ تا حال/بوسه/بغل جدید، یک نینی روباه تازه مستقیم ساخته می‌شود.
-        if m.pregnancy_decision=='aborted' and not m.baby_id:
-            m.post_abort_actions=int(m.post_abort_actions or 0)+1
-            if m.post_abort_actions>=POST_ABORT_BIRTH_ACTIONS:
-                m.post_abort_actions=0
-                m.pregnancy_gender=random.choice(['male','female'])
-                m.pregnancy_decision='continue'
-                m.pregnancy_started_at=now_utc()
-                baby=RubyBaby(marriage_id=m.id,name='نینی روباه',gender=m.pregnancy_gender,level=1,belly=1,belly_capacity=1,points=0,last_hunger_at=now_utc(),last_production_at=now_utc()); session.add(baby); session.flush(); m.baby_id=baby.id; just_born=True
-        session.commit()
-        target_word='خانومیش' if actor.fox_gender=='male' else 'شوشوییش'
-        msg=random.choice(MARRIAGE_TEMPLATES[text]).format(actor=user_mention(actor),target_word=target_word)
-        msg += f"\n\n💞 میزان رابطه: {int(m.relation)}"
-        if just_pregnant:
-            msg += f"\n\n🤰 {user_mention(spouse)}، شما از روباه {user_mention(actor)} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
-            try:
-                await context.bot.send_message(m.female_id, f"🤰 شما از روباه {user_mention(session.get(User,m.male_id))} باردار هستید!\n🍼 جنسیت نینی روباه: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}\n\nبرای تصمیم‌گیری وارد «ازدواج روبی» شو.")
-            except Exception: pass
-        if just_born:
-            msg += f"\n\n🎉 نینی روباه شما متولد شد! 🍼\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}"
-            for _uid in (m.male_id,m.female_id):
-                try: await context.bot.send_message(_uid, f"🎉 نینی روباه شما متولد شد!\n⚧ جنسیت: {'پسر 👦🏻' if m.pregnancy_gender=='male' else 'دختر 👧🏻'}")
-                except Exception: pass
         # متن اقدام + میزان رابطه با تصویر ازدواج روبی، دقیقاً به همان پیام همسر ریپلای می‌شود.
         try:
             await update.message.reply_text(msg, reply_to_message_id=reply.message_id)
@@ -11208,8 +11238,6 @@ async def city_donate_button(update, context):
     except Exception:
         return
     if not await require_membership(update, context): return
-    context.user_data['city_donate_chat_id'] = chat_id
-    context.user_data['city_donate_message_id'] = q.message.message_id
     session=get_session()
     try:
         row=session.get(GroupChat, chat_id)
@@ -11217,10 +11245,14 @@ async def city_donate_button(update, context):
             await q.answer("❌ شهر پیدا نشد.", show_alert=True); return
         if (row.city_level or 1) >= CITY_MAX_LEVEL:
             await q.answer("🏆 شهر به آخرین سطح رسیده و دیگر دونیت لازم نیست.", show_alert=True); return
-        text=city_panel_text(session,row)+"\n\n🏦 مبلغ دونیت را همینجا در پاسخ به این پنل بفرست.\nمثال: 5000 / 5k / 5کا"
     finally: session.close()
+    context.user_data['city_donate_chat_id'] = chat_id
+    context.user_data['city_donate_message_id'] = q.message.message_id
+    context.user_data['city_donate_panel_chat'] = q.message.chat_id
+    context.user_data.pop('pending_city_donation', None)
     await q.answer()
-    try: await q.message.edit_text(text, reply_markup=city_keyboard(chat_id,row.city_level))
+    text="🏦 دونیت به خزانه شهر\n\n🏦 مبلغ دونیت را همینجا در پاسخ به این پنل بفرست.\nمثال: 5000 / 5k / 5کا"
+    try: await q.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به شهر",callback_data=f"cityback:{chat_id}")]]))
     except Exception: pass
 
 async def city_top_donors_button(update, context):
@@ -11265,6 +11297,8 @@ async def city_back_button(update, context):
     q=update.callback_query
     try: chat_id=int(q.data.split(":")[1])
     except Exception: return
+    for _k in ('city_donate_chat_id','city_donate_message_id','city_donate_panel_chat','pending_city_donation'):
+        context.user_data.pop(_k,None)
     session=get_session()
     try:
         row=session.get(GroupChat,chat_id)
@@ -11281,43 +11315,96 @@ async def handle_city_donate_text(update, context):
         return False
     context.user_data.pop('city_donate_chat_id', None)
     if not await require_membership(update, context): return True
+    panel_mid=context.user_data.get('city_donate_message_id')
+    panel_cid=context.user_data.get('city_donate_panel_chat') or update.effective_chat.id
+    back_kb=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به شهر",callback_data=f"cityback:{chat_id}")]])
+    async def show(text, kb):
+        # همه‌ی مراحل دونیت (مبلغ، تأیید، خطا) توی همون پنل ویرایش می‌شن.
+        if panel_mid:
+            try:
+                await context.bot.edit_message_text(chat_id=panel_cid,message_id=panel_mid,text=text,reply_markup=kb)
+                return
+            except BadRequest as e:
+                if 'not modified' in str(e).lower(): return
+                logger.warning("city donate panel edit failed: %s", e)
+            except Exception as e:
+                logger.warning("city donate panel edit failed: %s", e)
+        await update.message.reply_text(text, reply_markup=kb, **reply_kwargs(update.message))
+    async def retry(text):
+        context.user_data['city_donate_chat_id']=chat_id
+        await show(text+"\n\n🏦 مبلغ دونیت را دوباره بفرست.", back_kb)
     try:
         amount = parse_amount(update.message.text)
     except Exception:
-        await update.message.reply_text("❌ مبلغ نامعتبره؛ مثلاً بنویس: 5000 یا 5k", **reply_kwargs(update.message)); return True
+        await retry("❌ مبلغ نامعتبره؛ مثلاً بنویس: 5000 یا 5k"); return True
     if amount <= 0:
-        await update.message.reply_text("❌ مبلغ نامعتبره.", **reply_kwargs(update.message)); return True
+        await retry("❌ مبلغ نامعتبره."); return True
     session = get_session()
     try:
         user = get_or_create_user(session, update.effective_user)
-        if (user.fox_points or 0) < amount:
-            await update.message.reply_text("❌ روب‌پوینت کافی نداری.", **reply_kwargs(update.message)); return True
+        pts = int(user.fox_points or 0)
         row = session.get(GroupChat, chat_id)
         if not row:
-            await update.message.reply_text("❌ این گپ شهر نداره.", **reply_kwargs(update.message)); return True
-        user.fox_points -= amount
-        row.city_treasury = (row.city_treasury or 0) + amount
-        donors = set(x for x in (row.city_donors or '').split(',') if x)
-        donors.add(str(user.telegram_id))
-        row.city_donors = ','.join(donors)
-        session.add(CityDonation(chat_id=chat_id,user_id=user.telegram_id,amount=amount,created_at=now_utc()))
-        session.commit()
-        chat_title = row.title
+            await show("❌ این گپ شهر نداره.", None); return True
+        if pts < amount:
+            await retry("❌ روب‌پوینت کافی نداری."); return True
     finally:
         session.close()
-    await maybe_level_up_city(context, chat_id)
-    session=get_session()
-    try:
-        row=session.get(GroupChat,chat_id)
-        panel_text=city_panel_text(session,row) if row else f"🏦 دونیت {amount:,} روب‌پوینت انجام شد!"
-    finally: session.close()
-    panel_message_id=context.user_data.pop('city_donate_message_id',None)
-    if panel_message_id:
-        try:
-            await context.bot.edit_message_text(chat_id=update.effective_chat.id,message_id=panel_message_id,text=panel_text,reply_markup=city_keyboard(chat_id,row.city_level))
-        except Exception:
-            pass
+    context.user_data['pending_city_donation']={'chat_id':chat_id,'amount':amount}
+    kb=InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ بله", callback_data=f"citydonconf:yes:{chat_id}"),
+        InlineKeyboardButton("❌ خیر", callback_data=f"citydonconf:no:{chat_id}"),
+    ]])
+    await show(f"🏦 دونیت به خزانه شهر\n\n❓ آیا از دونیت {amount:,} روب‌پوینت به خزانه شهر مطمئنی؟\n💰 موجودی تو: {pts:,} روب‌پوینت", kb)
     return True
+
+async def city_donate_confirm(update, context):
+    q = update.callback_query
+    try:
+        _, ans, chat_id_s = q.data.split(":")
+        chat_id = int(chat_id_s)
+    except Exception:
+        return
+    pending = context.user_data.get('pending_city_donation')
+    if not pending or int(pending.get('chat_id', 0)) != chat_id:
+        await q.answer("این دونیت دیگر فعال نیست.", show_alert=True); return
+    for _k in ('pending_city_donation','city_donate_message_id','city_donate_panel_chat','city_donate_chat_id'):
+        context.user_data.pop(_k, None)
+    if not await require_membership(update, context): return
+    amount = int(pending['amount'])
+    done = False; alert = None
+    session = get_session()
+    try:
+        row = session.get(GroupChat, chat_id)
+        user = get_or_create_user(session, q.from_user)
+        if ans == 'yes' and row:
+            if int(user.fox_points or 0) < amount:
+                alert = "❌ روب‌پوینت کافی نداری."
+            else:
+                user.fox_points -= amount
+                row.city_treasury = (row.city_treasury or 0) + amount
+                donors = set(x for x in (row.city_donors or '').split(',') if x)
+                donors.add(str(user.telegram_id))
+                row.city_donors = ','.join(donors)
+                session.add(CityDonation(chat_id=chat_id,user_id=user.telegram_id,amount=amount,created_at=now_utc()))
+                session.commit()
+                done = True
+    finally:
+        session.close()
+    if done:
+        await maybe_level_up_city(context, chat_id)
+    session = get_session()
+    try:
+        row = session.get(GroupChat, chat_id)
+        panel_text = city_panel_text(session, row) if row else "❌ شهر پیدا نشد."
+        kb = city_keyboard(chat_id, row.city_level) if row else None
+    finally:
+        session.close()
+    if done: await q.answer(f"🏦 {amount:,} روب‌پوینت به خزانه شهر دونیت شد!")
+    elif alert: await q.answer(alert, show_alert=True)
+    else: await q.answer("لغو شد.")
+    try: await q.message.edit_text(panel_text, reply_markup=kb)
+    except Exception: pass
 
 async def maybe_level_up_city(context, chat_id):
     """اگه شهر به همه‌ی هدف‌های سطح بعد رسیده باشه، ارتقاش می‌ده، به دونیت‌کننده‌های این چرخه
@@ -15005,7 +15092,7 @@ def main():
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:(home|storage):\d+$|^remoji:cat:[a-z_]+$"))
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:item:[a-z_]+:\d+$"))
     app.add_handler(CallbackQueryHandler(emoji_action, pattern=r"^remoji:(buyyes|buyno|select|transfer|sell|sellyes|transferyes|transferno):[a-z_0-9]+:\d+$|^remoji:upgrade:\d+$"))
-    app.add_handler(CallbackQueryHandler(marriage_callback, pattern=r"^marriage:(?:start|gift|buy|cancel|proposalconfirm|accept|acceptyes|reject|action|actionyes|noop|transfer|transferyes|babyview|babyhome|babymilk|babyname|babyupgrade|babyupgradeyes|babycollect|collectyes|back|continue|continueyes|abort|abortyes|divorce|divorceyes|cheatdivorce|cheatignore):[^:]+(?::[^:]+)?$"))
+    app.add_handler(CallbackQueryHandler(marriage_callback, pattern=r"^marriage:(?:start|gift|buy|kiss|cancel|proposalconfirm|accept|acceptyes|reject|action|actionyes|noop|transfer|transferyes|babyview|babyhome|babymilk|babyname|babyupgrade|babyupgradeyes|babycollect|collectyes|back|continue|continueyes|abort|abortyes|divorce|divorceyes|cheatdivorce|cheatignore):[^:]+(?::[^:]+)?$"))
     app.add_handler(CallbackQueryHandler(attack_owl_button, pattern=r"^atk:(protect|allow|refresh):\d+$"))
     app.add_handler(CallbackQueryHandler(education_topic, pattern=r"^edutopic:(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_unlock, pattern=r"^eduunlock:(yes|no):(general|religion|history_geo|literature|math_iq)$"))
@@ -15039,6 +15126,7 @@ def main():
     app.add_handler(CallbackQueryHandler(leaderboard_button,pattern=r"^lb:"))
     app.add_handler(CallbackQueryHandler(mood_button,pattern=r"^md:\d+:\d+:[0-2]{0,4}:[0-2]$"))
     app.add_handler(CallbackQueryHandler(city_donate_button,pattern=r"^citydonate:-?\d+$"))
+    app.add_handler(CallbackQueryHandler(city_donate_confirm,pattern=r"^citydonconf:(?:yes|no):-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_top_donors_button,pattern=r"^citytop:-?\d+$"))
     app.add_handler(CallbackQueryHandler(city_back_button,pattern=r"^cityback:-?\d+$"))
     app.add_handler(CallbackQueryHandler(market_callback,pattern=r"^rmarket:(?:open|settings|buy|plus|minus|noop|confirm|stock|transfer):-?\d+(?::[\w-]+)*$"))
