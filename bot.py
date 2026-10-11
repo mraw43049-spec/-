@@ -4077,8 +4077,8 @@ def next_fox_point_seconds(user):
     needed = max(0.0, 1.0 - remainder)
     return max(1, int(needed / rate))
 
-async def restore_fox_panel(bot, chat_id, message_id, owner_id):
-    await asyncio.sleep(4)
+async def restore_fox_panel(bot, chat_id, message_id, owner_id, delay=4):
+    await asyncio.sleep(delay)
     session=get_session()
     try:
         user=session.get(User,owner_id)
@@ -4086,7 +4086,11 @@ async def restore_fox_panel(bot, chat_id, message_id, owner_id):
         settle_fox_production(user);session.commit();text=fox_profile_text(user);markup=fox_keyboard(user.telegram_id,user.level,user.fox_level,user.fox_prestige_count)
     finally:session.close()
     try:await bot.edit_message_text(text=text,chat_id=chat_id,message_id=message_id,reply_markup=markup)
-    except Exception as e:logger.debug("restore fox panel: %s",e)
+    except Exception as e:
+        logger.debug("restore fox panel: %s",e)
+        # پنل عکس‌دار (اسکین VIP) متن ندارد؛ به‌جاش کپشن برمی‌گردد.
+        try:await bot.edit_message_caption(chat_id=chat_id,message_id=message_id,caption=text[:1024],reply_markup=markup)
+        except Exception as e2:logger.debug("restore fox panel caption: %s",e2)
 
 
 async def fox_command(update, context):
@@ -4150,11 +4154,9 @@ async def fox_button(update, context):
             user.fox_last_production_at = now_utc()
             user.fox_production_remainder = 0.0
             session.commit()
-            nxt = next_fox_point_seconds(user)
-            next_text = f"⏱ روب‌پوینت بعدی حدود {format_duration(nxt)} دیگر تولید می‌شود." if nxt else "⏸ تولید متوقف است تا شکم حداقل 2 غذا داشته باشد."
-            await q.answer("برداشت انجام شد! 💰")
-            await _panel_edit(q.message, fox_profile_text(user) + f"\n\n💰 {amount:,} روب‌پوینت به موجودیت اضافه شد.\n{next_text}")
-            asyncio.create_task(restore_fox_panel(context.bot,q.message.chat_id,q.message.message_id,user.telegram_id))
+            await q.answer()
+            await _panel_edit(q.message, f"💰 {amount:,} روب‌پوینت برداشت شد و به موجودیت اضافه شد.")
+            asyncio.create_task(restore_fox_panel(context.bot,q.message.chat_id,q.message.message_id,user.telegram_id,delay=5))
             return
         if action == "upgrade":
             lvl = max(1, min(FOX_MAX_LEVEL, int(user.fox_level or 1)))
@@ -9209,7 +9211,7 @@ async def admin_text(update, context):
         finally:
             session.close()
     if str(action).startswith("broadcast"):
-        await run_admin_broadcast(update, context, mode=str(action).split(":", 1)[1] if ":" in str(action) else "all"); return
+        await run_admin_broadcast(update, context, mode=str(action).split(":", 1)[1] if ":" in str(action) else "all"); return True
     if action == "giftall":
         cleaned = text.replace(",", "").replace("،", "").strip()
         if not cleaned.lstrip("-").isdigit():
@@ -14973,7 +14975,7 @@ def main():
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(recovery_callback, pattern=r"^recovery:(?:get|enter)$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|addpoints|addowls|fineadd|finefree|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|gwcreate|gwmanage|backup|back)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|broadcastgroups|broadcastusers|addpoints|addowls|fineadd|finefree|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|gwcreate|gwmanage|backup|back)$"))
     app.add_handler(CallbackQueryHandler(admin_jailset_callback,pattern=r"^admin:jailset:(?:add|free)$"))
     app.add_handler(CallbackQueryHandler(gw_create_callback,pattern=r"^gwc:(?:home|cancel|create|chdef|opt:[a-z]+|set:[a-z]+:[A-Za-z0-9]+)$"))
     app.add_handler(CallbackQueryHandler(gw_admin_callback,pattern=r"^gwa:(?:list|(?:view|top|toggletop|draw|drawyes|cancel|cancelyes|postch|bc):\d+(?::\d+)?|(?:bcc|bcgo):\d+:[gua]|user:\d+:\d+:\d+)$"))
