@@ -10196,9 +10196,20 @@ async def marriage_callback(update, context):
             # هدیه تا پاسخ خانم از انبار خواستگار نگه داشته می‌شود؛ رد/انقضا = برگشت، قبول = تحویل.
             session.add(m); session.delete(item); session.commit(); context.user_data.pop('marriage_proposal_confirm',None); context.user_data.pop('marriage_proposal',None)
             await q.answer('💌 درخواست ارسال شد!')
+            _prop_text=f"💕 ازدواج روبی 💍\n\n{user_mention(male)} با {m.gift_emoji} از تو خواستگاری کرده است!\n⏳ ۱۲ ساعت فرصت داری.\n\nقبول می‌کنی؟"
+            _prop_kb=InlineKeyboardMarkup([[InlineKeyboardButton('💍 قبول',callback_data=f'marriage:accept:{m.id}'),InlineKeyboardButton('❌ رد',callback_data=f'marriage:reject:{m.id}')]])
+            _sent=False
             try:
-                await context.bot.send_message(female.telegram_id,f"💕 ازدواج روبی 💍\n\n{user_mention(male)} با {m.gift_emoji} از تو خواستگاری کرده است!\n⏳ ۱۲ ساعت فرصت داری.\n\nقبول می‌کنی؟",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('💍 قبول',callback_data=f'marriage:accept:{m.id}'),InlineKeyboardButton('❌ رد',callback_data=f'marriage:reject:{m.id}')]]))
+                await context.bot.send_message(female.telegram_id,_prop_text,reply_markup=_prop_kb); _sent=True
             except Exception:
+                _gcid=data.get('chat_id')
+                if _gcid:
+                    try:
+                        await context.bot.send_message(_gcid,_prop_text,reply_markup=_prop_kb,reply_to_message_id=data.get('reply_to')); _sent=True
+                    except Exception:
+                        try: await context.bot.send_message(_gcid,_prop_text,reply_markup=_prop_kb); _sent=True
+                        except Exception: _sent=False
+            if not _sent:
                 marriage_close_pending(session,m); session.commit(); await _edit(f'❌ نتوانستم درخواست را به پیوی او بفرستم؛ او باید ربات را استارت کرده باشد.\n🎁 هدیه {m.gift_emoji} به انبارت برگشت.'); return
             await _edit(f"💌 درخواست خواستگاری برای {user_mention(female)} ارسال شد.\n⏳ او ۱۲ ساعت برای پاسخ فرصت دارد.\n🎁 هدیه {m.gift_emoji} تا جواب او نگه داشته می‌شود؛ اگر رد کند یا جواب ندهد به انبارت برمی‌گردد.")
             return
@@ -10462,7 +10473,8 @@ async def handle_marriage_text(update, context):
         if text.startswith('/') or text in MARRIAGE_ACTIONS: return False
         # اگر پنل در گروه باز شده، فقط آیدی عددی یا @شناسه را به‌عنوان انتخاب خانم قبول می‌کنیم
         # تا بقیه‌ی پیام‌های گروه اشتباه برداشت نشوند.
-        if update.effective_chat.type!='private' and not re.fullmatch(r'\d{5,15}|@[A-Za-z0-9_]{4,32}', text): return False
+        _is_reply_marriage = (text=='ازدواج' and update.message.reply_to_message is not None and update.message.reply_to_message.from_user is not None)
+        if update.effective_chat.type!='private' and not _is_reply_marriage and not re.fullmatch(r'\d{5,15}|@[A-Za-z0-9_]{4,32}', text): return False
         session=get_session()
         try:
             male=get_or_create_user(session,update.effective_user)
@@ -10482,7 +10494,9 @@ async def handle_marriage_text(update, context):
             if getattr(male,'marriage_lock_until',None) and not admin_only(int(male.telegram_id)) and now_utc()<aware(male.marriage_lock_until): await update.message.reply_text(f'⏳ تا {format_duration(int((aware(male.marriage_lock_until)-now_utc()).total_seconds()))} دیگر نمی‌توانی ازدواج کنی.'); return True
             if getattr(female,'marriage_lock_until',None) and not admin_only(int(female.telegram_id)) and now_utc()<aware(female.marriage_lock_until): await update.message.reply_text('⏳ این کاربر فعلاً از ازدواج دوباره محروم است.'); return True
             if not marriage_gift_item(session,male.telegram_id,prop['gift_key']): await update.message.reply_text('❌ هدیه‌ای که انتخاب کردی دیگر در انبارت نیست.'); return True
-            context.user_data['marriage_proposal_confirm']={'female_id':female.telegram_id,'gift_key':prop['gift_key'],'emoji':prop['emoji'],'mid':0}
+            context.user_data['marriage_proposal_confirm']={'female_id':female.telegram_id,'gift_key':prop['gift_key'],'emoji':prop['emoji'],'mid':0,
+                'chat_id':(update.effective_chat.id if update.effective_chat.type!='private' else None),
+                'reply_to':(update.message.reply_to_message.message_id if update.message.reply_to_message else None)}
             await update.message.reply_text(f"💕 تأیید خواستگاری\n\n👤 خانم : {user_mention(female)}\n🎁 هدیه : {prop['emoji']}\n⏳ مهلت پاسخ او : ۱۲ ساعت\n\nدرخواست خواستگاری ارسال شود؟",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('💌 بله، ارسال کن',callback_data=f"marriage:proposalconfirm:0:{prop['gift_key']}"),InlineKeyboardButton('❌ لغو',callback_data='marriage:cancel:0:x')]]))
             return True
         finally: session.close()
@@ -14989,7 +15003,7 @@ def main():
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:(home|storage):\d+$|^remoji:cat:[a-z_]+$"))
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:item:[a-z_]+:\d+$"))
     app.add_handler(CallbackQueryHandler(emoji_action, pattern=r"^remoji:(buyyes|buyno|select|transfer|sell|sellyes|transferyes|transferno):[a-z_0-9]+:\d+$|^remoji:upgrade:\d+$"))
-    app.add_handler(CallbackQueryHandler(marriage_callback, pattern=r"^marriage:(?:start|gift|cancel|proposalconfirm|accept|acceptyes|reject|action|actionyes|noop|transfer|transferyes|babyview|babyhome|babymilk|babyname|babyupgrade|babyupgradeyes|babycollect|collectyes|back|continue|continueyes|abort|abortyes|divorce|divorceyes|cheatdivorce|cheatignore):[^:]+(?::[^:]+)?$"))
+    app.add_handler(CallbackQueryHandler(marriage_callback, pattern=r"^marriage:(?:start|gift|buy|cancel|proposalconfirm|accept|acceptyes|reject|action|actionyes|noop|transfer|transferyes|babyview|babyhome|babymilk|babyname|babyupgrade|babyupgradeyes|babycollect|collectyes|back|continue|continueyes|abort|abortyes|divorce|divorceyes|cheatdivorce|cheatignore):[^:]+(?::[^:]+)?$"))
     app.add_handler(CallbackQueryHandler(attack_owl_button, pattern=r"^atk:(protect|allow|refresh):\d+$"))
     app.add_handler(CallbackQueryHandler(education_topic, pattern=r"^edutopic:(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_unlock, pattern=r"^eduunlock:(yes|no):(general|religion|history_geo|literature|math_iq)$"))

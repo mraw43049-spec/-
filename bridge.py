@@ -1224,7 +1224,7 @@ async def custom_ban_duration_message(update, context):
 def register(app):
     """هندلرها و جاب‌ها رو به اپلیکیشن اضافه می‌کنه (از bot.py صدا زده می‌شه)."""
     app.add_handler(CommandHandler("bannertest", banner_test))
-    app.add_handler(CallbackQueryHandler(button, pattern=r"^brg:(ok|cancel|end|rep|rm|ban|unban|dismiss):\d+$"))
+    app.add_handler(CallbackQueryHandler(button, pattern=r"^brg:(ok|cancel|end|rep|rm|repyes|rmyes|repcancel|ban|unban|dismiss|custom|back|dur):\d+(?::\d+)?$"))
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & ~filters.COMMAND & (
             filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL
