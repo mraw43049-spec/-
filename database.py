@@ -102,6 +102,8 @@ class User(Base):
     fox_sick_next_dose_at = Column(DateTime(timezone=True), nullable=True)
     fox_sick_rest_until = Column(DateTime(timezone=True), nullable=True)
     fox_last_sick_at = Column(DateTime(timezone=True), nullable=True)
+    fox_sick_rx_code = Column(String, nullable=True)      # کد ۶ رقمی نسخه‌ی دکتر
+    fox_sick_prescribed = Column(String, nullable=True)   # درمانی که داروخونه تجویز کرده: pill | syrup | potion | rest
 
     # یخچال روبی (از سطح 7 کاربر باز می‌شود)
     fridge_level = Column(Integer, nullable=False, default=1)
@@ -723,6 +725,8 @@ def init_db():
         'fox_sick_next_dose_at': DT_SQL_TYPE,
         'fox_sick_rest_until': DT_SQL_TYPE,
         'fox_last_sick_at': DT_SQL_TYPE,
+        'fox_sick_rx_code': 'VARCHAR',
+        'fox_sick_prescribed': 'VARCHAR',
         'fridge_level': 'INTEGER NOT NULL DEFAULT 1',
         'factory_built': 'INTEGER NOT NULL DEFAULT 0',
         'factory_build_started_at': DT_SQL_TYPE,

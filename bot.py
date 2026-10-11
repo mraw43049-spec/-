@@ -389,13 +389,16 @@ BACKUP_INTERVAL_SECONDS = 24 * 60 * 60  # هر ۲۴ ساعت یک بکاپ خو�
 FOX_SICK_UNLOCK_LEVEL = 6
 FOX_SICK_INTERVAL_SECONDS = 48 * 60 * 60  # هر ۴۸ ساعت یک‌بار روباه مریض می‌شود.
 FOX_SICK_REASONS = ["سرماخوردگی", "خوردن غذای فاسد", "خستگی بیش از حد", "سرمازدگی توی جنگل", "دل‌درد ناگهانی"]
-FOX_PILL_COST = 5000
-FOX_PILL_INTERVAL_SECONDS = 3 * 60
-FOX_PILL_DOSES_NEEDED = 3
-FOX_SYRUP_COST = 10000
-FOX_SYRUP_INTERVAL_SECONDS = 60
-FOX_SYRUP_DOSES_NEEDED = 3
-FOX_REST_DURATION_SECONDS = 60 * 60
+FOX_REST_DURATION_SECONDS = 30 * 60
+# درمان‌ها: قیمت «کل دوره» است (یک‌بار موقع خرید کم می‌شود)، نه هر دوز.
+FOX_TREATMENTS = {
+    'pill':   {'emoji': '💊', 'name': 'قرص',   'price': 5000,  'doses': 3, 'interval': 3 * 60},
+    'syrup':  {'emoji': '🧴', 'name': 'شربت',  'price': 7500,  'doses': 3, 'interval': 2 * 60},
+    'potion': {'emoji': '🥣', 'name': 'معجون', 'price': 10000, 'doses': 1, 'interval': 0},
+    'rest':   {'emoji': '💤', 'name': 'استراحت کردن', 'price': 0, 'doses': 0, 'interval': 0},
+}
+FOX_SICK_IMAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fox_sick.jpg')
+_FOX_SICK_FILE_ID = None
 
 # ---------- ظرفیت شکم روباه: شروع ۳، با هر ارتقای روباه ۱ تا بالا می‌ره، سقف ۱۵ ----------
 FOX_BELLY_MIN_CAPACITY = 3
@@ -890,6 +893,8 @@ def clear_fox_sickness(user):
     user.fox_sick_doses_given = 0
     user.fox_sick_next_dose_at = None
     user.fox_sick_rest_until = None
+    user.fox_sick_rx_code = None
+    user.fox_sick_prescribed = None
 
 
 def _start_fox_sickness(user, now):
@@ -899,6 +904,8 @@ def _start_fox_sickness(user, now):
     user.fox_sick_doses_given = 0
     user.fox_sick_next_dose_at = None
     user.fox_sick_rest_until = None
+    user.fox_sick_rx_code = None
+    user.fox_sick_prescribed = None
     user.fox_last_sick_at = now
 
 
@@ -907,8 +914,8 @@ def sync_fox_sickness(user):
     همون لحظه‌ای که کاربر برای اولین بار لول 6 بشه روباه مریض می‌شه، و از اون به بعد هر بار
     که خوب بشه، دقیقاً 48 ساعت بعد دوباره مریض می‌شه (این چرخه تا آخر ادامه داره).
     مقدار برگشتی یعنی چیزی تغییر کرده یا نه."""
-    if (user.level or 1) < FOX_SICK_UNLOCK_LEVEL:
-        return False
+    if (user.level or 1) < FOX_SICK_UNLOCK_LEVEL and not user.fox_sick_since:
+        return False   # (اگه پشتیبانی دستی مریضش کرده باشه، حتی زیر لول 6 هم باید درمان و خوب‌شدن کار کنه)
     now = now_utc()
     if vip_no_sickness(user):
         # اسکین خون‌آشامی فعال: روباه هیچ‌وقت مریض نمی‌شود (اگه از قبل مریض بوده، خوب می‌شود).
@@ -933,49 +940,193 @@ def sync_fox_sickness(user):
     return False
 
 
-def fox_sickness_message(user):
-    reason = user.fox_sick_reason or "یه دلیل نامعلوم"
-    progress = ""
-    if user.fox_sick_treatment in ('pill', 'syrup'):
-        needed = FOX_PILL_DOSES_NEEDED if user.fox_sick_treatment == 'pill' else FOX_SYRUP_DOSES_NEEDED
-        label = "💊 قرص" if user.fox_sick_treatment == 'pill' else "🧴 شربت"
+# ---- پنل مریضی: عکس + دکتر + داروخونه (همه توی یک پنل) ----
+
+def fox_sick_state(user):
+    if user.fox_sick_treatment in ('pill', 'syrup'): return 'dose'
+    if user.fox_sick_treatment == 'rest': return 'rest'
+    if user.fox_sick_prescribed: return 'buy'
+    if user.fox_sick_rx_code: return 'rx'
+    return 'start'
+
+
+def _sick_tokens(reason, code):
+    """متن دکتر به‌صورت تکه‌های کوچک (برای انیمیشن تایپ). کد نسخه یک تکه‌ی کامل و تک‌فاصله (قابل کپی) است."""
+    import html as _html
+    pre = (f"╭━━  🩺 مطب دکتر روباهیو  ━━╮\n\n"
+           f"👨🏻‍⚕️ سلام! روباهت رو معاینه کردم.\n\n"
+           f"🔍 تشخیص: روباهت به‌خاطر {reason} مریض شده.\n\n"
+           f"📝 نسخه‌ی پزشک:\n")
+    post = "\n\n🏥 این نسخه رو به داروخونه بده تا روباهت خوب بشه!"
+    toks = [_html.escape(t) for t in re.findall(r'\S+\s*', pre)]
+    toks.append(f"<code>{code}</code>\n\n")
+    toks += [_html.escape(t) for t in re.findall(r'\S+\s*', post)]
+    return toks
+
+
+def fox_doctor_text(user):
+    return ''.join(_sick_tokens(user.fox_sick_reason or "یه دلیل نامعلوم", user.fox_sick_rx_code or "------"))
+
+
+def _nice_duration(sec):
+    sec = int(sec)
+    return f"{sec // 60} دقیقه" if sec % 60 == 0 else format_duration(sec)
+
+
+def _treatment_details(t):
+    info = FOX_TREATMENTS[t]
+    if t == 'pill':
+        return f"💊 قرص — {info['doses']} عدد؛ هر {_nice_duration(info['interval'])} یکی"
+    if t == 'syrup':
+        return f"🧴 شربت — {info['doses']} نوبت؛ هر {_nice_duration(info['interval'])} یک بار"
+    if t == 'potion':
+        return "🥣 معجون — فقط ۱ بار"
+    return f"💤 استراحت کردن — رایگان؛ {_nice_duration(FOX_REST_DURATION_SECONDS)} روباهت می‌خوابه و بعدش خودکار خوب می‌شه"
+
+
+def fox_sick_view(user, note=''):
+    """(متن HTML، کیبورد) مناسب مرحله‌ی فعلی درمان؛ از روی دیتابیس ساخته می‌شود."""
+    uid = user.telegram_id
+    state = fox_sick_state(user)
+    if state == 'start':
+        return ("<b>روباه شما مریض شده است 🤒 برای بهبود باید به دکتر مراجعه کنی</b>",
+                InlineKeyboardMarkup([[InlineKeyboardButton("مراجعه به پزشک🩺", callback_data=f"foxsick:doctor:{uid}")]]))
+    if state == 'rx':
+        return (fox_doctor_text(user),
+                InlineKeyboardMarkup([[InlineKeyboardButton("رفتن به داروخونه🌡", callback_data=f"foxsick:pharm:{uid}")]]))
+    if state == 'buy':
+        t = user.fox_sick_prescribed
+        info = FOX_TREATMENTS[t]
+        price_line = f"💰 قیمت کل: {info['price']:,} روب‌پوینت" if info['price'] else "💰 قیمت: رایگان"
+        if t == 'potion' and int(user.potion_count or 0) > 0:
+            label = "🥣 استفاده از معجون موجودی"
+            price_line = "💰 معجون توی انبارت هست؛ رایگان مصرف می‌شه"
+        elif t == 'rest':
+            label = "💤 شروع استراحت"
+        else:
+            label = f"💳 خرید {info['emoji']} ({info['price']:,})"
+        return (f"{note}╭━━  🏥 داروخونه روباهیو  ━━╮\n\n"
+                f"✅ نسخه تأیید شد.\n"
+                f"🩺 دکتر برای روباهت این رو تجویز کرده:\n\n"
+                f"{_treatment_details(t)}\n{price_line}",
+                InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=f"foxsick:buy:{uid}")]]))
+    if state == 'dose':
+        t = user.fox_sick_treatment
+        info = FOX_TREATMENTS[t]
         given = int(user.fox_sick_doses_given or 0)
-        progress = f"\n\n✅ تا الان {given}/{needed} بار {label} دادی."
-    elif user.fox_sick_treatment == 'rest':
-        remaining = max(0, int((aware(user.fox_sick_rest_until) - now_utc()).total_seconds())) if user.fox_sick_rest_until else 0
-        progress = f"\n\n🛌 روباهت خوابیده؛ {format_duration(remaining)} دیگه خودش خوب می‌شه."
-    return (
-        f"🤒 روباهت به‌خاطر {reason} مریض شده و تا خوب نشه هیچ کاری نمی‌تونه انجام بده!\n\n"
-        f"💊 قرص — {FOX_PILL_COST:,} روب‌پوینت هر بار؛ هر {FOX_PILL_INTERVAL_SECONDS//60} دقیقه یک‌بار، {FOX_PILL_DOSES_NEEDED} بار پشت‌سرهم بده تا خوب بشه.\n"
-        f"🧴 شربت — {FOX_SYRUP_COST:,} روب‌پوینت هر بار؛ هر {FOX_SYRUP_INTERVAL_SECONDS} ثانیه یک‌بار، {FOX_SYRUP_DOSES_NEEDED} بار پشت‌سرهم بده تا خوب بشه.\n"
-        f"🛌 استراحت — رایگان؛ روباه {FOX_REST_DURATION_SECONDS//3600} ساعت می‌خوابه و بعدش خودش خوب می‌شه.\n\n"
-        "یکی از گزینه‌ها رو انتخاب کن ⬇️"
-        + progress
-    )
+        txt = f"{note}{info['emoji']} درمان با {info['name']}\n\n✅ دوز {given}/{info['doses']} داده شد.\n"
+        nxt = aware(user.fox_sick_next_dose_at)
+        if nxt and now_utc() < nxt:
+            txt += f"⏳ دوز بعدی {format_duration(int((nxt - now_utc()).total_seconds()))} دیگه."
+        else:
+            txt += "👇 دوز بعدی رو بده."
+        return (txt, InlineKeyboardMarkup([[InlineKeyboardButton(f"{info['emoji']} دادن {info['name']}", callback_data=f"foxsick:dose:{uid}")]]))
+    # rest
+    remaining = max(0, int((aware(user.fox_sick_rest_until) - now_utc()).total_seconds())) if user.fox_sick_rest_until else 0
+    return (f"{note}💤 روباهت خوابیده؛ {format_duration(remaining)} دیگه خودش خوب می‌شه.",
+            InlineKeyboardMarkup([[InlineKeyboardButton("🔄 بررسی", callback_data=f"foxsick:back:{uid}")]]))
 
 
-def fox_sickness_keyboard(owner_id):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💊 دادن قرص", callback_data=f"foxsick:pill:{owner_id}")],
-        [InlineKeyboardButton("🧴 دادن شربت", callback_data=f"foxsick:syrup:{owner_id}")],
-        [InlineKeyboardButton("🥣 دادن معجون (۱ عدد)", callback_data=f"foxsick:potion:{owner_id}")],
-        [InlineKeyboardButton("🛌 استراحت کردن", callback_data=f"foxsick:rest:{owner_id}")],
-    ])
+async def sick_edit(bot, chat_id, mid, is_photo, text, kb=None):
+    """پنل مریضی (عکس‌دار → کپشن، بدون عکس → متن) را ویرایش می‌کند."""
+    try:
+        if is_photo:
+            await bot.edit_message_caption(chat_id=chat_id, message_id=mid, caption=text, parse_mode='HTML', reply_markup=kb)
+        else:
+            await bot.edit_message_text(chat_id=chat_id, message_id=mid, text=text, parse_mode='HTML', reply_markup=kb)
+        return True
+    except BadRequest as e:
+        if 'not modified' in str(e).lower(): return True
+        logger.warning("sick panel edit failed: %s", e)
+    except Exception as e:
+        logger.warning("sick panel edit failed: %s", e)
+    return False
+
+
+async def send_fox_sick_panel(message, user):
+    """پنل مریضی را با عکس (حجم کم، با file_id کش‌شده) می‌فرستد؛ اگر عکس نبود فقط متن."""
+    global _FOX_SICK_FILE_ID
+    text, kb = fox_sick_view(user)
+    kw = reply_kwargs(message)
+    try:
+        if _FOX_SICK_FILE_ID:
+            await message.reply_photo(_FOX_SICK_FILE_ID, caption=text, parse_mode='HTML', reply_markup=kb, **kw)
+            return
+        if os.path.exists(FOX_SICK_IMAGE):
+            with open(FOX_SICK_IMAGE, 'rb') as fh:
+                sent = await message.reply_photo(fh, caption=text, parse_mode='HTML', reply_markup=kb, **kw)
+            if sent and sent.photo: _FOX_SICK_FILE_ID = sent.photo[-1].file_id
+            return
+    except Exception as e:
+        logger.warning("sick panel photo failed: %s", e)
+        _FOX_SICK_FILE_ID = None
+    await message.reply_text(text, parse_mode='HTML', reply_markup=kb, **kw)
 
 
 async def guard_fox_sickness(update, context, session, user):
-    """اگه روباه مریضه، پیام درمان رو نشون می‌ده و True برمی‌گردونه (یعنی کار دیگه‌ای انجام نشه)."""
+    """اگه روباه مریضه، پنل درمان رو نشون می‌ده و True برمی‌گردونه (یعنی کار دیگه‌ای انجام نشه)."""
     if sync_fox_sickness(user):
         session.commit()
     if not user.fox_sick_since:
         return False
     if update.message:
-        await update.message.reply_text(
-            fox_sickness_message(user), reply_markup=fox_sickness_keyboard(update.effective_user.id), **reply_kwargs(update.message)
-        )
+        await send_fox_sick_panel(update.message, user)
     elif update.callback_query:
         await update.callback_query.answer("🤒 روباهت مریضه؛ اول درمانش کن.", show_alert=True)
     return True
+
+
+async def _fox_doctor_typing(bot, chat_id, mid, is_photo, user_data, reason, code):
+    """متن دکتر را تکه‌تکه می‌نویسد (انگار یک نفر داره تایپ می‌کنه)."""
+    try:
+        toks = _sick_tokens(reason, code)
+        steps = 10
+        size = max(1, -(-len(toks) // steps))
+        k = size
+        while k < len(toks):
+            ok = await sick_edit(bot, chat_id, mid, is_photo, ''.join(toks[:k]) + " ▌", None)
+            if not ok: break
+            await asyncio.sleep(1.2)
+            k += size
+    except Exception as e:
+        logger.warning("doctor typing: %s", e)
+    finally:
+        user_data.pop('sick_busy', None)
+    text = ''.join(_sick_tokens(reason, code))
+    uid = user_data.get('_sick_uid')
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("رفتن به داروخونه🌡", callback_data=f"foxsick:pharm:{uid}")]])
+    await sick_edit(bot, chat_id, mid, is_photo, text, kb)
+
+
+async def _fox_walk_to_pharmacy(bot, chat_id, mid, is_photo, user_data, uid):
+    try:
+        await asyncio.sleep(5)
+        user_data['sick_rx_wait'] = {'chat': chat_id, 'mid': mid, 'photo': is_photo}
+        await sick_edit(bot, chat_id, mid, is_photo,
+                        "🏥 داروخونه روباهیو\n\n📝 لطفاً نسخه پزشک رو وارد کن (کد ۶ رقمی).\n✍️ کد رو در جواب همین پنل بفرست.",
+                        InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data=f"foxsick:back:{uid}")]]))
+    finally:
+        user_data.pop('sick_busy', None)
+
+
+async def fox_sick_rest_done(context):
+    d = context.job.data or {}
+    session = get_session()
+    try:
+        user = session.query(User).filter(User.telegram_id == d.get('uid')).first()
+        if not user: return
+        if sync_fox_sickness(user): session.commit()
+        if user.fox_sick_since: return
+    finally:
+        session.close()
+    await sick_edit(context.bot, d['chat'], d['mid'], d.get('photo', False), "🎉 روباهت از خواب بیدار شد و کامل خوب شد!", None)
+
+
+def _pick_prescription(user):
+    pts = int(user.fox_points or 0)
+    opts = [k for k, v in FOX_TREATMENTS.items()
+            if v['price'] <= pts or k == 'rest' or (k == 'potion' and int(user.potion_count or 0) > 0)]
+    return random.choice(opts)
 
 
 async def fox_sickness_button(update, context):
@@ -987,6 +1138,8 @@ async def fox_sickness_button(update, context):
     if q.from_user.id != owner_id:
         await q.answer("⛔ این پنل برای کاربر دیگری است.", show_alert=True); return
     if not await require_membership(update, context): return
+    chat_id = q.message.chat_id; mid = q.message.message_id; is_photo = bool(q.message.photo)
+    ud = context.user_data
     session = get_session()
     try:
         user = get_or_create_user(session, q.from_user)
@@ -994,74 +1147,141 @@ async def fox_sickness_button(update, context):
         if not user.fox_sick_since:
             session.commit()
             await q.answer("🎉 روباهت از قبل خوب شده!", show_alert=True)
-            try:
-                await q.message.edit_text("🎉 روباهت خوبه و آماده‌ی کاره!", reply_markup=None)
-            except Exception:
-                pass
+            await sick_edit(context.bot, chat_id, mid, is_photo, "🎉 روباهت خوبه و آماده‌ی کاره!", None)
             return
         now = now_utc()
-        if user.fox_sick_treatment and user.fox_sick_treatment != choice:
-            cur_label = {"pill": "💊 قرص", "syrup": "🧴 شربت", "rest": "🛌 استراحت"}.get(user.fox_sick_treatment, "؟")
-            await q.answer(f"❌ قبلاً درمان {cur_label} رو شروع کردی؛ باید همون رو ادامه بدی.", show_alert=True); return
-        if choice == 'potion':
-            if int(user.potion_count or 0) <= 0:
-                await q.answer("❌ معجون نداری؛ اول از مارکت روبی بخر.", show_alert=True); return
-            user.potion_count -= 1
-            clear_fox_sickness(user)
-            user.fox_last_sick_at = now
+        state = fox_sick_state(user)
+
+        async def show(note=''):
+            t, k = fox_sick_view(user, note)
+            await sick_edit(context.bot, chat_id, mid, is_photo, t, k)
+
+        if ud.get('sick_busy') and choice in ('doctor', 'pharm'):
+            await q.answer(); return
+
+        if choice in ('back', 'pill', 'syrup', 'potion', 'rest'):
+            ud.pop('sick_rx_wait', None); ud.pop('sick_rx_ok', None)
+            await q.answer(); await show(); return
+
+        if choice == 'doctor':
+            if state != 'start':
+                await q.answer(); await show(); return
+            code = ''.join(secrets.choice('0123456789') for _ in range(6))
+            user.fox_sick_rx_code = code
             session.commit()
-            await q.answer("🥣 معجون را دادی و روباه کامل خوب شد!")
-            try: await q.message.edit_text("🎉 روباهت با معجون 🥣 خوب شد!", reply_markup=None)
-            except Exception: pass
+            await q.answer()
+            ud['sick_busy'] = True; ud['_sick_uid'] = owner_id
+            asyncio.create_task(_fox_doctor_typing(context.bot, chat_id, mid, is_photo, ud, user.fox_sick_reason or "یه دلیل نامعلوم", code))
             return
-        if choice == 'rest':
-            user.fox_sick_treatment = 'rest'
-            user.fox_sick_rest_until = now + timedelta(seconds=FOX_REST_DURATION_SECONDS)
+
+        if choice == 'pharm':
+            if state != 'rx':
+                await q.answer(); await show(); return
+            await q.answer()
+            ud['sick_busy'] = True
+            await sick_edit(context.bot, chat_id, mid, is_photo, "🚶 شما درحال رفتن به داروخونه هستید...", None)
+            asyncio.create_task(_fox_walk_to_pharmacy(context.bot, chat_id, mid, is_photo, ud, owner_id))
+            return
+
+        if choice in ('rxyes', 'rxno'):
+            if state != 'rx' or not ud.get('sick_rx_ok'):
+                await q.answer(); await show(); return
+            ud.pop('sick_rx_ok', None)
+            if choice == 'rxno':
+                ud['sick_rx_wait'] = {'chat': chat_id, 'mid': mid, 'photo': is_photo}
+                await q.answer()
+                await sick_edit(context.bot, chat_id, mid, is_photo,
+                                "🏥 داروخونه روباهیو\n\n📝 لطفاً نسخه پزشک رو وارد کن (کد ۶ رقمی).\n✍️ کد رو در جواب همین پنل بفرست.",
+                                InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data=f"foxsick:back:{owner_id}")]]))
+                return
+            user.fox_sick_prescribed = _pick_prescription(user)
             session.commit()
-            await q.answer("🛌 روباهت خوابید.")
-            try:
-                await q.message.edit_text(
-                    f"🛌 روباهت به‌خاطر {user.fox_sick_reason} رفت بخوابه.\n"
-                    f"⏱ بعد از {format_duration(FOX_REST_DURATION_SECONDS)} خودش خوب می‌شه؛ تا اون‌موقع صبر کن.",
-                    reply_markup=None
-                )
-            except Exception:
-                pass
-            return
-        if choice in ('pill', 'syrup'):
-            cost = FOX_PILL_COST if choice == 'pill' else FOX_SYRUP_COST
-            interval = FOX_PILL_INTERVAL_SECONDS if choice == 'pill' else FOX_SYRUP_INTERVAL_SECONDS
-            doses_needed = FOX_PILL_DOSES_NEEDED if choice == 'pill' else FOX_SYRUP_DOSES_NEEDED
-            next_at = aware(user.fox_sick_next_dose_at)
-            if next_at and now < next_at:
-                remaining = int((next_at - now).total_seconds())
-                await q.answer(f"⏳ {format_duration(remaining)} دیگه صبر کن تا بتونی دوباره بدی.", show_alert=True); return
-            if (user.fox_points or 0) < cost:
-                await q.answer(f"❌ روب‌پوینت کافی نداری؛ {cost:,} لازمه.", show_alert=True); return
-            user.fox_points -= cost
-            user.fox_sick_treatment = choice
+            await q.answer(); await show(); return
+
+        if choice == 'buy':
+            if state != 'buy':
+                await q.answer(); await show(); return
+            t = user.fox_sick_prescribed
+            info = FOX_TREATMENTS[t]
+            if t == 'potion' and int(user.potion_count or 0) > 0:
+                user.potion_count -= 1
+            elif info['price'] > 0:
+                if int(user.fox_points or 0) < info['price']:
+                    await q.answer(f"❌ روب‌پوینت کافی نداری؛ {info['price']:,} لازمه.", show_alert=True); return
+                user.fox_points -= info['price']
+            user.fox_sick_prescribed = None
+            if t == 'rest':
+                user.fox_sick_treatment = 'rest'
+                user.fox_sick_rest_until = now + timedelta(seconds=FOX_REST_DURATION_SECONDS)
+                session.commit()
+                await q.answer("💤 روباهت خوابید.")
+                try:
+                    context.job_queue.run_once(fox_sick_rest_done, FOX_REST_DURATION_SECONDS + 2,
+                                               data={'uid': owner_id, 'chat': chat_id, 'mid': mid, 'photo': is_photo})
+                except Exception as e:
+                    logger.warning("rest job: %s", e)
+                await show(); return
+            if t == 'potion':
+                clear_fox_sickness(user); user.fox_last_sick_at = now
+                session.commit()
+                await q.answer("🥣 روباهت کامل خوب شد!")
+                await sick_edit(context.bot, chat_id, mid, is_photo, "🎉 روباهت با معجون 🥣 کامل خوب شد!", None); return
+            user.fox_sick_treatment = t
+            user.fox_sick_doses_given = 0
+            user.fox_sick_next_dose_at = None
+            session.commit()
+            await q.answer("✅ خریدی!")
+            await show("✅ دارو رو خریدی.\n\n"); return
+
+        if choice == 'dose':
+            if state != 'dose':
+                await q.answer(); await show(); return
+            t = user.fox_sick_treatment
+            info = FOX_TREATMENTS[t]
+            nxt = aware(user.fox_sick_next_dose_at)
+            if nxt and now < nxt:
+                await q.answer(f"⏳ {format_duration(int((nxt - now).total_seconds()))} دیگه صبر کن تا بتونی دوباره بدی.", show_alert=True); return
             user.fox_sick_doses_given = int(user.fox_sick_doses_given or 0) + 1
-            user.fox_sick_next_dose_at = now + timedelta(seconds=interval)
-            cured = user.fox_sick_doses_given >= doses_needed
-            label = "💊 قرص" if choice == 'pill' else "🧴 شربت"
-            if cured:
-                clear_fox_sickness(user)
-                user.fox_last_sick_at = now
-            session.commit()
-            if cured:
+            user.fox_sick_next_dose_at = now + timedelta(seconds=info['interval'])
+            if user.fox_sick_doses_given >= info['doses']:
+                clear_fox_sickness(user); user.fox_last_sick_at = now
+                session.commit()
                 await q.answer("🎉 روباهت خوب شد!")
-                try:
-                    await q.message.edit_text(f"{label} رو دادی و روباهت کامل خوب شد! 🎉", reply_markup=None)
-                except Exception:
-                    pass
-            else:
-                remain = doses_needed - user.fox_sick_doses_given
-                await q.answer(f"{label} دادی؛ {remain} بار دیگه مونده.")
-                try:
-                    await q.message.edit_text(fox_sickness_message(user), reply_markup=fox_sickness_keyboard(owner_id))
-                except Exception:
-                    pass
-            return
+                await sick_edit(context.bot, chat_id, mid, is_photo, f"{info['emoji']} دوز آخر رو دادی و روباهت کامل خوب شد! 🎉", None); return
+            session.commit()
+            await q.answer(f"{info['emoji']} دادی!")
+            await show(); return
+    finally:
+        session.close()
+
+
+async def sick_rx_text(update, context):
+    """کد ۶ رقمی نسخه را (در جواب پنل داروخونه) می‌گیرد و تأیید را توی همون پنل نشان می‌دهد."""
+    wait = context.user_data.get('sick_rx_wait')
+    msg = update.message
+    if not wait or not msg or not msg.text or not update.effective_user: return
+    if update.effective_chat.id != wait['chat']: return
+    t = msg.text.strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+    if not re.fullmatch(r'\d{6}', t): return
+    uid = update.effective_user.id
+    session = get_session()
+    try:
+        user = session.get(User, uid)
+        if not user: return
+        if not user.fox_sick_since or fox_sick_state(user) != 'rx':
+            context.user_data.pop('sick_rx_wait', None); return
+        if t != (user.fox_sick_rx_code or ''):
+            await sick_edit(context.bot, wait['chat'], wait['mid'], wait.get('photo', False),
+                            "❌ کد نسخه اشتباهه.\n\n📝 دوباره کد ۶ رقمی رو در جواب همین پنل بفرست.",
+                            InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data=f"foxsick:back:{uid}")]]))
+            raise ApplicationHandlerStop
+        context.user_data.pop('sick_rx_wait', None)
+        context.user_data['sick_rx_ok'] = True
+        await sick_edit(context.bot, wait['chat'], wait['mid'], wait.get('photo', False),
+                        f"🏥 داروخونه روباهیو\n\n🔢 کد نسخه: <code>{t}</code>\n\n❓ آیا مطمئن هستید این نسخه پزشک شماست؟",
+                        InlineKeyboardMarkup([[InlineKeyboardButton("✅ بله", callback_data=f"foxsick:rxyes:{uid}"),
+                                               InlineKeyboardButton("❌ خیر", callback_data=f"foxsick:rxno:{uid}")]]))
+        raise ApplicationHandlerStop
     finally:
         session.close()
 
@@ -8311,9 +8531,7 @@ async def fox_sick_gate_message(update, context):
             return
         for _k in _JAIL_ACTIVE_FLOW_FLAGS:
             context.user_data.pop(_k, None)
-        await msg.reply_text(
-            fox_sickness_message(u), reply_markup=fox_sickness_keyboard(update.effective_user.id), **reply_kwargs(msg)
-        )
+        await send_fox_sick_panel(msg, u)
         raise ApplicationHandlerStop
     finally:
         session.close()
@@ -13056,6 +13274,46 @@ async def support_text(update, context):
     await update.message.reply_text(done_text, **reply_kwargs(update.message))
     return True
 
+SICK_CMD_RE = re.compile(r'^(?:روباهیو|روباه|روبی)\s+مریض\s*کن$')
+
+async def admin_make_sick_command(update, context):
+    """پشتیبانی: ریپلای روی پیام یک کاربر + «روباهیو مریض کن» → روباهش درجا مریض می‌شود."""
+    msg = update.message
+    if not msg or not msg.text or not update.effective_user or not admin_only(update.effective_user.id):
+        return
+    text = re.sub(r'\s+', ' ', msg.text.replace('\u200c', ' ')).strip()
+    if not SICK_CMD_RE.match(text):
+        return
+    reply = msg.reply_to_message
+    if not reply or not reply.from_user:
+        await msg.reply_text("🤒 برای مریض کردن روباه، روی پیام کاربر ریپلای کن و بنویس «روباهیو مریض کن».", **reply_kwargs(msg))
+        raise ApplicationHandlerStop
+    target_tg = reply.from_user
+    err = None; target = None
+    session = get_session()
+    try:
+        target = session.get(User, target_tg.id)
+        if target_tg.is_bot or int(target_tg.id) in ADMIN_IDS:
+            err = "❌ این کاربر ربات یا پشتیبانیه؛ روباهش مریض نمی‌شه."
+        elif not target:
+            err = "❌ این کاربر هنوز توی ربات ثبت‌نام نکرده."
+        elif (target.level or 1) < FOX_UNLOCK_LEVEL:
+            err = f"❌ روباه این کاربر هنوز باز نشده (از لول {FOX_UNLOCK_LEVEL} باز می‌شه)."
+        elif vip_no_sickness(target):
+            err = "🛡 این کاربر اسکین خون‌آشامی فعال داره و روباهش هیچ‌وقت مریض نمی‌شه."
+        elif target.fox_sick_since:
+            err = "🤒 روباه این کاربر از قبل مریضه."
+        else:
+            _start_fox_sickness(target, now_utc())
+            session.commit()
+            await send_fox_sick_panel(reply, target)
+    finally:
+        session.close()
+    if err:
+        await msg.reply_text(err, **reply_kwargs(msg))
+    raise ApplicationHandlerStop
+
+
 async def admin_message_router(update, context):
     """Single group-0 router for admin replies and admin panel text actions."""
     if await support_admin_reply(update, context):
@@ -15117,7 +15375,7 @@ def main():
     app.add_handler(CallbackQueryHandler(owl_transfer_button,pattern=r"^owltransfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
     app.add_handler(CallbackQueryHandler(lucky_bag_button,pattern=r"^luckybag:(?:open|skip):\d+$"))
-    app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(pill|syrup|potion|rest):\d+$"))
+    app.add_handler(CallbackQueryHandler(fox_sickness_button,pattern=r"^foxsick:(doctor|pharm|rxyes|rxno|buy|dose|back|pill|syrup|potion|rest):\d+$"))
     app.add_handler(CallbackQueryHandler(jail_button,pattern=r"^jail:(memory|pay|bank|bankcancel):\d+$"))
     app.add_handler(CallbackQueryHandler(profile_lock_callback,pattern=r"^profilelock:toggle$"))
     app.add_handler(CallbackQueryHandler(smuggling_button,pattern=r"^smuggle:(plus|minus|all|confirm|claim|oplus|ominus|oall|oconfirm|pickfox|pickowl|menu):\d+:\d+$"))
@@ -15139,6 +15397,8 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_message_router),group=0)
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.TEXT,fox_sick_gate_message),group=-9)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,sick_rx_text),group=-8)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_make_sick_command),group=-7)
     app.add_handler(CallbackQueryHandler(casino_disabled_gate,pattern=r"^(?:rg:cz_|csetup:[a-z]+:cz_|csetup:setcount:cz_|rcreate:cz_|rdicebet:|rjoin:)"),group=-8)
     app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
