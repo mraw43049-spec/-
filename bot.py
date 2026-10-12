@@ -11,7 +11,7 @@ import hashlib
 from datetime import datetime, timezone, timedelta
 
 from telegram import InlineKeyboardButton as _TelegramInlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile, InputMediaPhoto, MessageEntity, User as TgUser, BotCommand, BotCommandScopeAllPrivateChats, MenuButtonCommands, WebAppInfo
-from telegram.error import RetryAfter, Forbidden, BadRequest, TimedOut, NetworkError
+from telegram.error import RetryAfter, Forbidden, BadRequest, TimedOut, NetworkError, Conflict
 from telegram.ext import (
     ApplicationBuilder, ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, ChatMemberHandler,
     ContextTypes, MessageHandler, filters, ExtBot
@@ -14041,8 +14041,47 @@ async def giveaway_command(update, context):
         session.close()
 
 
+async def on_error(update, context):
+    """خطاهای کنترل‌نشده را واضح توی لاگ می‌نویسد (قبلاً هیچ error handler ثبت نشده بود)."""
+    err = context.error
+    if isinstance(err, Conflict):
+        logger.error("⚠️ CONFLICT: یک نمونه‌ی دیگر از ربات با همین BOT_TOKEN دارد پولینگ می‌کند (سرور قبلی یا دیپلوی دوم). "
+                     "فقط یکی باید روشن باشد؛ وگرنه آپدیت‌ها بین دو نمونه تقسیم می‌شود و ربات ناقص جواب می‌دهد.")
+    elif isinstance(err, (NetworkError, TimedOut, RetryAfter)):
+        logger.warning("Network/Telegram hiccup: %s", err)
+    else:
+        logger.error("Unhandled exception while processing update: %s", update, exc_info=err)
+
+
+async def startup_selfcheck(application):
+    """موقع بالا آمدن روی سرور جدید چند چیز مهم را چک و توی لاگ گزارش می‌کند."""
+    bot = application.bot
+    me = None
+    try:
+        me = await bot.get_me()
+        logger.info("Bot identity: @%s (id %s)", me.username, me.id)
+        wh = await bot.get_webhook_info()
+        if wh.url:
+            logger.warning("Webhook روی این توکن فعال بود (%s)؛ برای کار کردن پولینگ حذف شد.", wh.url)
+            await bot.delete_webhook(drop_pending_updates=False)
+    except Exception as exc:
+        logger.exception("Startup check (getMe/webhook) failed — BOT_TOKEN اشتباه است؟ %s", exc)
+    if not ADMIN_IDS:
+        logger.warning("ADMIN_IDS خالی است؛ پنل ادمین/پشتیبانی و دستورهای پشتیبانی کار نمی‌کنند.")
+    if me:
+        for channel, _url, _label in REQUIRED_CHANNELS:
+            if not channel: continue
+            try:
+                m = await bot.get_chat_member(channel, me.id)
+                if m.status not in ("administrator", "creator"):
+                    logger.warning("ربات توی کانال %s ادمین نیست؛ چک عضویت اجباری برای همه خطا می‌دهد.", channel)
+            except Exception as exc:
+                logger.warning("نمی‌تونم کانال %s را چک کنم (%s)؛ مطمئن شو ربات ادمین همین کانال است و آیدی کانال درست است.", channel, exc)
+
+
 async def post_init(application):
     """منوی دستورهای کنار کادر پیام را مثل منوی ربات‌های تلگرام فعال می‌کند."""
+    await startup_selfcheck(application)
     # فقط دستورهای درخواستی کاربر در منوی سه‌خطی نمایش داده می‌شوند.
     commands = [
         BotCommand("start", "شروع بازی"),
@@ -15366,6 +15405,7 @@ def main():
     )
     if app.job_queue is None:
         raise RuntimeError("JobQueue is unavailable. Install python-telegram-bot[job-queue].")
+    app.add_error_handler(on_error)
     app.add_handler(CommandHandler("start",start_command))
     app.add_handler(CommandHandler("help",help_command))
     app.add_handler(CommandHandler("shop",gift_shop_command))
@@ -15471,7 +15511,7 @@ def main():
     app.add_handler(MessageHandler(filters.ALL,ban_gate),group=-10)
     app.add_handler(MessageHandler(filters.TEXT,fox_sick_gate_message),group=-9)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,sick_rx_text),group=-8)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_make_sick_command),group=-7)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=list(ADMIN_IDS)),admin_make_sick_command),group=-6)
     app.add_handler(CallbackQueryHandler(casino_disabled_gate,pattern=r"^(?:rg:cz_|csetup:[a-z]+:cz_|csetup:setcount:cz_|rcreate:cz_|rdicebet:|rjoin:)"),group=-8)
     app.add_handler(MessageHandler(filters.ALL,purchase_flow_gate),group=-9)
     app.add_handler(MessageHandler(filters.Regex(rf"^{re.escape(CLAIM_KEYWORD)}$"),claim_points),group=1)
