@@ -278,6 +278,23 @@ def _load_admin_ids():
 
 REQUIRED_CHANNELS = _load_required_channels()
 ADMIN_ID_SET = _load_admin_ids()
+
+def _all_admin_ids() -> set[int]:
+    """ادمین‌های پشتیبانی از تنظیمات Railway و فهرست ادمین‌های خود بات."""
+    ids = set(ADMIN_ID_SET)
+    try:
+        ids.update(int(x) for x in os.environ.get("ADMIN_IDS", "").replace(" ", "").split(",") if x.lstrip("-").isdigit())
+    except Exception:
+        pass
+    try:
+        _bot = load_botmod()
+        ids.update(int(x) for x in getattr(_bot, "ADMIN_IDS", set()))
+    except Exception:
+        pass
+    return ids
+
+def _is_admin_id(uid: int) -> bool:
+    return int(uid) in _all_admin_ids()
 if not REQUIRED_CHANNELS:
     print("[miniapp] WARNING: هیچ کانال اجباری‌ای پیدا نشد (REQUIRED_CHANNEL خالیه)؛ عضویت چک نمی‌شه!")
 
@@ -479,16 +496,16 @@ class StorePriceIn(BaseModel):
 def api_store(tg_user: dict = Depends(current_telegram_user)):
     with engine.connect() as conn:
         prices = {r["item_key"]: {"price_toman": int(r["price_toman"]), "title": r["title"]} for r in conn.execute(select(_store_prices)).mappings()}
-    return {"items": [{**item, **prices.get(item["key"], {"price_toman":0})} for item in STORE_ITEMS], "is_admin": int(tg_user["id"]) in ADMIN_ID_SET}
+    return {"items": [{**item, **prices.get(item["key"], {"price_toman":0})} for item in STORE_ITEMS], "is_admin": _is_admin_id(int(tg_user["id"]))}
 
 @app.get("/api/store/orders")
 def api_store_orders(tg_user: dict = Depends(current_telegram_user)):
     with engine.connect() as conn:
         stmt = select(_store_orders)
-        if int(tg_user["id"]) not in ADMIN_ID_SET:
+        if not _is_admin_id(int(tg_user["id"])):
             stmt = stmt.where(_store_orders.c.buyer_id == int(tg_user["id"]))
         rows = conn.execute(stmt.order_by(_store_orders.c.id.desc()).limit(100)).mappings().all()
-    return {"orders": [dict(r) for r in rows], "is_admin": int(tg_user["id"]) in ADMIN_ID_SET}
+    return {"orders": [dict(r) for r in rows], "is_admin": _is_admin_id(int(tg_user["id"]))}
 
 @app.post("/api/store/orders")
 def api_store_order(body: StoreOrderIn, tg_user: dict = Depends(current_telegram_user)):
@@ -521,7 +538,7 @@ def api_store_order(body: StoreOrderIn, tg_user: dict = Depends(current_telegram
                f"نوع ارسال: {'ناشناس برای گیرنده' if body.send_mode == 'anonymous' else 'برای خودم' if body.send_mode == 'self' else 'برای شخص دیگر'}\n"
                f"متن هدیه: {txt or 'بدون متن'}\nوضعیت: در انتظار بررسی")
     sent = 0
-    for admin_id in ADMIN_ID_SET:
+    for admin_id in _all_admin_ids():
         try:
             response = _tg_http.post(f"{_TG_API}/sendPhoto", data={"chat_id":admin_id,"caption":caption}, files={"photo":(body.receipt_name or "receipt.jpg", receipt, "image/jpeg")})
             if response.status_code == 200 and response.json().get("ok"): sent += 1
@@ -533,7 +550,7 @@ def api_store_order(body: StoreOrderIn, tg_user: dict = Depends(current_telegram
 
 @app.post("/api/store/admin/price")
 def api_store_set_price(body: StorePriceIn, tg_user: dict = Depends(current_telegram_user)):
-    if int(tg_user["id"]) not in ADMIN_ID_SET: raise HTTPException(status_code=403, detail="فقط ادمین می‌تواند قیمت را تغییر دهد.")
+    if not _is_admin_id(int(tg_user["id"])): raise HTTPException(status_code=403, detail="فقط ادمین‌های تنظیم‌شده در بات می‌توانند قیمت را تغییر دهند. ADMIN_IDS را در Railway بررسی کن.")
     if body.price_toman < 0 or body.price_toman > 1000000000: raise HTTPException(status_code=400, detail="قیمت معتبر نیست.")
     item = next((x for x in STORE_ITEMS if x["key"] == body.item_key), None)
     if not item: raise HTTPException(status_code=404, detail="محصول پیدا نشد.")
@@ -1956,7 +1973,7 @@ def bank_change_card(tg_user: dict = Depends(current_telegram_user)):
 
 @app.post("/api/store/admin/order-status")
 def api_store_order_status(body: dict, tg_user: dict = Depends(current_telegram_user)):
-    if int(tg_user["id"]) not in ADMIN_ID_SET: raise HTTPException(status_code=403, detail="فقط ادمین می‌تواند وضعیت سفارش را تغییر دهد.")
+    if not _is_admin_id(int(tg_user["id"])): raise HTTPException(status_code=403, detail="فقط ادمین‌های تنظیم‌شده در بات می‌توانند وضعیت سفارش را تغییر دهند. ADMIN_IDS را در Railway بررسی کن.")
     try: order_id = int(body.get("order_id")); status = str(body.get("status", "")).strip()
     except Exception: raise HTTPException(status_code=400, detail="اطلاعات سفارش نامعتبر است.")
     allowed = {"در انتظار بررسی", "در حال انجام", "تکمیل شد", "رد شد"}

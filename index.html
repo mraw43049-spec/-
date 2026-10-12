@@ -563,33 +563,11 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       <button class="filter" data-cat="rescued">🎃 روباه‌های زخمی</button>
       <button class="filter" data-cat="hunt">⚔️ شکار</button>
       <button class="filter" data-cat="claim">🐾 روب روب</button>
-      <button class="filter" data-cat="edu">🎓 پاسخ درست درس</button>
-      <button class="filter" data-cat="owl">🦉 جغد روبی</button>
+            <button class="filter" data-cat="owl">🦉 جغد روبی</button>
     </div>
   </div>
   <div id="podium" class="podium"></div>
   <div class="card"><ol id="list"></ol><div id="msg">🦊 در حال بارگذاری...</div></div>
-</section>
-
-<section id="eduView" class="view">
-  <div class="card">
-    <div class="section-title">🎓 روباهیو درس</div>
-    <div id="eduTitle" class="muted" style="text-align:center">در حال بارگذاری...</div>
-    <div class="stat-row">
-      <div class="stat"><b id="eduCorrect">۰</b><span>پاسخ درست</span></div>
-      <div class="stat"><b id="eduUnits">۰</b><span>واحد</span></div>
-      <div class="stat"><b id="eduCerts">۰/۱۵</b><span>مدرک</span></div>
-    </div>
-    <div id="eduNext" class="muted" style="text-align:center;margin-top:8px"></div>
-  </div>
-  <div id="eduCert"></div>
-  <div id="eduQ"></div>
-  <div class="card">
-    <div class="section-title">📚 موضوع‌ها</div>
-    <div id="eduCooldown" class="muted" style="text-align:center;margin-bottom:4px"></div>
-    <div id="eduTopics"></div>
-    <button id="eduDesign" class="opt" style="text-align:center;margin-top:12px;display:none">✍️ طرح سوال (۵۰۰ روب‌پوینت جایزه‌ی هر سوال تأییدشده)</button>
-  </div>
 </section>
 
 <section id="wheelView" class="view">
@@ -752,12 +730,11 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 </div></div>
 
 <nav class="tabs">
-  <button id="eduTab" class="tab"><svg class="ico"><use href="#i-edu"/></svg>درس</button>
+  <button id="storeTab" class="tab">🎁 فروشگاه</button>
   <button id="wheelTab" class="tab"><svg class="ico"><use href="#i-game"/></svg>بازی‌ها</button>
   <button id="foxTab" class="tab center active"><span class="cav" id="cAvatar">🦊</span><span id="cName">روباه</span></button>
   <button id="bankTab" class="tab"><svg class="ico"><use href="#i-bank"/></svg>بانک</button>
   <button id="leaderTab" class="tab"><svg class="ico"><use href="#i-trophy"/></svg>لیدربرد</button>
-  <button id="storeTab" class="tab">🎁 فروشگاه</button>
 </nav>
 
 <div id="bkModal" class="modal"><div class="sheet">
@@ -1791,117 +1768,6 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   $("prClose").onclick = hidePlinkoResult;
   window.addEventListener("resize", function(){ if (bombMode === "plinko" && !plinkoBusy) plinkoDraw(); });
 
-  // ---------- روباهیو درس ----------
-  var edu = null, eduAt = 0, eduTick = null, eduBusy = false, botUser = null;
-  function eduLeft(sec){ return Math.max(0, sec - Math.floor((Date.now() - eduAt)/1000)); }
-  function fmtMS(sec){ var m = Math.floor(sec/60), s = sec%60; return fa(m) + ":" + fa(String(s).padStart(2,"0")); }
-  function setEdu(st){ edu = st; eduAt = Date.now(); drawEdu(true); }
-  function loadEdu(){
-    return api("/api/edu").then(function(st){ setEdu(st); stamp(); })
-      .catch(function(e){ if (!e.gate) $("eduTitle").textContent = "خطا: " + e.message; });
-  }
-  function drawEdu(full){
-    if (!edu) return;
-    if (full) {
-      $("eduTitle").textContent = "🏅 " + edu.title;
-      $("eduCorrect").textContent = fa(edu.correct_answers);
-      $("eduUnits").textContent = fa(edu.units);
-      $("eduCerts").textContent = fa(edu.certificates) + "/" + fa(edu.max_certificates);
-      $("eduNext").textContent = edu.certificates < edu.max_certificates ? "📈 تا مدرک بعدی: " + fa(edu.to_next) + " پاسخ درست" : "🏆 همه‌ی مدارک رو گرفتی!";
-      // مدرک در انتظار
-      var cb = $("eduCert"); cb.innerHTML = "";
-      if (edu.pending_certificate) {
-        var c = document.createElement("div"); c.className = "card";
-        c.innerHTML = "<div class='section-title'>🎓 مدرک " + "</div>";
-        var t = document.createElement("div"); t.className = "muted";
-        t.textContent = "به حد نصاب مدرک «" + edu.next_title + "» رسیدی! شهریه: " + fa(edu.tuition) + " | جایزه: " + fa(edu.reward) + " روب‌پوینت";
-        var b = document.createElement("button"); b.className = "opt"; b.style.textAlign = "center";
-        b.textContent = "✅ پرداخت شهریه و دریافت مدرک";
-        b.onclick = function(){ eduCall("/api/edu/certificate"); };
-        c.appendChild(t); c.appendChild(b); cb.appendChild(c);
-      }
-      // سؤال فعال
-      var qb = $("eduQ"); qb.innerHTML = "";
-      if (edu.active) {
-        var qc = document.createElement("div"); qc.className = "card q-card";
-        var h = document.createElement("div"); h.className = "section-title"; h.textContent = edu.active.topic_title;
-        var qt = document.createElement("div"); qt.className = "q-text"; qt.textContent = "❓ " + edu.active.question;
-        qc.appendChild(h); qc.appendChild(qt);
-        if (edu.active.designer) { var d = document.createElement("div"); d.className = "muted"; d.textContent = "✍️ طراح: " + edu.active.designer; qc.appendChild(d); }
-        var bar = document.createElement("div"); bar.className = "q-bar"; var bi = document.createElement("i"); bi.id = "qBarI"; bar.appendChild(bi);
-        var tl = document.createElement("div"); tl.className = "muted"; tl.id = "qLeft"; tl.style.textAlign = "center"; tl.style.marginBottom = "4px";
-        qc.appendChild(bar); qc.appendChild(tl);
-        edu.active.options.forEach(function(txt, pos){
-          var o = document.createElement("button"); o.className = "opt"; o.textContent = (pos+1) + ") " + txt;
-          o.onclick = function(){ answerEdu(pos); }; qc.appendChild(o);
-        });
-        qb.appendChild(qc);
-      }
-      // موضوع‌ها
-      var tb = $("eduTopics"); tb.innerHTML = "";
-      edu.topics.forEach(function(t){
-        var row = document.createElement("div"); row.className = "topic";
-        var nm = document.createElement("span"); nm.textContent = t.title; nm.style.fontWeight = "800";
-        var bt = document.createElement("button"); bt.className = "go"; bt.dataset.topic = t.key;
-        if (t.unlocked) { bt.textContent = "▶️ شروع"; bt.onclick = function(){ startEdu(t.key); }; }
-        else { bt.className = "go lock"; bt.textContent = "🔒 باز کردن (" + fa(edu.unlock_cost) + ")"; bt.onclick = function(){ unlockEdu(t.key, t.title); }; }
-        row.appendChild(nm); row.appendChild(bt); tb.appendChild(row);
-      });
-      $("eduDesign").style.display = edu.certificates < edu.max_certificates ? "" : "none";
-    }
-    // بخش‌های زنده (هر ثانیه)
-    var cd = Math.max(0, edu.cooldown - Math.floor((Date.now() - eduAt)/1000));
-    var activeLeft = edu.active ? eduLeft(edu.active.left) : 0;
-    var playing = edu.active && activeLeft > 0;
-    $("eduCooldown").textContent = playing ? "" : (cd > 0 ? "⏳ سؤال بعدی تا " + fmtMS(cd) + " دیگه" : "موضوع رو انتخاب کن و شروع کن:");
-    document.querySelectorAll("#eduTopics .go").forEach(function(b){ b.disabled = (cd > 0 || playing || eduBusy) && !b.classList.contains("lock"); });
-    if (edu.active) {
-      var li = $("qLeft"), bi2 = $("qBarI");
-      if (li) li.textContent = "⏱ " + fa(activeLeft) + " ثانیه";
-      if (bi2) bi2.style.width = Math.round(activeLeft / 15 * 100) + "%";
-      if (activeLeft <= 0) {
-        document.querySelectorAll("#eduQ .opt").forEach(function(b){ b.disabled = true; });
-        if (li) li.textContent = "⏰ زمان تموم شد";
-        if (!eduBusy && !edu._timedOut) { edu._timedOut = true; setTimeout(function(){ if (view === "edu") loadEdu(); }, 2500); }
-      }
-    }
-  }
-  function eduCall(path, body){
-    if (eduBusy) return Promise.resolve();
-    eduBusy = true;
-    return api(path, "POST", body).then(function(r){
-      if (r.message) toast(r.message, r.result ? r.result === "correct" : true);
-      setEdu(r.state || edu);
-      return r;
-    }).catch(function(e){ toast(e.message, false); loadEdu(); }).then(function(){ eduBusy = false; drawEdu(false); });
-  }
-  function startEdu(topic){
-    // بدون صفحه‌ی مکث؛ درخواست شروع بلافاصله ارسال می‌شود و سؤال مستقیماً جایگزین موضوع‌ها می‌شود.
-    if (eduBusy) return;
-    document.querySelectorAll("#eduTopics .go").forEach(function(b){ b.disabled = true; });
-    eduCall("/api/edu/start", { topic: topic });
-  }
-  function unlockEdu(topic, title){
-    if (!confirm("باز کردن «" + title + "» با " + fa(edu.unlock_cost) + " روب‌پوینت؟")) return;
-    eduCall("/api/edu/unlock", { topic: topic });
-  }
-  function answerEdu(pos){
-    document.querySelectorAll("#eduQ .opt").forEach(function(b){ b.disabled = true; });
-    eduCall("/api/edu/answer", { pos: pos }).then(function(r){
-      if (r && r.result === "wrong" && r.correct_text) {
-        var qb = $("eduQ"), c = document.createElement("div"); c.className = "card";
-        c.textContent = "✅ جواب درست: " + r.correct_text; qb.appendChild(c);
-      }
-    });
-  }
-  $("eduDesign").onclick = function(){
-    function open(u){ var url = "https://t.me/" + u + "?start=design_question"; if (tg && tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url, "_blank"); }
-    if (botUser) return open(botUser);
-    api("/api/botinfo").then(function(r){ if (r.username) { botUser = r.username; open(botUser); } else toast("نتونستم یوزرنیم بات رو پیدا کنم.", false); })
-      .catch(function(e){ toast(e.message, false); });
-  };
-
-
   // ---------- فروشگاه هدایا و سفارش‌ها ----------
   var storeItems = [], storeSelected = null, storeMode = "self", storeIsAdmin = false;
   function storeMoney(n){ return Number(n||0).toLocaleString("en-US") + " تومان"; }
@@ -1958,23 +1824,20 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   function show(v){
     if (v !== view) { try { window.scrollTo(0, 0); } catch(e){} }
     view = v;
-    ["fox","edu","wheel","leader","bank","store"].forEach(function(n){
+    ["fox","wheel","leader","bank","store"].forEach(function(n){
       $(n + "View").classList.toggle("active", v === n);
       $(n + "Tab").classList.toggle("active", v === n);
     });
     clearInterval(bankTickT); bankTickT = null;
-    clearInterval(eduTick); eduTick = null;
     clearInterval(wheelTick); wheelTick = null;
     clearInterval(bombTick); bombTick = null;
-    if (v === "edu") { loadEdu(); eduTick = setInterval(function(){ drawEdu(false); }, 1000); }
-    else if (v === "wheel") { loadWheel(); wheelTick = setInterval(drawWheelInfo, 1000); if (bombMode === "bomb") { loadBomb(); bombTick = setInterval(drawBombCd, 1000); } else if (bombMode === "plinko") loadPlinko(); }
+    if (v === "wheel") { loadWheel(); wheelTick = setInterval(drawWheelInfo, 1000); if (bombMode === "bomb") { loadBomb(); bombTick = setInterval(drawBombCd, 1000); } else if (bombMode === "plinko") loadPlinko(); }
     else if (v === "leader") loadLeader();
     else if (v === "bank") { loadBank(); bankTickT = setInterval(drawBankLive, 1000); }
     else if (v === "store") { loadStore(); }
     else loadProfile();
   }
   $("foxTab").onclick = function(){ show("fox"); };
-  $("eduTab").onclick = function(){ show("edu"); };
   $("wheelTab").onclick = function(){ show("wheel"); };
   $("leaderTab").onclick = function(){ show("leader"); };
   $("storeTab").onclick = function(){ show("store"); };
@@ -1987,7 +1850,6 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred("light"); } catch(e){}
     var p;
     if (view === "leader") p = loadLeader();
-    else if (view === "edu") p = loadEdu();
     else if (view === "wheel") p = (bombMode === "bomb" ? loadBomb() : bombMode === "plinko" ? loadPlinko() : loadWheel());
     else if (view === "bank") p = loadBank();
     else if (view === "store") p = loadStore();
@@ -2053,11 +1915,11 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   }
 
   paintCachedSkinInstant();
-  // لینک «ورود به مینی اپ — درس» مستقیماً پنل درس را باز می‌کند.
+  // لینک قدیمی درس به فروشگاه هدایت می‌شود.
   var initialView = "fox";
   try {
     var qp = new URLSearchParams(location.search);
-    if (qp.get("view") === "education" || qp.get("view") === "edu") initialView = "edu";
+    if (qp.get("view") === "education" || qp.get("view") === "edu" || qp.get("view") === "store") initialView = "store";
     else if (qp.get("view") === "wheel" || qp.get("view") === "bomb") initialView = "wheel";
   } catch(e){}
   show(initialView);
