@@ -392,6 +392,9 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 .bk-quick button{flex:1;min-width:58px;padding:9px 4px;border-radius:12px;border:1px solid #3fae83;background:#153a2b;color:#eafff3;font-weight:800;font-family:inherit;font-size:13px}
 .bk-preview{margin-top:10px;padding:12px;border-radius:14px;background:#0a1d15;border:1px solid #2a5c45;line-height:2;font-size:13px}
 .bk-preview b{color:#ffd45e}
+
+.store-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.store-item{border:1px solid #4c3677;background:linear-gradient(145deg,#24143d,#171b35);border-radius:16px;padding:13px;text-align:center;min-width:0}.store-item .gift-ico{font-size:34px;display:block;margin-bottom:5px}.store-item b{display:block;font-size:14px}.store-item small{display:block;color:#ffe08a;margin:7px 0 10px}.store-item button{width:100%;padding:9px 5px}.store-form{display:grid;gap:10px}.store-form input,.store-form select,.store-form textarea{width:100%;box-sizing:border-box;background:#111326;color:#fff;border:1px solid #51416f;border-radius:12px;padding:11px;font:inherit}.store-modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.store-modes button{padding:9px 4px;font-size:12px}.store-modes button.selected{outline:2px solid #ffcf5a;background:#44315e}.store-order{border:1px solid #3b3155;border-radius:12px;padding:11px;margin:8px 0;background:#17152a;font-size:13px;line-height:1.9}.store-order .status{color:#ffe08a;font-weight:800}.store-price-admin{display:flex;gap:6px;align-items:center;margin-top:7px}.store-price-admin input{min-width:0;width:90px;padding:7px;border-radius:8px;background:#111326;color:white;border:1px solid #51416f}.store-hidden{display:none!important}@media(max-width:360px){.store-grid{grid-template-columns:1fr}.store-modes{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body>
@@ -481,17 +484,6 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   <button id="blockedRetry" class="action">🔄 بررسی دوباره</button>
 </div></div>
 <div id="toast" class="toast"></div>
-<button id="starGiftOpen" type="button" aria-label="سفارش گیفت استارزی" style="position:fixed;z-index:40;bottom:88px;left:14px;border:0;border-radius:18px;padding:12px 15px;background:linear-gradient(135deg,#ffd166,#f59e0b);color:#382300;font-weight:900;box-shadow:0 8px 25px #0005">🎁 خرید گیفت استارزی</button>
-<div id="starGiftModal" style="display:none;position:fixed;inset:0;z-index:100;background:#06101ddd;backdrop-filter:blur(8px);padding:18px;overflow:auto;align-items:center;justify-content:center">
- <form id="starGiftForm" style="width:min(100%,440px);margin:auto;background:#14253a;border:1px solid #ffffff20;border-radius:22px;padding:20px;color:#fff;box-shadow:0 20px 60px #0008">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><h2 style="margin:0 0 14px">🎁 سفارش گیفت واقعی تلگرام</h2><button id="starGiftClose" type="button" style="background:#e5484d;color:white;border:0;border-radius:10px;padding:7px 11px">✕</button></div>
-  <label style="display:block;margin:10px 0 6px">نوع گیفت</label><select id="starGiftType" required style="width:100%;padding:12px;border-radius:12px;background:#0b1727;color:white;border:1px solid #ffffff30"><option value="15">⭐ ۱۵ استارز — ۶۶٬۸۵۰ تومان</option><option value="25">⭐ ۲۵ استارز — ۱۱۱٬۵۰۰ تومان</option><option value="50">⭐ ۵۰ استارز — ۲۲۳٬۰۰۰ تومان</option></select>
-  <label style="display:block;margin:12px 0 6px">آیدی تلگرام گیرنده (@username یا آیدی عددی)</label><input id="starGiftRecipient" required maxlength="64" placeholder="مثلاً @username" style="box-sizing:border-box;width:100%;padding:12px;border-radius:12px;background:#0b1727;color:white;border:1px solid #ffffff30">
-  <label style="display:block;margin:12px 0 6px">تصویر رسید پرداخت</label><input id="starGiftReceipt" type="file" accept="image/*" required style="width:100%;color:#fff">
-  <p style="font-size:12px;line-height:1.7;color:#b8c9dc">بعد از ثبت، آیدی سفارش‌دهنده، آیدی گیرنده، نوع گیفت و تصویر رسید برای پشتیبانی ارسال می‌شود. سفارش پس از بررسی پشتیبانی انجام می‌شود.</p>
-  <button id="starGiftSubmit" type="submit" style="width:100%;padding:13px;border:0;border-radius:13px;background:#22c55e;color:#062311;font-weight:900">📨 ثبت سفارش برای پشتیبانی</button><div id="starGiftStatus" role="status" style="white-space:pre-line;margin-top:12px;font-size:13px"></div>
- </form>
-</div>
 <div id="lightbox" class="lightbox"><button id="lbClose" class="lb-close">✕</button><img id="lbImg" alt="اسکین"><div class="lb-tip">با دو انگشت زوم کن • دوبار تپ = زوم • بکش تا جابجا بشه</div></div>
 <div class="topbar">
   <button id="btnRefresh" class="rbtn refresh-tab" aria-label="تازه‌سازی"><span id="rfIcon">🔄</span></button>
@@ -732,12 +724,40 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   </div>
 </section>
 
+
+<section id="storeView" class="view">
+ <div class="card">
+  <div class="section-title">🎁 فروشگاه روباهیو</div>
+  <p class="muted" style="line-height:1.8">هدیه یا بستهٔ استار انتخاب کن، رسید پرداخت را بفرست و وضعیت سفارشت را همین‌جا ببین. سفارش‌ها پس از بررسی پشتیبانی تکمیل می‌شوند.</p>
+  <div id="storeAdminNote" class="muted" style="display:none;margin:8px 0">🛠 پنل قیمت ادمین: قیمت‌ها را تغییر بده و ذخیره کن.</div>
+  <div id="storeGrid" class="store-grid"><div class="muted">در حال بارگذاری فروشگاه…</div></div>
+ </div>
+ <div class="card">
+  <div class="section-title">📦 سفارش‌های من</div>
+  <button id="storeReloadOrders" class="action secondary" style="width:100%;margin-bottom:8px">🔄 بروزرسانی سفارش‌ها</button>
+  <div id="storeOrders"><div class="muted">در حال دریافت سفارش‌ها…</div></div>
+ </div>
+</section>
+<div id="storeModal" class="modal"><div class="sheet" style="max-height:88vh;overflow:auto">
+ <h3 id="storeModalTitle">🎁 ثبت سفارش</h3>
+ <div id="storeModalPrice" class="muted" style="margin-bottom:10px"></div>
+ <div class="store-form">
+  <div class="store-modes"><button type="button" class="action secondary" data-store-mode="self">برای خودم</button><button type="button" class="action secondary" data-store-mode="other">برای دیگری</button><button type="button" class="action secondary" data-store-mode="anonymous">ناشناس</button></div>
+  <input id="storeRecipient" placeholder="یوزرنیم گیرنده بدون @" autocomplete="off" maxlength="32">
+  <textarea id="storeText" rows="2" maxlength="500" placeholder="متن دلخواه (اختیاری؛ خالی بگذاری بدون متن ارسال می‌شود)"></textarea>
+  <label class="muted">📸 تصویر رسید پرداخت (اجباری)<input id="storeReceipt" type="file" accept="image/*" style="display:block;margin-top:6px"></label>
+  <div id="storeFormHint" class="muted" style="line-height:1.7"></div>
+  <div class="row"><button id="storeSubmit" class="action">✅ ثبت سفارش</button><button id="storeCancel" class="action secondary">بستن</button></div>
+ </div>
+</div></div>
+
 <nav class="tabs">
   <button id="eduTab" class="tab"><svg class="ico"><use href="#i-edu"/></svg>درس</button>
   <button id="wheelTab" class="tab"><svg class="ico"><use href="#i-game"/></svg>بازی‌ها</button>
   <button id="foxTab" class="tab center active"><span class="cav" id="cAvatar">🦊</span><span id="cName">روباه</span></button>
   <button id="bankTab" class="tab"><svg class="ico"><use href="#i-bank"/></svg>بانک</button>
   <button id="leaderTab" class="tab"><svg class="ico"><use href="#i-trophy"/></svg>لیدربرد</button>
+  <button id="storeTab" class="tab">🎁 فروشگاه</button>
 </nav>
 
 <div id="bkModal" class="modal"><div class="sheet">
@@ -1881,12 +1901,64 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       .catch(function(e){ toast(e.message, false); });
   };
 
+
+  // ---------- فروشگاه هدایا و سفارش‌ها ----------
+  var storeItems = [], storeSelected = null, storeMode = "self", storeIsAdmin = false;
+  function storeMoney(n){ return Number(n||0).toLocaleString("en-US") + " تومان"; }
+  function loadStore(){
+    return api("/api/store").then(function(d){ storeItems=d.items||[]; storeIsAdmin=!!d.is_admin; renderStore(); return loadStoreOrders(); })
+      .catch(function(e){ $("storeGrid").textContent=e.message; throw e; });
+  }
+  function renderStore(){
+    $("storeAdminNote").style.display=storeIsAdmin?"block":"none";
+    var g=$("storeGrid"); g.innerHTML="";
+    storeItems.forEach(function(it){
+      var card=document.createElement("div"); card.className="store-item";
+      var icon=document.createElement("span"); icon.className="gift-ico"; icon.textContent=(it.title.match(/^\S+/)||["🎁"])[0]; card.appendChild(icon);
+      var title=document.createElement("b"); title.textContent=it.title.replace(/^\S+\s*/,""); card.appendChild(title);
+      var price=document.createElement("small"); price.textContent=storeMoney(it.price_toman); card.appendChild(price);
+      var btn=document.createElement("button"); btn.className="action"; btn.textContent="انتخاب و سفارش"; btn.onclick=function(){openStoreOrder(it.key);}; card.appendChild(btn);
+      if(storeIsAdmin){ var row=document.createElement("div"); row.className="store-price-admin"; var inp=document.createElement("input"); inp.type="number"; inp.min="0"; inp.value=it.price_toman; inp.setAttribute("aria-label","قیمت تومان"); var save=document.createElement("button"); save.className="action secondary"; save.textContent="ذخیره"; save.onclick=function(){saveStorePrice(it.key,inp.value,save);}; row.appendChild(inp);row.appendChild(save);card.appendChild(row); }
+      g.appendChild(card);
+    });
+  }
+  function saveStorePrice(key,val,btn){
+    var n=Number(val); if(!Number.isSafeInteger(n)||n<0){toast("قیمت معتبر نیست",false);return;}
+    btn.disabled=true; api("/api/store/admin/price","POST",{item_key:key,price_toman:n}).then(function(){toast("قیمت ذخیره شد",true);return loadStore();}).catch(function(e){toast(e.message,false);}).finally(function(){btn.disabled=false;});
+  }
+  function openStoreOrder(key){
+    storeSelected=storeItems.find(function(x){return x.key===key;}); if(!storeSelected)return;
+    storeMode="self"; $("storeModalTitle").textContent="🎁 "+storeSelected.title;
+    $("storeModalPrice").textContent="مبلغ سفارش: "+storeMoney(storeSelected.price_toman);
+    $("storeRecipient").value=""; $("storeText").value=""; $("storeReceipt").value="";
+    document.querySelectorAll("[data-store-mode]").forEach(function(b){b.classList.toggle("selected",b.dataset.storeMode===storeMode);});
+    updateStoreMode(); $("storeModal").classList.add("open");
+  }
+  function updateStoreMode(){
+    var me=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.username)||"";
+    var inp=$("storeRecipient"); inp.classList.toggle("store-hidden",storeMode==="self"); inp.placeholder=storeMode==="anonymous"?"یوزرنیم گیرنده (ارسال ناشناس)":"یوزرنیم گیرنده بدون @";
+    if(storeMode==="self") inp.value=me;
+    $("storeFormHint").textContent=storeMode==="anonymous"?"نام فرستنده برای گیرنده نمایش داده نمی‌شود؛ پشتیبانی اطلاعات کامل سفارش را می‌بیند.":storeMode==="self"?"هدیه به یوزرنیم خودت ارسال می‌شود: @"+ (me||"بدون یوزرنیم") : "یوزرنیم تلگرام گیرنده را وارد کن؛ شناسه عددی پذیرفته نمی‌شود.";
+  }
+  document.querySelectorAll("[data-store-mode]").forEach(function(b){b.onclick=function(){storeMode=b.dataset.storeMode;document.querySelectorAll("[data-store-mode]").forEach(function(x){x.classList.toggle("selected",x===b);});updateStoreMode();};});
+  $("storeCancel").onclick=function(){$("storeModal").classList.remove("open");};
+  $("storeModal").addEventListener("click",function(e){if(e.target===$("storeModal"))$("storeModal").classList.remove("open");});
+  $("storeSubmit").onclick=function(){
+    if(!storeSelected)return; var file=$("storeReceipt").files[0]; if(!file){toast("اول تصویر رسید پرداخت را انتخاب کن",false);return;}
+    if(file.size>8*1024*1024){toast("حجم رسید باید کمتر از ۸ مگابایت باشد",false);return;}
+    var recipient=$("storeRecipient").value.trim().replace(/^@/,""); if(storeMode!=="self"&&!/^[A-Za-z0-9_]{5,32}$/.test(recipient)){toast("یوزرنیم تلگرام گیرنده را درست وارد کن",false);return;}
+    var btn=$("storeSubmit");btn.disabled=true;btn.textContent="در حال ارسال…";
+    var reader=new FileReader(); reader.onload=function(){api("/api/store/orders","POST",{item_key:storeSelected.key,send_mode:storeMode,recipient_username:recipient,custom_text:$("storeText").value,receipt_base64:reader.result,receipt_name:file.name}).then(function(r){toast("سفارش #"+r.order_id+" ثبت شد",true);$("storeModal").classList.remove("open");return loadStoreOrders();}).catch(function(e){toast(e.message,false);}).finally(function(){btn.disabled=false;btn.textContent="✅ ثبت سفارش";});}; reader.onerror=function(){toast("خواندن تصویر رسید ناموفق بود",false);btn.disabled=false;btn.textContent="✅ ثبت سفارش";};reader.readAsDataURL(file);
+  };
+  function loadStoreOrders(){return api("/api/store/orders").then(function(d){var box=$("storeOrders");box.innerHTML="";var arr=d.orders||[];if(!arr.length){box.innerHTML='<div class="muted">هنوز سفارشی ثبت نکردی.</div>';return;}arr.forEach(function(o){var el=document.createElement("div");el.className="store-order";var title=document.createElement("b");title.textContent="#"+o.id+" · "+o.item_title;el.appendChild(title);if(d.is_admin){var buyer=document.createElement("div");buyer.textContent="خریدار: @"+(o.buyer_username||"بدون یوزرنیم")+" · شناسه: "+o.buyer_id;el.appendChild(buyer);}var info=document.createElement("div");info.textContent="گیرنده: @"+o.recipient_username+" · "+storeMoney(o.price_toman);el.appendChild(info);var date=document.createElement("div");date.className="muted";date.textContent=String(o.created_at||"").replace("T"," ").slice(0,16);el.appendChild(date);var st=document.createElement("div");st.className="status";st.textContent="وضعیت: "+o.status;el.appendChild(st);if(d.is_admin){var sel=document.createElement("select");["در انتظار بررسی","در حال انجام","تکمیل شد","رد شد"].forEach(function(v){var op=document.createElement("option");op.value=v;op.textContent=v;op.selected=v===o.status;sel.appendChild(op);});sel.style.cssText="margin-top:7px;width:100%;padding:8px;background:#111326;color:#fff;border:1px solid #51416f;border-radius:8px";var save=document.createElement("button");save.className="action secondary";save.style.cssText="width:100%;margin-top:6px";save.textContent="ذخیره وضعیت";save.onclick=function(){save.disabled=true;api("/api/store/admin/order-status","POST",{order_id:o.id,status:sel.value}).then(function(){toast("وضعیت سفارش بروزرسانی شد",true);return loadStoreOrders();}).catch(function(e){toast(e.message,false);}).finally(function(){save.disabled=false;});};el.appendChild(sel);el.appendChild(save);}box.appendChild(el);});}).catch(function(e){$("storeOrders").textContent=e.message;});}
+  $("storeReloadOrders").onclick=loadStoreOrders;
+
   // ---------- ناوبری + تازه‌سازی ----------
   var view = "fox";
   function show(v){
     if (v !== view) { try { window.scrollTo(0, 0); } catch(e){} }
     view = v;
-    ["fox","edu","wheel","leader","bank"].forEach(function(n){
+    ["fox","edu","wheel","leader","bank","store"].forEach(function(n){
       $(n + "View").classList.toggle("active", v === n);
       $(n + "Tab").classList.toggle("active", v === n);
     });
@@ -1898,12 +1970,14 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     else if (v === "wheel") { loadWheel(); wheelTick = setInterval(drawWheelInfo, 1000); if (bombMode === "bomb") { loadBomb(); bombTick = setInterval(drawBombCd, 1000); } else if (bombMode === "plinko") loadPlinko(); }
     else if (v === "leader") loadLeader();
     else if (v === "bank") { loadBank(); bankTickT = setInterval(drawBankLive, 1000); }
+    else if (v === "store") { loadStore(); }
     else loadProfile();
   }
   $("foxTab").onclick = function(){ show("fox"); };
   $("eduTab").onclick = function(){ show("edu"); };
   $("wheelTab").onclick = function(){ show("wheel"); };
   $("leaderTab").onclick = function(){ show("leader"); };
+  $("storeTab").onclick = function(){ show("store"); };
   $("bankTab").onclick = function(){ show("bank"); };
 
   function refreshNow(){
@@ -1916,6 +1990,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     else if (view === "edu") p = loadEdu();
     else if (view === "wheel") p = (bombMode === "bomb" ? loadBomb() : bombMode === "plinko" ? loadPlinko() : loadWheel());
     else if (view === "bank") p = loadBank();
+    else if (view === "store") p = loadStore();
     else p = loadProfile();
     Promise.resolve(p).then(function(){ toast("🔄 اطلاعات بروز شد", true); }).then(function(){
       setTimeout(function(){ b.classList.remove("spin"); }, 400);
@@ -1976,29 +2051,6 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       api("/api/leaderboard?category=points").then(function(d){ if (!lbCache.points) lbCache.points = d; }).catch(function(){});
     }, 1200);
   }
-
-  // ---------- سفارش گیفت استارزی: ثبت سفارش + ارسال رسید به پشتیبانی ----------
-  (function(){
-    var modal=document.getElementById("starGiftModal"), form=document.getElementById("starGiftForm"), status=document.getElementById("starGiftStatus"), submit=document.getElementById("starGiftSubmit");
-    document.getElementById("starGiftOpen").addEventListener("click",function(){modal.style.display="flex";});
-    document.getElementById("starGiftClose").addEventListener("click",function(){modal.style.display="none";});
-    modal.addEventListener("click",function(e){if(e.target===modal)modal.style.display="none";});
-    form.addEventListener("submit",function(e){
-      e.preventDefault(); status.textContent="در حال ارسال سفارش و رسید…"; submit.disabled=true;
-      var file=document.getElementById("starGiftReceipt").files[0];
-      if(!file){status.textContent="لطفاً تصویر رسید پرداخت را انتخاب کن.";submit.disabled=false;return;}
-      if(file.size>8*1024*1024){status.textContent="حجم رسید نباید بیشتر از ۸ مگابایت باشد.";submit.disabled=false;return;}
-      var reader=new FileReader();
-      reader.onload=function(){
-        var data=String(reader.result||"");
-        api("/api/star-gift-orders","POST",{gift_stars:Number(document.getElementById("starGiftType").value),recipient_id:document.getElementById("starGiftRecipient").value.trim(),receipt_base64:data.split(",")[1]||"",receipt_name:file.name||"receipt.jpg"})
-        .then(function(r){status.textContent="✅ "+r.message+"\nشماره سفارش: "+r.order_id; form.reset();})
-        .catch(function(err){status.textContent="❌ "+(err.message||"ثبت سفارش انجام نشد.");})
-        .finally(function(){submit.disabled=false;});
-      };
-      reader.onerror=function(){status.textContent="خواندن تصویر رسید ناموفق بود.";submit.disabled=false;}; reader.readAsDataURL(file);
-    });
-  })();
 
   paintCachedSkinInstant();
   // لینک «ورود به مینی اپ — درس» مستقیماً پنل درس را باز می‌کند.

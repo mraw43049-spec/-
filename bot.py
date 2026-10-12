@@ -7516,7 +7516,7 @@ async def bank_withdraw_button(update,context):
 GIFT_TIERS = {
     "15": {
         "tier_label": "گیفت 15 استارزی",
-        "price": 60000,
+        "price": 66850,
         "options": {
             "teddy": {"name": "تدی", "emoji": "🧸"},
             "heart": {"name": "قلب", "emoji": "💝"},
@@ -7524,7 +7524,7 @@ GIFT_TIERS = {
     },
     "25": {
         "tier_label": "گیفت 25 استارزی",
-        "price": 98000,
+        "price": 111500,
         "options": {
             "box": {"name": "کادو", "emoji": "🎁"},
             "rose": {"name": "گل رز", "emoji": "🌹"},
@@ -7532,7 +7532,7 @@ GIFT_TIERS = {
     },
     "50": {
         "tier_label": "گیفت 50 استارزی",
-        "price": 200000,
+        "price": 223000,
         "options": {
             "cake": {"name": "کیک", "emoji": "🎂"},
             "bouquet": {"name": "دسته گل", "emoji": "💐"},
@@ -7541,6 +7541,20 @@ GIFT_TIERS = {
         },
     },
 }
+def current_gift_tier_price(tier_key, fallback):
+    """Read the shared Mini App price table so admin edits apply to the bot too."""
+    try:
+        from database import engine as _shared_engine
+        from sqlalchemy import text as _sql_text
+        price_key = {"15":"stars_15", "25":"stars_25", "50":"stars_50"}.get(str(tier_key))
+        if not price_key: return int(fallback)
+        with _shared_engine.connect() as _conn:
+            _row = _conn.execute(_sql_text("SELECT price_toman FROM miniapp_store_prices WHERE item_key=:k"), {"k":price_key}).first()
+            if _row and _row[0] is not None: return int(_row[0])
+    except Exception:
+        pass
+    return int(fallback)
+
 GIFT_CARD_NUMBER = "6219861851160068"
 GIFT_CARD_OWNER = "ظریفی"
 GIFT_CHANNEL_USERNAME = "@foxfrenzy_gift"
@@ -7567,15 +7581,16 @@ def gift_shop_keyboard():
 
 def gift_tiers_text():
     lines = ["🎁 خرید گیفت استارزی", "", "یکی از تعرفه‌های استارزی رو انتخاب کن ⬇️", ""]
-    for tier in GIFT_TIERS.values():
+    for key, tier in GIFT_TIERS.items():
         icons = " ".join(o["emoji"] for o in tier["options"].values())
-        lines.append(f"┘─ {tier['tier_label']} {icons} — {tier['price']:,} تومان")
+        price = current_gift_tier_price(key, tier["price"])
+        lines.append(f"┘─ {tier['tier_label']} {icons} — {price:,} تومان")
     return "\n".join(lines)
 
 
 def gift_tiers_keyboard():
     rows = [
-        [InlineKeyboardButton(f"{tier['tier_label']} ({tier['price']:,} تومان)", callback_data=f"gift:pick:{key}:0")]
+        [InlineKeyboardButton(f"{tier['tier_label']} ({current_gift_tier_price(key, tier['price']):,} تومان)", callback_data=f"gift:pick:{key}:0")]
         for key, tier in GIFT_TIERS.items()
     ]
     rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="gift:backshop:0:0")])
@@ -7603,8 +7618,8 @@ def gift_qty_text(tier, option_key, qty):
     return (
         f"{t['tier_label']} — {label}\n\n"
         f"🔢 تعداد رو با دکمه‌های ➖ و ➕ تنظیم کن.\n"
-        f"💳 قیمت واحد: {t['price']:,} تومان\n"
-        f"💰 جمع کل ({qty} عدد): {t['price'] * qty:,} تومان\n\n"
+        f"💳 قیمت واحد: {current_gift_tier_price(tier, t['price']):,} تومان\n"
+        f"💰 جمع کل ({qty} عدد): {current_gift_tier_price(tier, t['price']) * qty:,} تومان\n\n"
         f"وقتی تعداد درست بود، روی «✅ تایید تعداد» بزن."
     )
 
@@ -7625,7 +7640,8 @@ def gift_order_summary_text(flow):
     tier = GIFT_TIERS[flow["gift_type"]]
     label = gift_option_label(flow["gift_type"], flow["gift_option"])
     qty = flow["qty"]
-    total = tier["price"] * qty
+    unit_price = current_gift_tier_price(flow["gift_type"], tier["price"])
+    total = unit_price * qty
     gift_text_display = flow.get("gift_text") or "بدون متن"
     return (
         f"🧾 خلاصه سفارش\n\n"
@@ -8068,7 +8084,8 @@ async def finalize_gift_order(update, context, flow):
         option_key = flow["gift_option"]
         design_label = gift_option_label(flow["gift_type"], option_key)
         qty = flow["qty"]
-        total = tier["price"] * qty
+        unit_price = current_gift_tier_price(flow["gift_type"], tier["price"])
+        total = unit_price * qty
         try:
             started_at = datetime.fromisoformat(flow["started_at"])
         except Exception:
@@ -8079,7 +8096,7 @@ async def finalize_gift_order(update, context, flow):
             gift_type=flow["gift_type"],
             gift_design=option_key,
             quantity=qty,
-            unit_price=tier["price"],
+            unit_price=unit_price,
             total_price=total,
             gift_text=flow.get("gift_text") or "",
             receipt_file_id=update.message.photo[-1].file_id,

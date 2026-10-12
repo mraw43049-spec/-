@@ -6,8 +6,6 @@
 - منطق برداشت و ارتقا از خود bot.py استفاده می‌کنه تا دقیقاً مثل بات رفتار کنه.
 """
 import asyncio
-import base64
-import binascii
 import hashlib
 import hmac
 import os
@@ -26,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
-from sqlalchemy import func, text
+from sqlalchemy import func, text, Table, MetaData, Column, Integer, String, BigInteger, Text, select, update
 import httpx
 
 import attack_owl
@@ -413,66 +411,139 @@ def current_telegram_user(x_init_data: str = Header(..., alias="X-Init-Data")):
     return tg_user
 
 
-# ---------- سفارش دستی گیفت استارزی از مینی‌اپ ----------
-class StarGiftOrderIn(BaseModel):
-    gift_stars: int
-    recipient_id: str
+
+# ---------------------------------------------------------------------------
+# فروشگاه مینی‌اپ: قیمت‌ها و سفارش‌ها در همان دیتابیس دائمی پروژه ذخیره می‌شوند.
+# ---------------------------------------------------------------------------
+_store_meta = MetaData()
+_store_prices = Table(
+    "miniapp_store_prices", _store_meta,
+    Column("item_key", String(80), primary_key=True),
+    Column("title", String(120), nullable=False),
+    Column("price_toman", BigInteger, nullable=False),
+)
+_store_orders = Table(
+    "miniapp_store_orders", _store_meta,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("buyer_id", BigInteger, nullable=False),
+    Column("buyer_username", String(80), nullable=True),
+    Column("recipient_username", String(80), nullable=False),
+    Column("item_key", String(80), nullable=False),
+    Column("item_title", String(120), nullable=False),
+    Column("price_toman", BigInteger, nullable=False),
+    Column("send_mode", String(24), nullable=False),
+    Column("custom_text", String(500), nullable=True),
+    Column("status", String(32), nullable=False, default="در انتظار بررسی"),
+    Column("created_at", String(40), nullable=False),
+)
+try:
+    _store_meta.create_all(bind=engine, checkfirst=True)
+    with engine.begin() as _conn:
+        _defaults = [
+            ("gift_teddy", "🧸 تدی", 66850), ("gift_heart", "❤️ قلب", 66850),
+            ("gift_rose", "🌹 گل رز", 111500), ("gift_box", "🎁 کادو", 111500),
+            ("gift_rocket", "🚀 موشک", 223000), ("gift_champagne", "🍾 شامپاین", 223000),
+            ("gift_bouquet", "💐 دسته گل", 223000), ("gift_cake", "🎂 کیک", 223000),
+            ("stars_15", "⭐ گیفت ۱۵ استار", 66850), ("stars_25", "⭐ گیفت ۲۵ استار", 111500),
+            ("stars_50", "⭐ گیفت ۵۰ استار", 223000),
+        ]
+        for _key, _title, _price in _defaults:
+            _exists = _conn.execute(select(_store_prices.c.item_key).where(_store_prices.c.item_key == _key)).first()
+            if not _exists:
+                _conn.execute(_store_prices.insert().values(item_key=_key, title=_title, price_toman=_price))
+except Exception as _store_init_error:
+    print(f"[miniapp-store] initialization failed: {_store_init_error}")
+
+STORE_ITEMS = [
+    {"key":"gift_teddy","title":"🧸 تدی","kind":"gift"}, {"key":"gift_heart","title":"❤️ قلب","kind":"gift"},
+    {"key":"gift_rose","title":"🌹 گل رز","kind":"gift"}, {"key":"gift_box","title":"🎁 کادو","kind":"gift"},
+    {"key":"gift_rocket","title":"🚀 موشک","kind":"gift"}, {"key":"gift_champagne","title":"🍾 شامپاین","kind":"gift"},
+    {"key":"gift_bouquet","title":"💐 دسته گل","kind":"gift"}, {"key":"gift_cake","title":"🎂 کیک","kind":"gift"},
+    {"key":"stars_15","title":"⭐ گیفت ۱۵ استار","kind":"stars"}, {"key":"stars_25","title":"⭐ گیفت ۲۵ استار","kind":"stars"},
+    {"key":"stars_50","title":"⭐ گیفت ۵۰ استار","kind":"stars"},
+]
+
+class StoreOrderIn(BaseModel):
+    item_key: str
+    send_mode: str
+    recipient_username: str = ""
+    custom_text: str = ""
     receipt_base64: str
     receipt_name: str = "receipt.jpg"
 
-STAR_GIFT_PRICES = {15: 66850, 25: 111500, 50: 223000}
+class StorePriceIn(BaseModel):
+    item_key: str
+    price_toman: int
 
-@app.post("/api/star-gift-orders")
-def create_star_gift_order(body: StarGiftOrderIn, tg_user: dict = Depends(current_telegram_user)):
-    """ثبت درخواست خرید؛ پشتیبانی سفارش، آیدی خریدار/گیرنده و رسید را دریافت می‌کند."""
-    import re
-    stars = int(body.gift_stars)
-    if stars not in STAR_GIFT_PRICES:
-        raise HTTPException(status_code=400, detail="نوع گیفت معتبر نیست.")
-    recipient = (body.recipient_id or "").strip()
-    if not re.fullmatch(r"(?:@?[A-Za-z][A-Za-z0-9_]{4,31}|[0-9]{5,20})", recipient):
-        raise HTTPException(status_code=400, detail="آیدی گیرنده را به شکل @username یا آیدی عددی معتبر وارد کن.")
-    raw = (body.receipt_base64 or "").strip()
-    if "," in raw and raw.startswith("data:"):
-        raw = raw.split(",", 1)[1]
-    try:
-        receipt = base64.b64decode(raw, validate=True)
-    except (ValueError, binascii.Error):
-        raise HTTPException(status_code=400, detail="تصویر رسید معتبر نیست.")
-    if not receipt or len(receipt) > 8 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="رسید باید تصویر معتبر و حداکثر ۸ مگابایت باشد.")
-    if not ADMIN_ID_SET:
-        raise HTTPException(status_code=503, detail="شناسه پشتیبانی روی سرور تنظیم نشده؛ لطفاً بعداً تلاش کن.")
-    order_id = f"SG{int(time.time())}-{tg_user['id']}"
-    price = STAR_GIFT_PRICES[stars]
-    caption = (
-        f"🎁 سفارش جدید گیفت استارزی\n\n"
-        f"🧾 شماره سفارش: {order_id}\n"
-        f"👤 آیدی سفارش‌دهنده: <code>{tg_user['id']}</code>\n"
-        f"🎯 آیدی گیرنده: <code>{recipient}</code>\n"
-        f"⭐ نوع گیفت: {stars} استارز\n"
-        f"💵 مبلغ اعلام‌شده: {price:,} تومان\n"
-        f"📌 وضعیت: در انتظار بررسی پشتیبانی\n"
-        f"⚠️ رسید ارسالی به‌تنهایی تأیید پرداخت نیست؛ مبلغ را بررسی کنید."
-    )
+@app.get("/api/store")
+def api_store(tg_user: dict = Depends(current_telegram_user)):
+    with engine.connect() as conn:
+        prices = {r["item_key"]: {"price_toman": int(r["price_toman"]), "title": r["title"]} for r in conn.execute(select(_store_prices)).mappings()}
+    return {"items": [{**item, **prices.get(item["key"], {"price_toman":0})} for item in STORE_ITEMS], "is_admin": int(tg_user["id"]) in ADMIN_ID_SET}
+
+@app.get("/api/store/orders")
+def api_store_orders(tg_user: dict = Depends(current_telegram_user)):
+    with engine.connect() as conn:
+        stmt = select(_store_orders)
+        if int(tg_user["id"]) not in ADMIN_ID_SET:
+            stmt = stmt.where(_store_orders.c.buyer_id == int(tg_user["id"]))
+        rows = conn.execute(stmt.order_by(_store_orders.c.id.desc()).limit(100)).mappings().all()
+    return {"orders": [dict(r) for r in rows], "is_admin": int(tg_user["id"]) in ADMIN_ID_SET}
+
+@app.post("/api/store/orders")
+def api_store_order(body: StoreOrderIn, tg_user: dict = Depends(current_telegram_user)):
+    item = next((x for x in STORE_ITEMS if x["key"] == body.item_key), None)
+    if not item: raise HTTPException(status_code=400, detail="محصول انتخاب‌شده معتبر نیست.")
+    if body.send_mode not in ("self", "other", "anonymous"): raise HTTPException(status_code=400, detail="روش ارسال معتبر نیست.")
+    buyer_name = str(tg_user.get("username") or "").strip().lstrip("@").lower()
+    if body.send_mode == "self": recipient = buyer_name
+    else: recipient = body.recipient_username.strip().lstrip("@").lower()
+    if not recipient or len(recipient) > 32 or not recipient.replace("_", "a").isalnum():
+        raise HTTPException(status_code=400, detail="یوزرنیم تلگرام گیرنده را درست وارد کن.")
+    if body.send_mode == "self" and not buyer_name:
+        raise HTTPException(status_code=400, detail="برای ارسال به خودت، باید یوزرنیم تلگرام داشته باشی.")
+    txt = body.custom_text.strip()
+    if len(txt) > 500: raise HTTPException(status_code=400, detail="متن هدیه حداکثر ۵۰۰ کاراکتر است.")
+    raw = body.receipt_base64.split(",", 1)[-1]
+    import base64, binascii
+    try: receipt = base64.b64decode(raw, validate=True)
+    except (ValueError, binascii.Error): raise HTTPException(status_code=400, detail="تصویر رسید معتبر نیست.")
+    if not receipt or len(receipt) > 8 * 1024 * 1024: raise HTTPException(status_code=400, detail="رسید باید کمتر از ۸ مگابایت باشد.")
+    with engine.begin() as conn:
+        pr = conn.execute(select(_store_prices).where(_store_prices.c.item_key == body.item_key)).mappings().first()
+        if not pr: raise HTTPException(status_code=404, detail="قیمت این محصول پیدا نشد.")
+        result = conn.execute(_store_orders.insert().values(buyer_id=int(tg_user["id"]), buyer_username=buyer_name or None,
+            recipient_username=recipient, item_key=body.item_key, item_title=pr["title"], price_toman=int(pr["price_toman"]),
+            send_mode=body.send_mode, custom_text=txt or None, status="در انتظار بررسی", created_at=datetime.now(timezone.utc).isoformat()))
+        order_id = result.inserted_primary_key[0]
+    caption = (f"🛍 سفارش جدید مینی‌اپ روباهیو\nکد سفارش: #{order_id}\nفرستنده: @{buyer_name or 'بدون یوزرنیم'} (ID: {tg_user['id']})\n"
+               f"گیرنده: @{recipient}\nمحصول: {pr['title']}\nمبلغ: {int(pr['price_toman']):,} تومان\n"
+               f"نوع ارسال: {'ناشناس برای گیرنده' if body.send_mode == 'anonymous' else 'برای خودم' if body.send_mode == 'self' else 'برای شخص دیگر'}\n"
+               f"متن هدیه: {txt or 'بدون متن'}\nوضعیت: در انتظار بررسی")
     sent = 0
-    for admin_id in sorted(ADMIN_ID_SET):
+    for admin_id in ADMIN_ID_SET:
         try:
-            resp = _tg_http.post(
-                f"{_TG_API}/sendPhoto",
-                data={"chat_id": admin_id, "caption": caption, "parse_mode": "HTML"},
-                files={"photo": (body.receipt_name or "receipt.jpg", receipt, "application/octet-stream")},
-                timeout=15,
-            )
-            if resp.is_success and resp.json().get("ok"):
-                sent += 1
-            else:
-                print(f"[star-gift-order] admin delivery failed: {resp.text[:300]}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[star-gift-order] admin delivery error: {exc}")
-    if sent == 0:
-        raise HTTPException(status_code=502, detail="ارسال سفارش به پشتیبانی ناموفق بود؛ دوباره تلاش کن.")
-    return {"ok": True, "order_id": order_id, "message": "سفارشت برای پشتیبانی ارسال شد و بعد از بررسی با تو هماهنگ می‌شود."}
+            response = _tg_http.post(f"{_TG_API}/sendPhoto", data={"chat_id":admin_id,"caption":caption}, files={"photo":(body.receipt_name or "receipt.jpg", receipt, "image/jpeg")})
+            if response.status_code == 200 and response.json().get("ok"): sent += 1
+        except Exception as e: print(f"[miniapp-store] admin notification failed: {e}")
+    if not sent:
+        with engine.begin() as conn: conn.execute(update(_store_orders).where(_store_orders.c.id == order_id).values(status="ثبت شد؛ ارسال به پشتیبانی ناموفق بود"))
+        raise HTTPException(status_code=503, detail="سفارش ذخیره شد اما پیام به پشتیبانی ارسال نشد؛ به پشتیبانی اطلاع بده.")
+    return {"ok": True, "order_id": order_id, "message": "سفارش ثبت شد و رسید برای پشتیبانی فرستاده شد."}
+
+@app.post("/api/store/admin/price")
+def api_store_set_price(body: StorePriceIn, tg_user: dict = Depends(current_telegram_user)):
+    if int(tg_user["id"]) not in ADMIN_ID_SET: raise HTTPException(status_code=403, detail="فقط ادمین می‌تواند قیمت را تغییر دهد.")
+    if body.price_toman < 0 or body.price_toman > 1000000000: raise HTTPException(status_code=400, detail="قیمت معتبر نیست.")
+    item = next((x for x in STORE_ITEMS if x["key"] == body.item_key), None)
+    if not item: raise HTTPException(status_code=404, detail="محصول پیدا نشد.")
+    # قیمت تعرفهٔ استارزی در بات و قیمت هدیه‌های همان رده با هم همگام می‌مانند.
+    tier_map = {"gift_teddy":"15", "gift_heart":"15", "stars_15":"15", "gift_rose":"25", "gift_box":"25", "stars_25":"25", "gift_rocket":"50", "gift_champagne":"50", "gift_bouquet":"50", "gift_cake":"50", "stars_50":"50"}
+    tier = tier_map[body.item_key]
+    group = {"15":["gift_teddy","gift_heart","stars_15"], "25":["gift_rose","gift_box","stars_25"], "50":["gift_rocket","gift_champagne","gift_bouquet","gift_cake","stars_50"]}[tier]
+    with engine.begin() as conn:
+        conn.execute(update(_store_prices).where(_store_prices.c.item_key.in_(group)).values(price_toman=body.price_toman))
+    return {"ok": True, "price_toman": body.price_toman, "synced_tier": tier}
 
 
 @app.get("/api/membership")
@@ -1882,3 +1953,15 @@ def bank_change_card(tg_user: dict = Depends(current_telegram_user)):
         raise
     finally:
         session.close()
+
+@app.post("/api/store/admin/order-status")
+def api_store_order_status(body: dict, tg_user: dict = Depends(current_telegram_user)):
+    if int(tg_user["id"]) not in ADMIN_ID_SET: raise HTTPException(status_code=403, detail="فقط ادمین می‌تواند وضعیت سفارش را تغییر دهد.")
+    try: order_id = int(body.get("order_id")); status = str(body.get("status", "")).strip()
+    except Exception: raise HTTPException(status_code=400, detail="اطلاعات سفارش نامعتبر است.")
+    allowed = {"در انتظار بررسی", "در حال انجام", "تکمیل شد", "رد شد"}
+    if status not in allowed: raise HTTPException(status_code=400, detail="وضعیت انتخاب‌شده معتبر نیست.")
+    with engine.begin() as conn:
+        result = conn.execute(update(_store_orders).where(_store_orders.c.id == order_id).values(status=status))
+        if not result.rowcount: raise HTTPException(status_code=404, detail="سفارش پیدا نشد.")
+    return {"ok": True, "order_id": order_id, "status": status}
