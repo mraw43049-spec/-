@@ -516,7 +516,8 @@ class GiftOrder(Base):
     __tablename__ = 'gift_orders'
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
-    recipient_id = Column(BigInteger, nullable=False)
+    recipient_id = Column(BigInteger, nullable=False)   # 0 یعنی گیرنده هنوز در ربات ثبت‌نام نکرده/شناسایی نشده
+    recipient_username = Column(String, nullable=True)  # شناسه کاربری گیرنده (بدون @)
     gift_type = Column(String, nullable=False)          # '15' | '25' | '50'
     quantity = Column(Integer, nullable=False, default=1)
     unit_price = Column(Integer, nullable=False)
@@ -534,7 +535,8 @@ class PointsPurchase(Base):
     __tablename__ = 'points_purchases'
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)   # آیدی سفارش‌دهنده
-    recipient_id = Column(BigInteger, nullable=False)                              # آیدی گیرنده روب‌پوینت
+    recipient_id = Column(BigInteger, nullable=False)                              # آیدی گیرنده روب‌پوینت (0 = هنوز شناسایی نشده)
+    recipient_username = Column(String, nullable=True)                             # شناسه کاربری گیرنده (بدون @)
     package_key = Column(String, nullable=False)         # '1' | '2' | '3' | '4'
     points_amount = Column(Integer, nullable=False)
     price = Column(Integer, nullable=False)
@@ -677,6 +679,11 @@ def init_db():
         bridge_ban_cols = {c['name'] for c in inspector.get_columns('bridge_bans')}
         if 'expires_at' not in bridge_ban_cols:
             with engine.begin() as conn: conn.execute(text(f'ALTER TABLE bridge_bans ADD COLUMN expires_at {DT_SQL_TYPE}'))
+    for _t in ('gift_orders', 'points_purchases'):
+        if _t in inspector.get_table_names():
+            _tc = {c['name'] for c in inspector.get_columns(_t)}
+            if 'recipient_username' not in _tc:
+                with engine.begin() as conn: conn.execute(text(f'ALTER TABLE {_t} ADD COLUMN recipient_username VARCHAR'))
     cols = {c['name'] for c in inspector.get_columns('users')}
     injured_cols = {c['name'] for c in inspector.get_columns('injured_foxes')}
     bank_cols = {c['name'] for c in inspector.get_columns('bank_accounts')}

@@ -7636,6 +7636,36 @@ def gift_qty_keyboard(tier, option_key, qty):
     ])
 
 
+def normalize_tg_username(text):
+    """شناسه کاربری تلگرام را از ورودی کاربر پاک‌سازی می‌کند (بدون @ و حروف کوچک). نامعتبر → None."""
+    t = (text or "").strip()
+    t = re.sub(r"^(?:https?://)?(?:t\.me|telegram\.me)/", "", t, flags=re.I).strip().lstrip("@").strip()
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{4,31}", t):
+        return t.lower()
+    return None
+
+
+def find_user_by_username(session, username):
+    from sqlalchemy import func as _sa_func
+    if not username:
+        return None
+    return session.query(User).filter(_sa_func.lower(User.username) == username.lower()).first()
+
+
+def mask_username(username):
+    u = str(username or "")
+    if len(u) <= 3:
+        return "*" * len(u)
+    return "@" + u[:2] + "*" * (len(u) - 3) + u[-1:]
+
+
+def fake_receipt_ban_keyboard(user_id, extra_rows=None):
+    """دکمهٔ بن کاربر برای پشتیبانی؛ بن فقط با تصمیم پشتیبانی انجام می‌شود، نه خودکار توسط ربات."""
+    rows = list(extra_rows or [])
+    rows.append([InlineKeyboardButton("🚫 بن کاربر (رسید فیک)", callback_data=f"fakeban:{int(user_id)}")])
+    return InlineKeyboardMarkup(rows)
+
+
 def gift_order_summary_text(flow):
     tier = GIFT_TIERS[flow["gift_type"]]
     label = gift_option_label(flow["gift_type"], flow["gift_option"])
@@ -7646,15 +7676,15 @@ def gift_order_summary_text(flow):
     return (
         f"🧾 خلاصه سفارش\n\n"
         f"🎁 گیفت: {tier['tier_label']} — {label} × {qty}\n"
-        f"👤 آیدی عددی گیرنده: {flow['recipient_id']}\n"
+        f"👤 شناسه کاربری گیرنده: @{flow['recipient_username']}\n"
         f"📝 متن گیفت: {gift_text_display}\n"
         f"💰 مبلغ قابل پرداخت: {total:,} تومان\n\n"
         f"💳 پرداخت کارت به کارت به شماره کارت زیر:\n"
         f"{GIFT_CARD_NUMBER}\n"
         f"به نام: {GIFT_CARD_OWNER}\n\n"
         f"بعد از واریز، عکس رسیدِ پرداخت رو همینجا بفرست.\n\n"
-        f"⚠️ توجه: فقط عکس رسید رو بفرست. اگه غیر از عکس رسید چیز دیگه‌ای بفرستی، "
-        f"به‌طور دائم از ربات بن می‌شی."
+        f"⚠️ توجه: فقط عکس رسید واقعی پرداخت رو بفرست.\n"
+        f"🚫 اگه رسید فیک (جعلی) بفرستی، توسط پشتیبانی به‌طور دائم از ربات بن می‌شی."
     )
 
 
@@ -8024,8 +8054,8 @@ async def gift_button(update, context):
         label = gift_option_label(tier, flow["gift_option"])
         await q.message.edit_text(
             f"{GIFT_TIERS[tier]['tier_label']} — {label} × {flow['qty']}\n\n"
-            "👤 آیدی عددی کاربر گیرنده گیفت رو بفرست.\n"
-            "(برای گرفتن آیدی عددی خودت یا هر کاربر دیگه می‌تونی به @userinfobot پیام بدی)"
+            "👤 شناسه کاربری (یوزرنیم) گیرنده گیفت رو بفرست.\n"
+            "مثال: @username"
         )
         return
     if action == "notext":
@@ -8051,13 +8081,14 @@ async def handle_gift_text(update, context):
         return False
     text = update.message.text.strip()
     if stage == "await_recipient":
-        if not re.fullmatch(r"\d{5,15}", text):
+        uname = normalize_tg_username(text)
+        if not uname:
             await update.message.reply_text(
-                "❗️ آیدی عددی معتبر نیست. فقط آیدی عددی کاربر گیرنده رو بفرست (مثلاً با @userinfobot پیدا کن).",
+                "❗️ شناسه کاربری معتبر نیست. یوزرنیم تلگرام گیرنده رو بفرست؛ مثلاً @username",
                 **reply_kwargs(update.message)
             )
             return True
-        flow["recipient_id"] = text
+        flow["recipient_username"] = uname
         flow["stage"] = "await_text"
         context.user_data["gift_flow"] = flow
         await update.message.reply_text(
@@ -8090,9 +8121,11 @@ async def finalize_gift_order(update, context, flow):
             started_at = datetime.fromisoformat(flow["started_at"])
         except Exception:
             started_at = now_utc()
+        _rcpt = find_user_by_username(session, flow["recipient_username"])
         order = GiftOrder(
             user_id=user.telegram_id,
-            recipient_id=int(flow["recipient_id"]),
+            recipient_id=int(_rcpt.telegram_id) if _rcpt else 0,
+            recipient_username=flow["recipient_username"],
             gift_type=flow["gift_type"],
             gift_design=option_key,
             quantity=qty,
@@ -8109,7 +8142,7 @@ async def finalize_gift_order(update, context, flow):
         context.user_data.pop("gift_flow", None)
         await update.message.reply_text(
             f"✅ سفارش شما ثبت شد (شماره سفارش: {order_id}).\n"
-            f"تیم پشتیبانی رسیدت رو بررسی می‌کنه و به‌زودی گیفت برای آیدی {order.recipient_id} ارسال می‌شه.",
+            f"تیم پشتیبانی رسیدت رو بررسی می‌کنه و به‌زودی گیفت برای @{order.recipient_username} ارسال می‌شه.",
             **reply_kwargs(update.message)
         )
         caption = (
@@ -8117,13 +8150,14 @@ async def finalize_gift_order(update, context, flow):
             f"🎁 نوع گیفت: {tier['tier_label']} — {design_label} × {qty}\n"
             f"💰 مبلغ: {total:,} تومان\n"
             f"👤 آیدی سفارش‌دهنده: {order.user_id}\n"
-            f"🎯 آیدی گیرنده: {order.recipient_id}\n"
+            f"🎯 گیرنده: @{order.recipient_username}\n"
             f"📝 متن گیفت: {order.gift_text or 'بدون متن'}\n"
             f"🕐 زمان سفارش: {jalali_datetime_str(tehran_dt(order.created_at))}"
         )
         for admin_id in ADMIN_IDS:
             try:
-                await context.bot.send_photo(chat_id=admin_id, photo=order.receipt_file_id, caption=caption)
+                await context.bot.send_photo(chat_id=admin_id, photo=order.receipt_file_id, caption=caption,
+                                             reply_markup=fake_receipt_ban_keyboard(order.user_id))
             except Exception:
                 logger.warning("ارسال سفارش گیفت به ادمین %s ناموفق بود", admin_id)
         order.status = "delivered"
@@ -8149,7 +8183,7 @@ async def finalize_gift_order(update, context, flow):
 
 
 async def gift_flow_gate(update, context):
-    """وقتی کاربر منتظر ارسال رسیده: عکس یعنی ثبت سفارش، هر چیز دیگه یعنی بن دائم."""
+    """وقتی کاربر منتظر ارسال رسیده: عکس یعنی ثبت سفارش، هر چیز دیگه فقط تذکر (بن با پشتیبانی)."""
     flow = context.user_data.get("gift_flow")
     if not flow or flow.get("stage") != "await_receipt":
         return
@@ -8158,15 +8192,12 @@ async def gift_flow_gate(update, context):
     if update.message.photo:
         await finalize_gift_order(update, context, flow)
         raise ApplicationHandlerStop
-    session = get_session()
-    try:
-        user = get_or_create_user(session, update.effective_user)
-        user.is_banned = 1
-        session.commit()
-    finally:
-        session.close()
-    context.user_data.pop("gift_flow", None)
-    await update.message.reply_text("⛔️ چون به‌جای عکس رسید چیز دیگه‌ای فرستادی، به‌طور دائم از ربات بن شدی.")
+    # غیر از عکس رسید: ربات مستقیم بن نمی‌کند؛ فقط تذکر می‌دهد. بن رسید فیک با پشتیبانی است.
+    await update.message.reply_text(
+        "⚠️ فقط عکس رسید پرداخت رو بفرست تا سفارش برای پشتیبانی ارسال بشه.\n"
+        "🚫 رسید فیک (جعلی) باعث بن دائمی توسط پشتیبانی می‌شه.",
+        **reply_kwargs(update.message)
+    )
     raise ApplicationHandlerStop
 
 
@@ -8211,7 +8242,7 @@ def points_order_summary_text(flow):
     return (
         f"🧾 خلاصه سفارش\n\n"
         f"🪙 روب پوینت: {pkg['points']:,}\n"
-        f"👤 آیدی عددی گیرنده: {flow['recipient_id']}\n"
+        f"👤 شناسه کاربری گیرنده: @{flow['recipient_username']}\n"
         f"💰 مبلغ قابل پرداخت: {pkg['price']:,} تومان\n\n"
         f"💳 پرداخت کارت به کارت به شماره کارت زیر:\n"
         f"{POINTS_CARD_NUMBER}\n"
@@ -8262,8 +8293,8 @@ async def points_button(update, context):
         pkg = POINTS_PACKAGES[key]
         await q.message.edit_text(
             f"🪙 بسته انتخابی: {pkg['points']:,} روب پوینت — {pkg['price']:,} تومان\n\n"
-            "👤 آیدی عددی کاربری که می‌خوای روب پوینت رو دریافت کنه وارد کن.\n"
-            "(برای گرفتن آیدی عددی خودت یا هر کاربر دیگه می‌تونی به @userinfobot پیام بدی)"
+            "👤 شناسه کاربری (یوزرنیم) کسی که می‌خوای روب پوینت رو دریافت کنه بفرست.\n"
+            "مثال: @username"
         )
         return
     await q.answer()
@@ -8276,13 +8307,14 @@ async def handle_points_text(update, context):
     if flow.get("stage") != "await_recipient":
         return False
     text = update.message.text.strip()
-    if not re.fullmatch(r"\d{5,15}", text):
+    uname = normalize_tg_username(text)
+    if not uname:
         await update.message.reply_text(
-            "❗️ آیدی عددی معتبر نیست. فقط آیدی عددیِ کاربر گیرنده رو بفرست (مثلاً با @userinfobot پیدا کن).",
+            "❗️ شناسه کاربری معتبر نیست. یوزرنیم تلگرام گیرنده رو بفرست؛ مثلاً @username",
             **reply_kwargs(update.message)
         )
         return True
-    flow["recipient_id"] = text
+    flow["recipient_username"] = uname
     flow["stage"] = "await_receipt"
     context.user_data["points_flow"] = flow
     await update.message.reply_text(points_order_summary_text(flow), **reply_kwargs(update.message))
@@ -8296,17 +8328,20 @@ def points_admin_caption(order):
         f"🪙 مقدار: {pkg['points']:,} روب پوینت\n"
         f"💰 مبلغ: {pkg['price']:,} تومان\n"
         f"👤 آیدی عددی سفارش‌دهنده: {order.user_id}\n"
-        f"🎯 آیدی عددی گیرنده: {order.recipient_id}\n"
+        f"🎯 گیرنده: @{order.recipient_username}\n"
         f"🕐 زمان سفارش: {jalali_datetime_str(tehran_dt(order.created_at))}\n\n"
         f"⏳ وضعیت: در انتظار بررسی"
     )
 
 
-def points_admin_keyboard(order_id):
-    return InlineKeyboardMarkup([[
+def points_admin_keyboard(order_id, user_id=None):
+    rows = [[
         InlineKeyboardButton("✅ تایید", callback_data=f"pts:approve:{order_id}"),
         InlineKeyboardButton("❌ رد", callback_data=f"pts:reject:{order_id}"),
-    ]])
+    ]]
+    if user_id:
+        rows.append([InlineKeyboardButton("🚫 بن کاربر (رسید فیک)", callback_data=f"fakeban:{int(user_id)}")])
+    return InlineKeyboardMarkup(rows)
 
 
 def points_channel_text(order, status_line):
@@ -8316,7 +8351,7 @@ def points_channel_text(order, status_line):
         f"🪙 مقدار: {pkg['points']:,} روب پوینت\n"
         f"💳 {pkg['price']:,} تومان · کارت به کارت\n"
         f"👤 سفارش‌دهنده: {mask_telegram_id(order.user_id)}\n"
-        f"🎯 گیرنده: {mask_telegram_id(order.recipient_id)}\n"
+        f"🎯 گیرنده: {mask_username(order.recipient_username)}\n"
         f"🕐 {jalali_datetime_str(tehran_dt(order.created_at))}\n\n"
         f"{status_line}\n\n"
         f"🛍 خرید از روباهیو🦊: @fox_119bot"
@@ -8332,9 +8367,11 @@ async def finalize_points_order(update, context, flow):
             started_at = datetime.fromisoformat(flow["started_at"])
         except Exception:
             started_at = now_utc()
+        _rcpt = find_user_by_username(session, flow["recipient_username"])
         order = PointsPurchase(
             user_id=user.telegram_id,
-            recipient_id=int(flow["recipient_id"]),
+            recipient_id=int(_rcpt.telegram_id) if _rcpt else 0,
+            recipient_username=flow["recipient_username"],
             package_key=flow["package_key"],
             points_amount=pkg["points"],
             price=pkg["price"],
@@ -8348,7 +8385,7 @@ async def finalize_points_order(update, context, flow):
         context.user_data.pop("points_flow", None)
         await update.message.reply_text(
             f"✅ شما روب پوینت سفارش داده‌اید (شماره سفارش: {order_id}).\n"
-            f"⏳ منتظر تایید پشتیبانی باشید؛ به‌زودی {order.points_amount:,} روب پوینت به آیدی {order.recipient_id} اضافه می‌شه.\n"
+            f"⏳ منتظر تایید پشتیبانی باشید؛ به‌زودی {order.points_amount:,} روب پوینت به @{order.recipient_username} اضافه می‌شه.\n"
             f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}",
             **reply_kwargs(update.message)
         )
@@ -8358,7 +8395,7 @@ async def finalize_points_order(update, context, flow):
                     chat_id=admin_id,
                     photo=order.receipt_file_id,
                     caption=points_admin_caption(order),
-                    reply_markup=points_admin_keyboard(order_id),
+                    reply_markup=points_admin_keyboard(order_id, order.user_id),
                 )
             except Exception:
                 logger.warning("ارسال سفارش خرید روب پوینت به ادمین %s ناموفق بود", admin_id)
@@ -8412,6 +8449,42 @@ async def purchase_flow_gate(update, context):
         return
 
 
+async def fake_receipt_ban_button(update, context):
+    """بن کاربر با رسید فیک؛ فقط پشتیبانی/ادمین می‌تواند بزند."""
+    q = update.callback_query
+    if not q or not q.from_user or q.from_user.id not in ADMIN_IDS:
+        await q.answer("⛔️ این دکمه فقط برای پشتیبانیه.", show_alert=True)
+        return
+    m = re.fullmatch(r"fakeban:(\d+)", q.data or "")
+    if not m:
+        await q.answer()
+        return
+    target_id = int(m.group(1))
+    session = get_session()
+    try:
+        target = session.get(User, target_id)
+        if not target:
+            await q.answer("کاربر پیدا نشد.", show_alert=True)
+            return
+        if target_id in ADMIN_IDS:
+            await q.answer("ادمین رو نمی‌شه بن کرد.", show_alert=True)
+            return
+        target.is_banned = 1
+        session.commit()
+    finally:
+        session.close()
+    await q.answer("🚫 کاربر بن شد.", show_alert=True)
+    try:
+        await q.message.edit_reply_markup(reply_markup=None)
+        await q.message.reply_text(f"🚫 کاربر {target_id} توسط پشتیبانی به‌خاطر رسید فیک بن شد.")
+    except Exception:
+        pass
+    try:
+        await context.bot.send_message(chat_id=target_id, text="⛔️ به‌خاطر ارسال رسید فیک، توسط پشتیبانی به‌طور دائم از ربات بن شدی.")
+    except Exception:
+        pass
+
+
 async def points_admin_button(update, context):
     q = update.callback_query
     if not q or not q.from_user or q.from_user.id not in ADMIN_IDS:
@@ -8433,7 +8506,16 @@ async def points_admin_button(update, context):
             return
         pkg = POINTS_PACKAGES[order.package_key]
         if action == "approve":
-            recipient = get_or_create_user_by_id(session, order.recipient_id)
+            recipient = session.get(User, order.recipient_id) if order.recipient_id else None
+            if recipient is None:
+                recipient = find_user_by_username(session, order.recipient_username)
+            if recipient is None:
+                await q.answer(
+                    f"⚠️ کاربری با شناسه @{order.recipient_username} در ربات ثبت‌نام نکرده یا یوزرنیمش تغییر کرده؛ تایید انجام نشد.",
+                    show_alert=True
+                )
+                return
+            order.recipient_id = recipient.telegram_id
             recipient.fox_points = (recipient.fox_points or 0) + order.points_amount
             order.status = "approved"
             order.decided_at = now_utc()
@@ -8447,7 +8529,7 @@ async def points_admin_button(update, context):
             try:
                 await context.bot.send_message(
                     chat_id=order.user_id,
-                    text=f"✅ سفارش شما (#{order.id}) تایید شد و {order.points_amount:,} روب پوینت به آیدی {order.recipient_id} اضافه شد."
+                    text=f"✅ سفارش شما (#{order.id}) تایید شد و {order.points_amount:,} روب پوینت به @{order.recipient_username} اضافه شد."
                 )
             except Exception:
                 pass
@@ -15798,6 +15880,7 @@ def main():
     app.add_handler(CallbackQueryHandler(points_button,pattern=r"^points:(?:shop|pick|backshop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(vip_button,pattern=r"^vip:[a-z]+(?::[a-z]+){0,3}$"))
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
+    app.add_handler(CallbackQueryHandler(fake_receipt_ban_button,pattern=r"^fakeban:\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(owl_transfer_button,pattern=r"^owltransfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(injured_fox_button,pattern=r"^injured:rescue:\d+$"))
