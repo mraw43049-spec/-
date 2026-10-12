@@ -115,6 +115,7 @@ class User(Base):
     factory_workers_level = Column(Integer, nullable=False, default=1)
     factory_machine_level = Column(Integer, nullable=False, default=1)
     factory_produced_total = Column(Integer, nullable=False, default=0)
+    factory_staff_foxes = Column(Integer, nullable=False, default=0)   # روباه‌های زخمی‌ای که کاربر به کارکنان کارخونه اضافه کرده
 
     # بن دائم (فروشگاه گیفت: تخلف در ارسال رسید) یا محرومیت موقت توسط پشتیبانی
     is_banned = Column(Integer, nullable=False, default=0)
@@ -734,6 +735,7 @@ def init_db():
         'factory_workers_level': 'INTEGER NOT NULL DEFAULT 1',
         'factory_machine_level': 'INTEGER NOT NULL DEFAULT 1',
         'factory_produced_total': 'INTEGER NOT NULL DEFAULT 0',
+        'factory_staff_foxes': 'INTEGER NOT NULL DEFAULT 0',
         'is_banned': 'INTEGER NOT NULL DEFAULT 0',
         'banned_until': DT_SQL_TYPE,
         'jail_until': DT_SQL_TYPE,
@@ -843,6 +845,10 @@ def init_db():
         conn.execute(text("UPDATE users SET factory_workers_level = 1 WHERE factory_workers_level IS NULL OR factory_workers_level < 1"))
         conn.execute(text("UPDATE users SET factory_machine_level = 1 WHERE factory_machine_level IS NULL OR factory_machine_level < 1"))
         conn.execute(text("UPDATE users SET factory_produced_total = 0 WHERE factory_produced_total IS NULL OR factory_produced_total < 0"))
+        conn.execute(text("UPDATE users SET factory_staff_foxes = 0 WHERE factory_staff_foxes IS NULL OR factory_staff_foxes < 0"))
+        # سقف سطح کارکنان ۱۵ (دستگاه‌های تولید ۱۵ می‌ماند)
+        conn.execute(text("UPDATE users SET factory_workers_level = 15 WHERE factory_workers_level > 15"))
+        conn.execute(text("UPDATE users SET factory_staff_foxes = factory_workers_level - 1 WHERE factory_staff_foxes > factory_workers_level - 1"))
         conn.execute(text("UPDATE users SET is_banned = 0 WHERE is_banned IS NULL"))
         conn.execute(text("UPDATE users SET jail_fine = 0 WHERE jail_fine IS NULL OR jail_fine < 0"))
         if 'injured_fox_stock' in added_user_cols:

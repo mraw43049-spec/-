@@ -950,14 +950,55 @@ def fox_sick_state(user):
     return 'start'
 
 
+_DOC_GREETINGS = [
+    "👨🏻‍⚕️ سلام! روباهت رو معاینه کردم.",
+    "👨🏻‍⚕️ بفرما بشین؛ روباهت رو با دقت بررسی کردم.",
+    "👨🏻‍⚕️ خوش اومدی! معاینه‌ی روباهت تموم شد.",
+    "👨🏻‍⚕️ سلام دوست من، نتیجه‌ی معاینه آماده‌ست.",
+    "👨🏻‍⚕️ نگران نباش، روباهت رو کامل چک کردم.",
+    "👨🏻‍⚕️ درود! تازه از معاینه‌ی روباهت فارغ شدم.",
+    "👨🏻‍⚕️ سلام! بعد از چند تا آزمایش سریع، نتیجه رو بهت می‌گم.",
+    "👨🏻‍⚕️ قدم روی چشم! روباهت رو معاینه کردم.",
+]
+_DOC_DIAGNOSES = [
+    "🔍 تشخیص: روباهت به‌خاطر {r} مریض شده.",
+    "🔍 بعد از معاینه معلوم شد روباهت به‌خاطر {r} حالش بده.",
+    "🔍 نتیجه‌ی آزمایش: {r} باعث شده روباهت بیمار بشه.",
+    "🔍 علائم نشون می‌ده بیماری روباهت از {r} شروع شده.",
+    "🔍 تشخیص من اینه: روباهت درگیر عوارض {r} شده.",
+    "🔍 مشکل روباهت از {r} ناشی شده و باید درمان بشه.",
+    "🔍 طبق بررسی‌هام، {r} روباهت رو از پا انداخته.",
+    "🔍 گزارش معاینه: روباهت بعد از {r} علائم بیماری نشون داده.",
+]
+_DOC_RX_LABELS = ["📝 نسخه‌ی پزشک:", "📋 کد نسخه‌ی تو:", "🧾 شماره‌ی نسخه:", "📄 نسخه‌ی روباهت:"]
+_DOC_CLOSINGS = [
+    "🏥 این نسخه رو به داروخونه بده تا روباهت خوب بشه!",
+    "🏥 با این نسخه برو داروخونه تا درمان روباهت شروع بشه!",
+    "🏥 نسخه رو به داروخونه نشون بده؛ بعدش روباهت زود خوب می‌شه!",
+    "🏥 این کد رو به داروخونه بگو تا داروی روباهت رو بدن!",
+    "🏥 زودتر نسخه رو به داروخونه برسون تا روباهت سر پا بشه!",
+    "🏥 حالا با این نسخه برو داروخونه؛ روباهت منتظرته!",
+]
+
+
 def _sick_tokens(reason, code):
-    """متن دکتر به‌صورت تکه‌های کوچک (برای انیمیشن تایپ). کد نسخه یک تکه‌ی کامل و تک‌فاصله (قابل کپی) است."""
+    """متن دکتر به‌صورت تکه‌های کوچک (برای انیمیشن تایپ). کد نسخه یک تکه‌ی کامل و تک‌فاصله (قابل کپی) است.
+    متن هر بار فرق می‌کند؛ از روی خود کد نسخه انتخاب می‌شود تا هر بار نمایش پنل یک متن ثابت بماند."""
     import html as _html
+    c = (str(code) + "000000")[:6]
+    d = [int(x) if x.isdigit() else 0 for x in c]
+    greeting = _DOC_GREETINGS[(d[0] * 10 + d[1]) % len(_DOC_GREETINGS)]
+    diagnosis = _DOC_DIAGNOSES[(d[2] * 10 + d[3]) % len(_DOC_DIAGNOSES)].format(r=reason)
+    label = _DOC_RX_LABELS[(d[4] + d[0]) % len(_DOC_RX_LABELS)]
+    closing = _DOC_CLOSINGS[(d[5] * 10 + d[1]) % len(_DOC_CLOSINGS)]
+    temp = f"{38 + (d[3] % 3)}.{d[4]}"
+    pulse = 95 + d[5] * 4 + d[2]
     pre = (f"╭━━  🩺 مطب دکتر روباهیو  ━━╮\n\n"
-           f"👨🏻‍⚕️ سلام! روباهت رو معاینه کردم.\n\n"
-           f"🔍 تشخیص: روباهت به‌خاطر {reason} مریض شده.\n\n"
-           f"📝 نسخه‌ی پزشک:\n")
-    post = "\n\n🏥 این نسخه رو به داروخونه بده تا روباهت خوب بشه!"
+           f"{greeting}\n\n"
+           f"{diagnosis}\n"
+           f"🌡 تب: {temp} درجه  |  💓 نبض: {pulse}\n\n"
+           f"{label}\n")
+    post = f"\n\n{closing}"
     toks = [_html.escape(t) for t in re.findall(r'\S+\s*', pre)]
     toks.append(f"<code>{code}</code>\n\n")
     toks += [_html.escape(t) for t in re.findall(r'\S+\s*', post)]
@@ -5302,6 +5343,15 @@ def factory_building_text(user):
     )
 
 
+def factory_staff_info(user):
+    """(روباه زخمیِ اضافه‌شده به کارکنان، جای خالیِ باز، موجودی روباه زخمی کاربر).
+    هر ارتقای کارکنان یک جای خالی باز می‌کند؛ کاربر می‌تواند با هر ارتقا یک روباه زخمی به کارکنان اضافه کند."""
+    workers_level = max(1, min(FACTORY_WORKERS_MAX_LEVEL, int(user.factory_workers_level or 1)))
+    max_slots = workers_level - 1
+    staff = max(0, min(max_slots, int(user.factory_staff_foxes or 0)))
+    return staff, max_slots - staff, int(user.injured_fox_stock or 0)
+
+
 def factory_panel_text(user, orders):
     used = factory_storage_used(orders)
     storage_level = max(1, min(FACTORY_STORAGE_MAX_LEVEL, int(user.factory_storage_level or 1)))
@@ -5320,6 +5370,7 @@ def factory_panel_text(user, orders):
         f"┘─ ⭐️ سطح : {storage_level}\n\n"
         "🤒 کارگران کارخونه\n"
         f"┘─ 🦊 تعداد کارگران : {active_count} / {workers_cap} روباه\n"
+        f"┘─ 🩹 روباه زخمی در کارکنان : {factory_staff_info(user)[0]}\n"
         f"┘─ ⭐️ سطح : {workers_level}\n\n"
         "🖨 دستگاه های تولید\n"
         f"┘─ ⏳ زمان تولید محصول (۱۰۰٪) : {format_duration(hours_100 * 3600)}\n"
@@ -5336,7 +5387,7 @@ def factory_guide_text(page):
             "🏭 راهنمای کارخانه روبی — ۱/۳\n\n"
             "🪄 تولید: از بخش تولید، خط و محصول را انتخاب کن و درصد ساخت را بزن. وقتی محصولی درحال تولید است، دکمه به «درحال تولید⏳» تبدیل می‌شود و فقط وضعیت همان محصول را نشان می‌دهد.\n"
             "💰 هزینه: روب‌پوینت قبل از شروع سفارش کم می‌شود.\n"
-            "🦊 کارگران: هر کارگر یک سفارش هم‌زمان را پشتیبانی می‌کند.\n"
+            "🦊 کارگران: هر کارگر یک سفارش هم‌زمان را پشتیبانی می‌کند. کارکنان تا سطح ۱۵ ارتقا می‌خورند و با هر ارتقا می‌توانی یک 🩹 روباه زخمی هم به کارکنان اضافه کنی.\n"
             "🧳 انبار: ظرفیت سفارش‌های درحال تولید به سطح انبار بستگی دارد."
         ),
         2: (
@@ -5620,7 +5671,12 @@ def factory_upgrade_text(kind, user):
         cap = factory_workers_capacity(level)
         cost = factory_upgrade_cost(level, FACTORY_WORKERS_MAX_LEVEL)
         title = "🤒 کارگران کارخونه"
-        cur = f"تعداد کارگر فعلی: {cap} روباه"
+        _staff, _free, _stock = factory_staff_info(user)
+        cur = (f"تعداد کارگر فعلی: {cap} روباه\n"
+               f"🩹 روباه زخمی در کارکنان: {_staff}\n"
+               f"🩹 موجودی روباه زخمی تو: {_stock}")
+        if _free > 0:
+            cur += f"\n\n✅ {_free} جای خالی برای اضافه‌کردن روباه زخمی به کارکنان داری."
         nxt = f"تعداد کارگر بعدی: {factory_workers_capacity(level + 1)} روباه" if cost else ""
     else:
         level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(user.factory_machine_level or 1)))
@@ -5645,6 +5701,8 @@ def factory_upgrade_keyboard(kind, user, owner_id):
     cost = factory_upgrade_cost(level, max_level)
     if cost:
         rows.append([InlineKeyboardButton(f"⭐ ارتقا ({cost:,} روب‌پوینت)", callback_data=f"factory:upg:{kind}:{owner_id}")])
+    if kind == "workers" and factory_staff_info(user)[1] > 0:
+        rows.append([InlineKeyboardButton("🩹 اضافه کردن روباه زخمی به کارکنان", callback_data=f"factory:addfox:workers:{owner_id}")])
     rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:menu:upgrade:{owner_id}")])
     return InlineKeyboardMarkup(rows)
 
@@ -6028,8 +6086,23 @@ async def factory_button(update, context):
             user.fox_points -= cost
             setattr(user, level_attr, level + 1)
             session.commit()
-            await q.answer("⭐ ارتقا با موفقیت انجام شد!", show_alert=True)
+            await q.answer("⭐ ارتقا با موفقیت انجام شد!" + ("\n🩹 حالا می‌تونی یه روباه زخمی به کارکنان اضافه کنی." if kind == "workers" else ""), show_alert=True)
             await q.message.edit_text(factory_upgrade_text(kind, user), reply_markup=factory_upgrade_keyboard(kind, user, owner_id))
+            return
+
+        if action == "addfox":
+            _staff, _free, _stock = factory_staff_info(user)
+            if _free <= 0:
+                await q.answer("هر ارتقای کارکنان فقط یک جا برای روباه زخمی باز می‌کنه؛ اول کارکنان رو ارتقا بده.", show_alert=True)
+                return
+            if _stock <= 0:
+                await q.answer("🩹 روباه زخمی نداری! اول توی گپ‌ها یکی رو نجات بده.", show_alert=True)
+                return
+            user.injured_fox_stock = _stock - 1
+            user.factory_staff_foxes = _staff + 1
+            session.commit()
+            await q.answer("🩹 یه روباه زخمی به کارکنان کارخونه اضافه شد!", show_alert=True)
+            await q.message.edit_text(factory_upgrade_text("workers", user), reply_markup=factory_upgrade_keyboard("workers", user, owner_id))
             return
     finally:
         session.close()
