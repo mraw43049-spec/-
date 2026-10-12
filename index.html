@@ -396,6 +396,30 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 
 .store-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.store-item{border:1px solid #4c3677;background:linear-gradient(145deg,#24143d,#171b35);border-radius:16px;padding:13px;text-align:center;min-width:0}.store-item .gift-ico{font-size:34px;display:block;margin-bottom:5px}.store-item b{display:block;font-size:14px}.store-item small{display:block;color:#ffe08a;margin:7px 0 10px}.store-item button{width:100%;padding:10px 4px;white-space:nowrap;font-size:13.5px}.store-item{display:flex;flex-direction:column;align-items:center}.store-item small{margin:7px 0 10px}.store-retry{grid-column:1/-1;text-align:center;line-height:1.9}.store-retry button{margin-top:8px;padding:10px 18px}.store-order{word-break:break-word}.store-form input[type=file]{padding:9px;font-size:13px}.store-modes button{white-space:nowrap}.store-form{display:grid;gap:10px}.store-form input,.store-form select,.store-form textarea{width:100%;box-sizing:border-box;background:#111326;color:#fff;border:1px solid #51416f;border-radius:12px;padding:11px;font:inherit}.store-modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.store-modes button{padding:9px 4px;font-size:12px}.store-modes button.selected{outline:2px solid #ffcf5a;background:#44315e}.store-order{border:1px solid #3b3155;border-radius:12px;padding:11px;margin:8px 0;background:#17152a;font-size:13px;line-height:1.9}.store-order .status{color:#ffe08a;font-weight:800}.store-price-admin{display:flex;gap:6px;align-items:center;margin-top:7px}.store-price-admin input{min-width:0;width:90px;padding:7px;border-radius:8px;background:#111326;color:white;border:1px solid #51416f}.gift-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:2px 2px 14px}.gift-head h2{margin:0;font-size:21px;font-weight:800;color:#fff}.gift-head span{font-size:12px;color:#8d93a8}.gift-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.gift-card{background:#12151f;border:1px solid #262a3c;border-radius:20px;padding:10px 4px 12px;text-align:center;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .12s,border-color .25s;display:flex;flex-direction:column;align-items:center;min-width:0;user-select:none;-webkit-user-select:none}.gift-card:active{transform:scale(.96)}.gift-card.playing{border-color:#3d4468}.gift-anim{width:78px;height:78px;display:flex;align-items:center;justify-content:center;font-size:54px;line-height:1;margin-bottom:6px}.gift-anim svg{width:100%;height:100%;display:block}.gift-name{font-weight:800;font-size:14px;color:#fff}.gift-stars{font-size:12px;color:#7f869c;margin-top:3px}.gift-price{font-size:13px;font-weight:700;color:#fff;margin-top:4px;white-space:nowrap}@keyframes giftBounce{0%,100%{transform:translateY(0) scale(1)}25%{transform:translateY(-8px) rotate(-6deg) scale(1.1)}50%{transform:translateY(0) rotate(5deg) scale(1.04)}75%{transform:translateY(-4px) rotate(-3deg)}}.gift-anim.fallback-play{animation:giftBounce 1.6s ease-in-out}.gift-card .store-price-admin{width:100%;padding:0 4px}.gift-card .store-price-admin input{width:100%}@media(max-width:340px){.gift-grid{gap:6px}.gift-anim{width:64px;height:64px;font-size:44px}.gift-price{font-size:12px}}.store-hidden{display:none!important}@media(max-width:360px){.store-grid{grid-template-columns:1fr}.store-modes{grid-template-columns:1fr}}
 
+
+/* ===== عنوان گیفت‌ها: روباه نقاش (فقط transform/opacity/clip-path؛ بدون لگ) ===== */
+.fox-head{display:flex;justify-content:center;margin:2px 0 14px}
+.fox-title{position:relative;display:inline-block;padding:14px 0 4px 62px;min-height:52px}
+.gift-head .fox-text{margin:0;font-size:25px;font-weight:900;line-height:1.5;white-space:nowrap;background:linear-gradient(90deg,#ffe28a,#ffb03a 55%,#ff8a1f);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;clip-path:inset(-10px 0 -10px 100%);animation:foxText 9s cubic-bezier(.45,.05,.4,1) infinite;will-change:clip-path}
+.fox-mover{position:absolute;top:0;bottom:0;left:62px;right:0;pointer-events:none;animation:foxMove 9s cubic-bezier(.45,.05,.4,1) infinite;will-change:transform}
+.fox-fade{position:absolute;right:-4px;top:-5px;width:57px;height:48px;animation:foxFade 9s linear infinite}
+.fox-bob{position:relative;width:100%;height:100%;animation:foxBob .5s ease-in-out infinite alternate}
+.fox-svg{width:100%;height:100%;display:block;overflow:visible}
+.fox-tail{transform-box:fill-box;transform-origin:90% 90%;animation:foxTail .9s ease-in-out infinite alternate}
+.fox-eyes{transform-box:fill-box;transform-origin:center;animation:foxBlink 3.2s infinite}
+.fox-pen{transform-box:fill-box;transform-origin:15% 15%;animation:foxPen .28s ease-in-out infinite alternate}
+.fox-spark{position:absolute;right:-3px;bottom:-2px;width:9px;height:9px;border-radius:50%;background:radial-gradient(circle,#fff 0,#ffd45a 45%,rgba(255,180,40,0) 72%);animation:foxSpark .22s ease-in-out infinite alternate}
+@keyframes foxText{0%,5%{clip-path:inset(-10px 0 -10px 100%);opacity:1}38%,90%{clip-path:inset(-10px 0 -10px 0);opacity:1}97%{clip-path:inset(-10px 0 -10px 0);opacity:0}100%{clip-path:inset(-10px 0 -10px 100%);opacity:0}}
+@keyframes foxMove{0%,5%{transform:translate3d(0,0,0)}38%,100%{transform:translate3d(-100%,0,0)}}
+@keyframes foxFade{0%{opacity:0}3%,90%{opacity:1}97%,100%{opacity:0}}
+@keyframes foxBob{from{transform:translateY(0)}to{transform:translateY(-3px)}}
+@keyframes foxTail{from{transform:rotate(-9deg)}to{transform:rotate(9deg)}}
+@keyframes foxBlink{0%,92%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+@keyframes foxPen{from{transform:rotate(-5deg)}to{transform:rotate(6deg)}}
+@keyframes foxSpark{from{transform:scale(.6);opacity:.5}to{transform:scale(1.25);opacity:1}}
+@media (prefers-reduced-motion:reduce){.fox-text{animation:none;clip-path:none}.fox-mover{animation:none;transform:translate3d(-100%,0,0)}.fox-fade{animation:none}.fox-bob,.fox-tail,.fox-eyes,.fox-pen,.fox-spark{animation:none}}
+/* ===== ستاره‌های گیفت: طلایی و روشن ===== */
+.gift-stars{font-size:13px!important;font-weight:800;color:#ffd54a!important;text-shadow:0 0 9px rgba(255,200,60,.45),0 1px 0 rgba(120,70,0,.55);letter-spacing:.1px}
 </style>
 </head>
 <body>
@@ -715,7 +739,25 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 
 <section id="storeView" class="view">
  <div class="card">
-  <div class="gift-head"><h2>گیفت‌های تلگرام</h2><span>استیکرهای واقعی تلگرام</span></div>
+  <div class="gift-head fox-head" aria-label="گیفت‌های تلگرام">
+   <div class="fox-title" dir="ltr">
+    <h2 class="fox-text" dir="rtl">گیفت‌های تلگرام</h2>
+    <div class="fox-mover" aria-hidden="true"><div class="fox-fade"><div class="fox-bob">
+      <svg class="fox-svg" viewBox="0 0 76 64" aria-hidden="true" focusable="false">
+        <g class="fox-tail"><path d="M20 56C2 58-3 38 8 28C10 40 18 43 28 46Z" fill="#ff8a1f"/><path d="M8 28C5 33 4 38 5.5 43C9 39 11 33 8 28Z" fill="#fff4e0"/></g>
+        <path d="M20 64C20 49 28 42 36 42C44 42 52 49 52 64Z" fill="#ff8a1f"/>
+        <path d="M30 64C30 53 33 47 36 47C39 47 42 53 42 64Z" fill="#fff4e0"/>
+        <path d="M16 4L30 14L18 26Z" fill="#ff8a1f"/><path d="M19.500 9.500L27 15L20.500 21Z" fill="#3b1d12"/>
+        <path d="M56 4L42 14L54 26Z" fill="#ff8a1f"/><path d="M52.500 9.500L45 15L51.500 21Z" fill="#3b1d12"/>
+        <path d="M14 24C14 14 26 12 36 12C46 12 58 14 58 24C58 36 46 44 36 44C26 44 14 36 14 24Z" fill="#ff8a1f"/>
+        <path d="M14 26C20 28 28 34 36 44C26 44 16 38 14 26Z" fill="#fff4e0"/><path d="M58 26C52 28 44 34 36 44C46 44 56 38 58 26Z" fill="#fff4e0"/>
+        <ellipse cx="36" cy="40" rx="3" ry="2.200" fill="#2a1710"/>
+        <g class="fox-eyes"><ellipse cx="28" cy="27" rx="3" ry="3.600" fill="#2a1710"/><ellipse cx="46" cy="27" rx="3" ry="3.600" fill="#2a1710"/><circle cx="29.200" cy="25.600" r="1.100" fill="#fff"/><circle cx="47.200" cy="25.600" r="1.100" fill="#fff"/></g>
+        <g class="fox-pen"><path d="M60 38L71 53" stroke="#7c4dff" stroke-width="4.500" stroke-linecap="round"/><path d="M71 53L74 57.500" stroke="#ffd45a" stroke-width="3.200" stroke-linecap="round"/><path d="M47 51C53 49 58 46 61 41" stroke="#ff8a1f" stroke-width="6" stroke-linecap="round" fill="none"/><circle cx="61" cy="40.500" r="3.800" fill="#ff8a1f"/></g>
+      </svg>
+      <i class="fox-spark"></i></div></div></div>
+   </div>
+  </div>
   <div id="storeAdminNote" class="muted" style="display:none;margin:8px 0">🛠 پنل قیمت ادمین: قیمت‌ها را تغییر بده و ذخیره کن.</div>
   <div id="storeGrid" class="gift-grid"><div class="muted">در حال بارگذاری فروشگاه…</div></div>
  </div>
