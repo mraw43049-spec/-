@@ -450,11 +450,18 @@ _store_orders = Table(
     Column("price_toman", BigInteger, nullable=False),
     Column("send_mode", String(24), nullable=False),
     Column("custom_text", String(500), nullable=True),
-    Column("status", String(32), nullable=False, default="در انتظار بررسی"),
+    Column("status", String(120), nullable=False, default="در انتظار بررسی"),
     Column("created_at", String(40), nullable=False),
 )
 try:
     _store_meta.create_all(bind=engine, checkfirst=True)
+    # جدول‌های قدیمی ستون status را VARCHAR(32) ساخته بودن؛ روی PostgreSQL بزرگ‌ترش می‌کنیم.
+    try:
+        if engine.dialect.name == "postgresql":
+            with engine.begin() as _conn:
+                _conn.execute(text("ALTER TABLE miniapp_store_orders ALTER COLUMN status TYPE VARCHAR(120)"))
+    except Exception as _alter_error:  # noqa: BLE001
+        print(f"[miniapp-store] status column migration skipped: {_alter_error}")
     with engine.begin() as _conn:
         _defaults = [
             ("gift_teddy", "🧸 تدی", 66850), ("gift_heart", "❤️ قلب", 66850),
@@ -515,10 +522,11 @@ def api_store_order(body: StoreOrderIn, tg_user: dict = Depends(current_telegram
     buyer_name = str(tg_user.get("username") or "").strip().lstrip("@").lower()
     if body.send_mode == "self": recipient = buyer_name
     else: recipient = body.recipient_username.strip().lstrip("@").lower()
-    if not recipient or len(recipient) > 32 or not recipient.replace("_", "a").isalnum():
-        raise HTTPException(status_code=400, detail="یوزرنیم تلگرام گیرنده را درست وارد کن.")
     if body.send_mode == "self" and not buyer_name:
-        raise HTTPException(status_code=400, detail="برای ارسال به خودت، باید یوزرنیم تلگرام داشته باشی.")
+        raise HTTPException(status_code=400, detail="برای ارسال به خودت باید در تلگرام یوزرنیم داشته باشی؛ گزینهٔ «برای دیگری» را بزن.")
+    import re as _re
+    if not _re.fullmatch(r"[a-z0-9_]{5,32}", recipient or ""):
+        raise HTTPException(status_code=400, detail="یوزرنیم تلگرام گیرنده را درست وارد کن.")
     txt = body.custom_text.strip()
     if len(txt) > 500: raise HTTPException(status_code=400, detail="متن هدیه حداکثر ۵۰۰ کاراکتر است.")
     raw = body.receipt_base64.split(",", 1)[-1]
@@ -540,11 +548,11 @@ def api_store_order(body: StoreOrderIn, tg_user: dict = Depends(current_telegram
     sent = 0
     for admin_id in _all_admin_ids():
         try:
-            response = _tg_http.post(f"{_TG_API}/sendPhoto", data={"chat_id":admin_id,"caption":caption}, files={"photo":(body.receipt_name or "receipt.jpg", receipt, "image/jpeg")})
+            response = _tg_http.post(f"{_TG_API}/sendPhoto", data={"chat_id":admin_id,"caption":caption}, files={"photo":("receipt.jpg", receipt, "image/jpeg")})
             if response.status_code == 200 and response.json().get("ok"): sent += 1
         except Exception as e: print(f"[miniapp-store] admin notification failed: {e}")
     if not sent:
-        with engine.begin() as conn: conn.execute(update(_store_orders).where(_store_orders.c.id == order_id).values(status="ثبت شد؛ ارسال به پشتیبانی ناموفق بود"))
+        with engine.begin() as conn: conn.execute(update(_store_orders).where(_store_orders.c.id == order_id).values(status="ارسال به پشتیبانی ناموفق"))
         raise HTTPException(status_code=503, detail="سفارش ذخیره شد اما پیام به پشتیبانی ارسال نشد؛ به پشتیبانی اطلاع بده.")
     return {"ok": True, "order_id": order_id, "message": "سفارش ثبت شد و رسید برای پشتیبانی فرستاده شد."}
 
