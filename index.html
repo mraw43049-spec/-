@@ -481,6 +481,17 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   <button id="blockedRetry" class="action">🔄 بررسی دوباره</button>
 </div></div>
 <div id="toast" class="toast"></div>
+<button id="starGiftOpen" type="button" aria-label="سفارش گیفت استارزی" style="position:fixed;z-index:40;bottom:88px;left:14px;border:0;border-radius:18px;padding:12px 15px;background:linear-gradient(135deg,#ffd166,#f59e0b);color:#382300;font-weight:900;box-shadow:0 8px 25px #0005">🎁 خرید گیفت استارزی</button>
+<div id="starGiftModal" style="display:none;position:fixed;inset:0;z-index:100;background:#06101ddd;backdrop-filter:blur(8px);padding:18px;overflow:auto;align-items:center;justify-content:center">
+ <form id="starGiftForm" style="width:min(100%,440px);margin:auto;background:#14253a;border:1px solid #ffffff20;border-radius:22px;padding:20px;color:#fff;box-shadow:0 20px 60px #0008">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><h2 style="margin:0 0 14px">🎁 سفارش گیفت واقعی تلگرام</h2><button id="starGiftClose" type="button" style="background:#e5484d;color:white;border:0;border-radius:10px;padding:7px 11px">✕</button></div>
+  <label style="display:block;margin:10px 0 6px">نوع گیفت</label><select id="starGiftType" required style="width:100%;padding:12px;border-radius:12px;background:#0b1727;color:white;border:1px solid #ffffff30"><option value="15">⭐ ۱۵ استارز — ۶۶٬۸۵۰ تومان</option><option value="25">⭐ ۲۵ استارز — ۱۱۱٬۵۰۰ تومان</option><option value="50">⭐ ۵۰ استارز — ۲۲۳٬۰۰۰ تومان</option></select>
+  <label style="display:block;margin:12px 0 6px">آیدی تلگرام گیرنده (@username یا آیدی عددی)</label><input id="starGiftRecipient" required maxlength="64" placeholder="مثلاً @username" style="box-sizing:border-box;width:100%;padding:12px;border-radius:12px;background:#0b1727;color:white;border:1px solid #ffffff30">
+  <label style="display:block;margin:12px 0 6px">تصویر رسید پرداخت</label><input id="starGiftReceipt" type="file" accept="image/*" required style="width:100%;color:#fff">
+  <p style="font-size:12px;line-height:1.7;color:#b8c9dc">بعد از ثبت، آیدی سفارش‌دهنده، آیدی گیرنده، نوع گیفت و تصویر رسید برای پشتیبانی ارسال می‌شود. سفارش پس از بررسی پشتیبانی انجام می‌شود.</p>
+  <button id="starGiftSubmit" type="submit" style="width:100%;padding:13px;border:0;border-radius:13px;background:#22c55e;color:#062311;font-weight:900">📨 ثبت سفارش برای پشتیبانی</button><div id="starGiftStatus" role="status" style="white-space:pre-line;margin-top:12px;font-size:13px"></div>
+ </form>
+</div>
 <div id="lightbox" class="lightbox"><button id="lbClose" class="lb-close">✕</button><img id="lbImg" alt="اسکین"><div class="lb-tip">با دو انگشت زوم کن • دوبار تپ = زوم • بکش تا جابجا بشه</div></div>
 <div class="topbar">
   <button id="btnRefresh" class="rbtn refresh-tab" aria-label="تازه‌سازی"><span id="rfIcon">🔄</span></button>
@@ -1965,6 +1976,29 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       api("/api/leaderboard?category=points").then(function(d){ if (!lbCache.points) lbCache.points = d; }).catch(function(){});
     }, 1200);
   }
+
+  // ---------- سفارش گیفت استارزی: ثبت سفارش + ارسال رسید به پشتیبانی ----------
+  (function(){
+    var modal=document.getElementById("starGiftModal"), form=document.getElementById("starGiftForm"), status=document.getElementById("starGiftStatus"), submit=document.getElementById("starGiftSubmit");
+    document.getElementById("starGiftOpen").addEventListener("click",function(){modal.style.display="flex";});
+    document.getElementById("starGiftClose").addEventListener("click",function(){modal.style.display="none";});
+    modal.addEventListener("click",function(e){if(e.target===modal)modal.style.display="none";});
+    form.addEventListener("submit",function(e){
+      e.preventDefault(); status.textContent="در حال ارسال سفارش و رسید…"; submit.disabled=true;
+      var file=document.getElementById("starGiftReceipt").files[0];
+      if(!file){status.textContent="لطفاً تصویر رسید پرداخت را انتخاب کن.";submit.disabled=false;return;}
+      if(file.size>8*1024*1024){status.textContent="حجم رسید نباید بیشتر از ۸ مگابایت باشد.";submit.disabled=false;return;}
+      var reader=new FileReader();
+      reader.onload=function(){
+        var data=String(reader.result||"");
+        api("/api/star-gift-orders","POST",{gift_stars:Number(document.getElementById("starGiftType").value),recipient_id:document.getElementById("starGiftRecipient").value.trim(),receipt_base64:data.split(",")[1]||"",receipt_name:file.name||"receipt.jpg"})
+        .then(function(r){status.textContent="✅ "+r.message+"\nشماره سفارش: "+r.order_id; form.reset();})
+        .catch(function(err){status.textContent="❌ "+(err.message||"ثبت سفارش انجام نشد.");})
+        .finally(function(){submit.disabled=false;});
+      };
+      reader.onerror=function(){status.textContent="خواندن تصویر رسید ناموفق بود.";submit.disabled=false;}; reader.readAsDataURL(file);
+    });
+  })();
 
   paintCachedSkinInstant();
   // لینک «ورود به مینی اپ — درس» مستقیماً پنل درس را باز می‌کند.

@@ -6,6 +6,8 @@
 - منطق برداشت و ارتقا از خود bot.py استفاده می‌کنه تا دقیقاً مثل بات رفتار کنه.
 """
 import asyncio
+import base64
+import binascii
 import hashlib
 import hmac
 import os
@@ -409,6 +411,68 @@ def current_telegram_user(x_init_data: str = Header(..., alias="X-Init-Data")):
     if blocked:
         raise HTTPException(status_code=403, detail=blocked)
     return tg_user
+
+
+# ---------- سفارش دستی گیفت استارزی از مینی‌اپ ----------
+class StarGiftOrderIn(BaseModel):
+    gift_stars: int
+    recipient_id: str
+    receipt_base64: str
+    receipt_name: str = "receipt.jpg"
+
+STAR_GIFT_PRICES = {15: 66850, 25: 111500, 50: 223000}
+
+@app.post("/api/star-gift-orders")
+def create_star_gift_order(body: StarGiftOrderIn, tg_user: dict = Depends(current_telegram_user)):
+    """ثبت درخواست خرید؛ پشتیبانی سفارش، آیدی خریدار/گیرنده و رسید را دریافت می‌کند."""
+    import re
+    stars = int(body.gift_stars)
+    if stars not in STAR_GIFT_PRICES:
+        raise HTTPException(status_code=400, detail="نوع گیفت معتبر نیست.")
+    recipient = (body.recipient_id or "").strip()
+    if not re.fullmatch(r"(?:@?[A-Za-z][A-Za-z0-9_]{4,31}|[0-9]{5,20})", recipient):
+        raise HTTPException(status_code=400, detail="آیدی گیرنده را به شکل @username یا آیدی عددی معتبر وارد کن.")
+    raw = (body.receipt_base64 or "").strip()
+    if "," in raw and raw.startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    try:
+        receipt = base64.b64decode(raw, validate=True)
+    except (ValueError, binascii.Error):
+        raise HTTPException(status_code=400, detail="تصویر رسید معتبر نیست.")
+    if not receipt or len(receipt) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="رسید باید تصویر معتبر و حداکثر ۸ مگابایت باشد.")
+    if not ADMIN_ID_SET:
+        raise HTTPException(status_code=503, detail="شناسه پشتیبانی روی سرور تنظیم نشده؛ لطفاً بعداً تلاش کن.")
+    order_id = f"SG{int(time.time())}-{tg_user['id']}"
+    price = STAR_GIFT_PRICES[stars]
+    caption = (
+        f"🎁 سفارش جدید گیفت استارزی\n\n"
+        f"🧾 شماره سفارش: {order_id}\n"
+        f"👤 آیدی سفارش‌دهنده: <code>{tg_user['id']}</code>\n"
+        f"🎯 آیدی گیرنده: <code>{recipient}</code>\n"
+        f"⭐ نوع گیفت: {stars} استارز\n"
+        f"💵 مبلغ اعلام‌شده: {price:,} تومان\n"
+        f"📌 وضعیت: در انتظار بررسی پشتیبانی\n"
+        f"⚠️ رسید ارسالی به‌تنهایی تأیید پرداخت نیست؛ مبلغ را بررسی کنید."
+    )
+    sent = 0
+    for admin_id in sorted(ADMIN_ID_SET):
+        try:
+            resp = _tg_http.post(
+                f"{_TG_API}/sendPhoto",
+                data={"chat_id": admin_id, "caption": caption, "parse_mode": "HTML"},
+                files={"photo": (body.receipt_name or "receipt.jpg", receipt, "application/octet-stream")},
+                timeout=15,
+            )
+            if resp.is_success and resp.json().get("ok"):
+                sent += 1
+            else:
+                print(f"[star-gift-order] admin delivery failed: {resp.text[:300]}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[star-gift-order] admin delivery error: {exc}")
+    if sent == 0:
+        raise HTTPException(status_code=502, detail="ارسال سفارش به پشتیبانی ناموفق بود؛ دوباره تلاش کن.")
+    return {"ok": True, "order_id": order_id, "message": "سفارشت برای پشتیبانی ارسال شد و بعد از بررسی با تو هماهنگ می‌شود."}
 
 
 @app.get("/api/membership")
