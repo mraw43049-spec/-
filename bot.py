@@ -10840,12 +10840,48 @@ async def marriage_callback(update, context):
     session=get_session()
     try:
         user=get_or_create_user(session,q.from_user)
+        if action in ('courtprison','courtFine','courtLock'):
+            if len(parts) < 4:
+                return await q.answer('پنل نامعتبر است.', show_alert=True)
+            target_id, chat_id = int(parts[2]), int(parts[3])
+            if q.message.chat_id != chat_id or q.message.chat.type not in ('group','supergroup'):
+                return await q.answer('این پنل فقط در گپ اصلی معتبر است.', show_alert=True)
+            row = session.get(GroupChat, chat_id)
+            if not row or not mayor_is_current(row, uid):
+                return await q.answer('⛔ فقط شهردار همین گپ اجازه تصمیم دارد.', show_alert=True)
+            target = session.get(User, target_id)
+            if not target:
+                return await q.answer('کاربر پیدا نشد.', show_alert=True)
+            now = now_utc()
+            if action == 'courtprison':
+                target.jail_until = now + timedelta(minutes=15)
+                target.jail_reason = 'تصمیم شهردار شهر روبی'
+                target.jail_arrested_at = now
+                target.jail_fine = int(target.jail_fine or 0)
+                session.commit()
+                await q.answer('⛓️ حبس ۱۵ دقیقه‌ای اعمال شد.')
+                await _edit(f'⛓️ حکم شهردار اجرا شد.\n{user_mention(target)} به مدت ۱۵ دقیقه وارد زندان روبی شد.')
+                return
+            if action == 'courtFine':
+                fine = 20_000
+                available = max(0, int(target.fox_points or 0))
+                paid = min(available, fine)
+                target.fox_points = available - paid
+                row.city_treasury = int(row.city_treasury or 0) + paid
+                session.commit()
+                await q.answer(f'💴 جریمه اعمال شد؛ {paid:,} به خزانه شهر رفت.', show_alert=True)
+                await _edit(f'💴 حکم جریمه اجرا شد.\nکاربر: {user_mention(target)}\nجریمه: ۲۰٬۰۰۰ روب‌پوینت\nپرداخت‌شده از موجودی: {paid:,}\nبه خزانه شهر روبی منتقل شد: {paid:,}\n\nاگر موجودی کمتر از جریمه باشد، کسر فقط تا موجودی فعلی انجام می‌شود.')
+                return
+            target.marriage_lock_until = now + timedelta(hours=24)
+            session.commit()
+            await q.answer('🚫 محرومیت ۲۴ ساعته از ازدواج اعمال شد.')
+            await _edit(f'🚫 حکم شهردار اجرا شد.\n{user_mention(target)} تا ۲۴ ساعت اجازه خواستگاری یا ازدواج ندارد.')
+            return
         if int(user.level or 1) < MARRIAGE_UNLOCK_LEVEL:
             return await q.answer("🔒 ازدواج روبی از سطح ۳ باز می‌شود.",show_alert=True)
         if action in ('start','gift'):
             gift_key=parts[3] if len(parts)>3 else None
             if gift_key not in MARRIAGE_GIFTS: return await q.answer("گزینه نامعتبر است.",show_alert=True)
-            if user.fox_gender != 'male': return await q.answer("⛔ فقط روباه مرد می‌تواند خواستگاری کند.",show_alert=True)
             if active_marriage(session,uid): return await q.answer("💍 تو همین حالا متاهلی.",show_alert=True)
             if pending_marriage_for(session,uid): return await q.answer("⏳ یک درخواست ازدواج در انتظار پاسخ است.",show_alert=True)
             item=marriage_gift_item(session,uid,gift_key)
@@ -10862,7 +10898,6 @@ async def marriage_callback(update, context):
         if action=='buy':
             gift_key=parts[2] if len(parts)>2 else ''
             if gift_key not in MARRIAGE_GIFTS: return await q.answer('هدیه نامعتبر است.',show_alert=True)
-            if user.fox_gender!='male': return await q.answer('⛔ فقط روباه مرد می‌تواند خواستگاری کند.',show_alert=True)
             if active_marriage(session,uid) or pending_marriage_for(session,uid): return await q.answer('در حال حاضر امکان خواستگاری نداری.',show_alert=True)
             price=MARRIAGE_GIFT_PRICES[gift_key]
             if int(user.fox_points or 0)<price: return await q.answer(f'روب‌پوینت کافی نیست؛ قیمت {price:,} است.',show_alert=True)
@@ -10885,7 +10920,7 @@ async def marriage_callback(update, context):
             data=context.user_data.get('marriage_proposal_confirm') or {}
             if mid != 0 or data.get('gift_key')!=gift_key: return await q.answer('درخواست منقضی شده.',show_alert=True)
             female_id=int(data.get('female_id',0)); male=get_or_create_user(session,q.from_user); female=session.get(User,female_id)
-            if male.fox_gender!='male' or not female or female.fox_gender!='female' or int(female.level or 1)<MARRIAGE_UNLOCK_LEVEL:
+            if not female or int(female.level or 1)<MARRIAGE_UNLOCK_LEVEL:
                 return await q.answer('❌ شرایط ازدواج دیگر برقرار نیست.',show_alert=True)
             if active_marriage(session,male.telegram_id) or active_marriage(session,female.telegram_id) or pending_marriage_for(session,male.telegram_id) or pending_marriage_for(session,female.telegram_id):
                 return await q.answer('❌ یکی از دو نفر دیگر شرایط ازدواج ندارد.',show_alert=True)
@@ -11240,8 +11275,22 @@ async def handle_marriage_text(update, context):
             female=session.get(User,target.id)
             if not female:
                 female=User(telegram_id=target.id,username=target.username,first_name=target.first_name); session.add(female); session.commit()
-            if male.fox_gender!='male': await update.message.reply_text('⛔ فقط روباه مرد می‌تواند خواستگاری کند.'); return True
-            if female.fox_gender!='female': await update.message.reply_text('❌ این کاربر روباه زن نیست.'); return True
+            if (update.effective_chat.type in ('group','supergroup') and male.fox_gender == female.fox_gender
+                    and male.fox_gender in ('male','female')):
+                row = session.get(GroupChat, update.effective_chat.id)
+                if not row or not row.city_mayor_id:
+                    await update.message.reply_text('⚖️ این درخواست نیازمند شهردار فعال شهر روبی در همین گپ است.'); return True
+                kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton('⛓️ زندان ۱۵ دقیقه', callback_data=f'marriage:courtprison:{female.telegram_id}:{update.effective_chat.id}')],
+                    [InlineKeyboardButton('💴 جریمه ۲۰٬۰۰۰ + دونیت شهر', callback_data=f'marriage:courtFine:{female.telegram_id}:{update.effective_chat.id}')],
+                    [InlineKeyboardButton('🚫 محرومیت ازدواج ۲۴ ساعت', callback_data=f'marriage:courtLock:{female.telegram_id}:{update.effective_chat.id}')],
+                ])
+                await update.message.reply_text(
+                    f'⚖️📜 درخواست ازدواج بین {user_mention(male)} و {user_mention(female)} برای بررسی شهردار شهر روبی ارسال شد.\n\n'
+                    'شهردار در مورد این درخواست تصمیم خواهد گرفت. فقط شهردار همین گپ می‌تواند یکی از گزینه‌ها را انتخاب کند.',
+                    reply_markup=kb, **reply_kwargs(update.message))
+                context.user_data.pop('marriage_proposal', None)
+                return True
             if int(female.level or 1)<MARRIAGE_UNLOCK_LEVEL: await update.message.reply_text('❌ سطح این کاربر برای ازدواج کافی نیست.'); return True
             if target.id==male.telegram_id or active_marriage(session,target.id) or pending_marriage_for(session,target.id): await update.message.reply_text('❌ این کاربر در حال حاضر شرایط ازدواج ندارد.'); return True
             if getattr(male,'marriage_lock_until',None) and not admin_only(int(male.telegram_id)) and now_utc()<aware(male.marriage_lock_until): await update.message.reply_text(f'⏳ تا {format_duration(int((aware(male.marriage_lock_until)-now_utc()).total_seconds()))} دیگر نمی‌توانی ازدواج کنی.'); return True
@@ -15859,7 +15908,7 @@ def main():
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:(home|storage):\d+$|^remoji:cat:[a-z_]+$"))
     app.add_handler(CallbackQueryHandler(emoji_callback, pattern=r"^remoji:item:[a-z_]+:\d+$"))
     app.add_handler(CallbackQueryHandler(emoji_action, pattern=r"^remoji:(buyyes|buyno|select|transfer|sell|sellyes|transferyes|transferno):[a-z_0-9]+:\d+$|^remoji:upgrade:\d+$"))
-    app.add_handler(CallbackQueryHandler(marriage_callback, pattern=r"^marriage:(?:start|gift|buy|kiss|cancel|proposalconfirm|accept|acceptyes|reject|action|actionyes|noop|transfer|transferyes|babyview|babyhome|babymilk|babyname|babyupgrade|babyupgradeyes|babycollect|collectyes|back|continue|continueyes|abort|abortyes|divorce|divorceyes|cheatdivorce|cheatignore):[^:]+(?::[^:]+)?$"))
+    app.add_handler(CallbackQueryHandler(marriage_callback, pattern=r"^marriage:(?:start|gift|buy|kiss|cancel|proposalconfirm|accept|acceptyes|reject|action|actionyes|noop|transfer|transferyes|babyview|babyhome|babymilk|babyname|babyupgrade|babyupgradeyes|babycollect|collectyes|back|continue|continueyes|abort|abortyes|divorce|divorceyes|cheatdivorce|cheatignore|courtprison|courtFine|courtLock):[^:]+(?::[^:]+)?$"))
     app.add_handler(CallbackQueryHandler(attack_owl_button, pattern=r"^atk:(protect|allow|refresh):\d+$"))
     app.add_handler(CallbackQueryHandler(education_topic, pattern=r"^edutopic:(general|religion|history_geo|literature|math_iq)$"))
     app.add_handler(CallbackQueryHandler(education_unlock, pattern=r"^eduunlock:(yes|no):(general|religion|history_geo|literature|math_iq)$"))
