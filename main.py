@@ -1346,6 +1346,164 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
 
 
 # ---------------------------------------------------------------------------
+# کازینو: موشک 🚀 (ضریب‌دار؛ بازی Crash)
+# موشک با ضریبِ رو‌به‌رشد بالا می‌ره و تو یه لحظه‌ی تصادفی سقوط می‌کنه. بازیکن باید قبل از سقوط «برداشت» بزنه.
+# نقطه‌ی سقوط سمت سرور ذخیره می‌شه و تا پایان بازی فرستاده نمی‌شه؛ ضریب فقط با ساعت سرور حساب می‌شه.
+# تنظیمات (Railway): ROCKET_MIN_ENTRY / ROCKET_MAX_ENTRY / ROCKET_COOLDOWN / ROCKET_EDGE / ROCKET_MAX_MULT / ROCKET_GROWTH
+# ---------------------------------------------------------------------------
+import time as _time
+import rocket_core as _rk
+
+_rk.ensure_table(engine)
+
+
+def _rocket_result(botmod, user, status, mult, crash_point, bet, pay):
+    profit = pay - bet
+    if status == "cashed":
+        msg = f"✅ با ضریب ×{mult:g} برداشت کردی و {pay:,} روب‌پوینت گرفتی ({'+' if profit >= 0 else '-'}{abs(profit):,})."
+    else:
+        msg = f"💥 موشک تو ×{crash_point:g} سقوط کرد و {bet:,} روب‌پوینت سوخت."
+    return {"ended": status, "mult": float(mult), "crash_point": float(min(crash_point, _rk.MAX_MULT)),
+            "bet": int(bet), "payout": int(pay), "profit": int(profit),
+            "balance": int(user.fox_points or 0), "message": msg, "cooldown": int(_rk.COOLDOWN)}
+
+
+def _rocket_settle(session, botmod, user, g, now, cash_request=False):
+    """وضعیت بازی فعال رو با ساعت سرور بررسی می‌کنه. اگه تموم شده باشه (یا کاربر برداشت زده باشه) نتیجه رو ثبت و پرداخت می‌کنه.
+    برمی‌گردونه: dict نتیجه یا None (هنوز درحال پرواز)."""
+    t = now - float(g["started_at"])
+    status, m = _rk.evaluate(g["crash_point"], g["auto_cash"], t)
+    bet = int(g["bet"])
+    if status == "flying":
+        if not cash_request:
+            return None
+        status, m = "cashed", m          # برداشت دستی با ضریب فعلی
+    pay = _rk.payout(bet, m) if status == "cashed" else 0
+    if not _rk.finish_game(session, g["id"], status, m, pay, now):
+        return None                       # قبلاً تموم شده (درخواست هم‌زمان)
+    if pay > 0:
+        user.fox_points = int(user.fox_points or 0) + pay
+    session.commit()
+    return _rocket_result(botmod, user, status, m, float(g["crash_point"]), bet, pay)
+
+
+def _rocket_user_locked(session, tg_user):
+    user = (session.query(User).filter(User.telegram_id == tg_user["id"]).with_for_update().first())
+    if not user:
+        raise HTTPException(status_code=404, detail="هنوز توی بات ثبت‌نام نکردی.")
+    return user
+
+
+@app.get("/api/rocket")
+def rocket_state(tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = _rocket_user_locked(session, tg_user)
+        now = _time.time()
+        settled = None
+        g = _rk.get_active(session, user.telegram_id)
+        if g:
+            settled = _rocket_settle(session, botmod, user, g, now)
+            g = None if settled else g
+        out = {
+            "unlocked": int(user.level or 1) >= botmod.CASINO_UNLOCK_LEVEL,
+            "unlock_level": botmod.CASINO_UNLOCK_LEVEL, "level": int(user.level or 1),
+            "disabled": bool(getattr(botmod, "CASINO_DISABLED", False)),
+            "min_entry": _rk.MIN_ENTRY, "max_entry": _rk.MAX_ENTRY,
+            "max_mult": _rk.MAX_MULT, "min_auto": _rk.MIN_AUTO, "growth": _rk.GROWTH,
+            "balance": int(user.fox_points or 0),
+            "cooldown_left": 0 if g else _rk.cooldown_left(session, user.telegram_id, now),
+            "cooldown_total": int(_rk.COOLDOWN),
+            "history": _rk.history(session, user.telegram_id),
+            "settled": settled,
+            "game": None,
+        }
+        if g:
+            out["game"] = {"bet": int(g["bet"]), "auto_cash": g["auto_cash"],
+                           "elapsed": max(0.0, now - float(g["started_at"]))}
+        session.commit()
+        return out
+    finally:
+        session.close()
+
+
+class RocketStart(BaseModel):
+    amount: int
+    auto_cash: Optional[float] = None
+
+
+@app.post("/api/rocket/start")
+def rocket_start(body: RocketStart, tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = locked_user(session, tg_user, botmod)
+        if getattr(botmod, "CASINO_DISABLED", False):
+            raise HTTPException(status_code=403, detail=getattr(botmod, "CASINO_DISABLED_TEXT", "کازینو فعلاً غیرفعاله."))
+        _bomb_guard(botmod, session, user)
+        now = _time.time()
+        g = _rk.get_active(session, user.telegram_id)
+        if g:
+            # بازی نیمه‌کاره: اگه تموم شده نتیجه‌ش ثبت می‌شه، وگرنه ادامه پیدا می‌کنه (پول دوباره گرفته نمی‌شه)
+            settled = _rocket_settle(session, botmod, user, g, now)
+            if settled is None:
+                return {"game": {"bet": int(g["bet"]), "auto_cash": g["auto_cash"],
+                                 "elapsed": max(0.0, now - float(g["started_at"]))},
+                        "balance": int(user.fox_points or 0), "resumed": True}
+            raise HTTPException(status_code=409, detail=settled["message"])
+        amount = int(body.amount or 0)
+        if amount < _rk.MIN_ENTRY:
+            raise HTTPException(status_code=400, detail=f"❌ حداقل مبلغ ورودی موشک {_rk.MIN_ENTRY:,} روب‌پوینته.")
+        if amount > _rk.MAX_ENTRY:
+            raise HTTPException(status_code=400, detail=f"❌ سقف مبلغ ورودی موشک {_rk.MAX_ENTRY:,} روب‌پوینته.")
+        auto = body.auto_cash
+        if auto is not None:
+            try:
+                auto = round(float(auto), 2)
+            except Exception:
+                raise HTTPException(status_code=400, detail="ضریب برداشت خودکار نامعتبره.")
+            if not (_rk.MIN_AUTO <= auto <= _rk.MAX_MULT):
+                raise HTTPException(status_code=400, detail=f"ضریب برداشت خودکار باید بین ×{_rk.MIN_AUTO:g} و ×{_rk.MAX_MULT:g} باشه.")
+        wait = _rk.cooldown_left(session, user.telegram_id, now)
+        if wait > 0:
+            raise HTTPException(status_code=429, detail=f"⏳ {wait} ثانیه‌ی دیگه می‌تونی دوباره موشک پرتاب کنی.")
+        if int(user.fox_points or 0) < amount:
+            raise HTTPException(status_code=400, detail="❌ روب‌پوینت کافی نداری.")
+        user.fox_points = int(user.fox_points or 0) - amount
+        _rk.create_game(session, user.telegram_id, amount, _rk.roll_crash(), auto, now)
+        session.commit()
+        return {"game": {"bet": amount, "auto_cash": auto, "elapsed": 0.0},
+                "balance": int(user.fox_points or 0), "resumed": False}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@app.post("/api/rocket/cashout")
+def rocket_cashout(tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = _rocket_user_locked(session, tg_user)   # عمداً بدون چک مریضی روباه؛ برداشت نباید قفل بشه
+        now = _time.time()
+        g = _rk.get_active(session, user.telegram_id)
+        if not g:
+            raise HTTPException(status_code=404, detail="بازی فعالی نداری.")
+        res = _rocket_settle(session, botmod, user, g, now, cash_request=True)
+        if res is None:
+            raise HTTPException(status_code=409, detail="بازی همین الان تموم شد.")
+        return res
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
 # روباهیو درس (همون منطق education.py؛ پیشرفت بین بات و مینی‌اپ مشترکه)
 # ---------------------------------------------------------------------------
 EDU_UNLOCK_COST = 30000

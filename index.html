@@ -227,8 +227,8 @@ button:disabled::after,.lb-close::after{display:none}
 
 
 /* ===== بازی‌ها: گردونه + بمب 💥 (سبک: بدون انیمیشن بی‌نهایت) ===== */
-.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
-.seg button{border:1px solid #2f6b4f;background:linear-gradient(180deg,#17402f,#0e281e);color:#eafff3;border-radius:14px;padding:11px 4px;font-weight:900;font-size:13px;font-family:inherit}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px}
+.seg button{border:1px solid #2f6b4f;background:linear-gradient(180deg,#17402f,#0e281e);color:#eafff3;border-radius:14px;padding:11px 2px;font-weight:900;font-size:12px;font-family:inherit}
 .seg button.on{background:linear-gradient(180deg,#ffc46b,#ff9a3c);color:#2a1204;border-color:#ffd27a}
 .bomb-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
 .bomb-top b{color:#ffc46b}
@@ -420,6 +420,28 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 @media (prefers-reduced-motion:reduce){.fox-text{animation:none;clip-path:none}.fox-mover{animation:none;transform:translate3d(-100%,0,0)}.fox-fade{animation:none}.fox-bob,.fox-tail,.fox-eyes,.fox-pen,.fox-spark{animation:none}}
 /* ===== ستاره‌های گیفت: طلایی و روشن ===== */
 .gift-stars{font-size:13px!important;font-weight:800;color:#ffd54a!important;text-shadow:0 0 9px rgba(255,200,60,.45),0 1px 0 rgba(120,70,0,.55);letter-spacing:.1px}
+
+/* ===== موشک 🚀 ===== */
+#rocketCard{background:linear-gradient(160deg,#0f1530,#0a0d20 70%);border:1px solid #34408a;box-shadow:0 10px 35px #0006}
+.rk-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
+.rk-top b{color:#ffc46b}
+.rk-canvas{width:100%;display:block;border-radius:16px;background:#070a1a;direction:ltr;touch-action:manipulation}
+.rk-res{text-align:center;font-weight:900;margin:10px 0 4px;min-height:22px;line-height:1.8;font-size:13.5px}
+.rk-res.win{color:#7dffb3}.rk-res.lose{color:#ff8a8a}
+.rk-hist{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:8px 0;direction:ltr;min-height:26px}
+.rk-chip{padding:4px 9px;border-radius:999px;font-size:12px;font-weight:900;border:1px solid}
+.rk-chip.lo{color:#ff9d9d;border-color:#8a3a3a;background:#2a1216}
+.rk-chip.mid{color:#ffe08a;border-color:#8a7a3a;background:#2a2412}
+.rk-chip.hi{color:#8dffbd;border-color:#2f8a5a;background:#0f2a1c}
+.rk-chip.big{color:#e9b8ff;border-color:#8a3aa8;background:#26102e}
+.rk-row{display:flex;gap:8px;margin:8px 0;align-items:center}
+.rk-row input{flex:1;min-width:0;border-radius:12px;border:1px solid #3b4a9a;background:#0a0f26;color:#fff;padding:12px;font-size:16px;font-family:inherit;text-align:center}
+.rk-row label{font-size:12px;color:#aab4ff;white-space:nowrap}
+.rk-small{border:1px solid #3b4a9a;background:#141b40;color:#eaf0ff;border-radius:12px;padding:11px 14px;font-weight:900;font-family:inherit;font-size:14px}
+.rk-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 4px}
+.rk-chips button{border:1px solid #3b4a9a;background:#141b40;color:#eaf0ff;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:800;font-family:inherit}
+.rk-chips button.on{background:#ffc46b;color:#2a1204;border-color:#ffd27a}
+#rkCash{width:100%;background:linear-gradient(180deg,#5dff9f,#22c46b);color:#052414;font-size:16px;padding:16px 8px}
 </style>
 </head>
 <body>
@@ -605,7 +627,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 </section>
 
 <section id="wheelView" class="view">
-  <div class="seg"><button id="segWheel" class="on">🎡 گردونه</button><button id="segBomb">💥 بمب</button><button id="segPlinko">🔴 پلینکو</button></div>
+  <div class="seg"><button id="segWheel" class="on">🎡 گردونه</button><button id="segBomb">💥 بمب</button><button id="segPlinko">🔴 پلینکو</button><button id="segRocket">🚀 موشک</button></div>
 
   <div id="wheelCard" class="card" style="text-align:center">
     <div class="section-title">🎡 گردونه‌ی روزانه</div>
@@ -640,6 +662,31 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     <div id="bRes" class="bres"></div>
     <div id="bSteps" class="bsteps"></div>
     <div class="muted" style="margin-top:8px;line-height:1.9">۱۲ خانه داریم و ۳ تاش بمبه. هر خانه‌ی سالم پاداشش رو بالا می‌بره؛ بمب پیدا کنی همه‌چی می‌سوزه.</div>
+  </div>
+  <div id="rocketCard" class="card" style="display:none">
+    <div class="section-title">🚀 موشک</div>
+    <div class="rk-top"><span>💰 موجودی: <b id="rkBal">—</b></span><span id="rkCd" class="muted"></span></div>
+    <canvas id="rkCanvas" class="rk-canvas" width="320" height="300"></canvas>
+    <div id="rkRes" class="rk-res"></div>
+    <div class="rk-hist" id="rkHist"></div>
+    <div id="rkSetup">
+      <div class="rk-chips" id="rkChips"></div>
+      <div class="rk-row">
+        <button id="rkHalf" class="rk-small" type="button">½</button>
+        <input id="rkAmt" type="number" inputmode="numeric" placeholder="مبلغ ورودی" autocomplete="off">
+        <button id="rkDouble" class="rk-small" type="button">2×</button>
+      </div>
+      <div class="rk-row">
+        <label for="rkAuto">🎯 برداشت خودکار در ضریب</label>
+        <input id="rkAuto" type="number" inputmode="decimal" step="0.1" placeholder="اختیاری، مثلاً ۲" autocomplete="off">
+      </div>
+      <button id="rkStart" class="action" style="width:100%">🚀 پرتاب موشک</button>
+    </div>
+    <div id="rkFly" style="display:none">
+      <button id="rkCash" class="action">💰 برداشت</button>
+    </div>
+    <div class="muted" id="rkRule" style="margin-top:10px;line-height:1.9"></div>
+    <div class="muted" style="margin-top:6px;line-height:1.9">موشک با ضریبِ رو‌به‌رشد بالا می‌ره ولی تو یه لحظه‌ی تصادفی سقوط می‌کنه. قبل از سقوط «برداشت» بزن تا مبلغ × ضریب رو بگیری؛ اگه سقوط کنه، ورودی می‌سوزه. نقطه‌ی سقوط از اول مشخصه و کسی (حتی ما) نمی‌تونه عوضش کنه.</div>
   </div>
   <div id="plinkoCard" class="card" style="display:none">
     <div class="p-head">
@@ -1449,6 +1496,201 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   };
 
 
+  // ---------- بازی موشک 🚀 (ضریب‌دار) ----------
+  // ضریب فقط با ساعت سرور حساب می‌شه؛ این‌جا فقط نمایشه. نقطه‌ی سقوط تا پایان بازی دست مینی‌اپ نیست.
+  var rocket = null, rkBusy = false, rkGame = null, rkPhase = "idle", rkFinal = 1, rkPoll = null, rkPollBusy = false;
+  var rkRAF = 0, rkCdEnd = 0, rkCdTimer = null, rkAmt = 0, rkStars = [], rkBoomAt = 0;
+  (function(){ for (var i = 0; i < 40; i++) rkStars.push({ x: Math.random(), y: Math.random(), r: Math.random() * 1.4 + 0.3, s: Math.random() * 0.6 + 0.2 }); })();
+  function rkFm(m){ return "×" + Number(m).toLocaleString("fa-IR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function rkMultNow(){
+    if (!rkGame || !rocket) return 1;
+    var t = (Date.now() - rkGame.t0) / 1000;
+    return Math.min(rocket.max_mult, Math.floor(Math.exp(rocket.growth * t) * 100 + 1e-9) / 100);
+  }
+  function rkColor(m){ return m < 1.5 ? "#9fe8ff" : (m < 3 ? "#7dffb3" : (m < 10 ? "#ffe08a" : "#ff9ae8")); }
+  function rkDraw(){
+    var cv = $("rkCanvas"); if (!cv) return;
+    var dpr = window.devicePixelRatio || 1, W = 320, H = 300;
+    if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+    var c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#0b1030"); g.addColorStop(1, "#04060f");
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+    var now = Date.now(), i;
+    for (i = 0; i < rkStars.length; i++) {
+      var st = rkStars[i], yy = ((st.y * H + (rkPhase === "fly" ? now * 0.012 * st.s : 0)) % H);
+      c.fillStyle = "rgba(255,255,255," + (0.35 + st.s * 0.5) + ")"; c.beginPath(); c.arc(st.x * W, yy, st.r, 0, 6.2832); c.fill();
+    }
+    var growth = rocket ? rocket.growth : 0.08;
+    var m = rkPhase === "fly" ? rkMultNow() : rkFinal;
+    var T = Math.log(Math.max(1.0001, m)) / growth;            // ثانیه‌های پرواز
+    var padL = 26, padB = 30, padT = 70, padR = 30;
+    var xMax = Math.max(8, T * 1.12), yMax = Math.max(2, m * 1.25);
+    function px(t){ return padL + (t / xMax) * (W - padL - padR); }
+    function py(v){ return H - padB - ((v - 1) / (yMax - 1)) * (H - padB - padT); }
+    // شبکه
+    c.strokeStyle = "rgba(120,140,255,.14)"; c.lineWidth = 1;
+    for (i = 0; i < 4; i++) { var gy = padT + i * (H - padB - padT) / 3; c.beginPath(); c.moveTo(padL, gy); c.lineTo(W - padR + 6, gy); c.stroke(); }
+    // منحنی
+    var col = rkPhase === "crashed" ? "#ff6b6b" : (rkPhase === "cashed" ? "#5dff9f" : rkColor(m));
+    var N = 60, tipX = px(0), tipY = py(1), prevX = tipX, prevY = tipY, k;
+    var fg = c.createLinearGradient(0, H, 0, 0); fg.addColorStop(0, "rgba(93,255,159,0)"); fg.addColorStop(1, col.replace("#", "#") + "55");
+    c.beginPath(); c.moveTo(px(0), py(1));
+    for (k = 1; k <= N; k++) { var t = T * k / N, mm = Math.exp(growth * t); prevX = tipX; prevY = tipY; tipX = px(t); tipY = py(mm); c.lineTo(tipX, tipY); }
+    c.lineWidth = 3; c.strokeStyle = col; c.lineJoin = "round"; c.shadowColor = col; c.shadowBlur = 10; c.stroke(); c.shadowBlur = 0;
+    c.lineTo(tipX, H - padB); c.lineTo(px(0), H - padB); c.closePath(); c.fillStyle = fg; c.fill();
+    // موشک یا انفجار
+    c.save(); c.translate(tipX, tipY); c.textAlign = "center"; c.textBaseline = "middle";
+    if (rkPhase === "crashed") {
+      var age = Math.min(1, (now - rkBoomAt) / 400);
+      c.font = (30 + 22 * age) + "px sans-serif"; c.fillText("💥", 0, 0);
+    } else {
+      var ang = Math.atan2(tipY - prevY, tipX - prevX);
+      if (rkPhase === "idle") ang = -Math.PI / 4;
+      c.rotate(ang + Math.PI / 4); c.font = "30px sans-serif"; c.fillText("🚀", 0, 0);
+      if (rkPhase === "fly") { c.font = "16px sans-serif"; c.fillText("🔥", -14 - (now % 200) / 40, 14 + (now % 200) / 40); }
+    }
+    c.restore();
+    // عدد ضریب
+    c.textAlign = "center"; c.textBaseline = "middle";
+    c.font = "900 44px sans-serif"; c.fillStyle = col; c.shadowColor = col; c.shadowBlur = 14;
+    c.fillText(rkFm(m), W / 2, 36); c.shadowBlur = 0;
+    c.font = "800 13px sans-serif";
+    if (rkPhase === "crashed") { c.fillStyle = "#ff8a8a"; c.fillText("💥 سقوط کرد!", W / 2, 62); }
+    else if (rkPhase === "cashed") { c.fillStyle = "#7dffb3"; c.fillText("✅ برداشت شد", W / 2, 62); }
+    else if (rkPhase === "fly" && rkGame) { c.fillStyle = "#cfd6ff"; c.fillText("💵 الان برداشت کنی: " + fa(Math.floor(rkGame.bet * m + 1e-9)), W / 2, 62); }
+    else { c.fillStyle = "#aab4ff"; c.fillText("آماده‌ی پرتاب", W / 2, 62); }
+  }
+  function rkLoop(){
+    rkRAF = 0;
+    if (rkPhase === "fly" || (rkPhase === "crashed" && Date.now() - rkBoomAt < 500)) {
+      rkDraw();
+      if (rkPhase === "fly") { var cb = $("rkCash"); if (cb) cb.textContent = "💰 برداشت · " + fa(Math.floor(rkGame.bet * rkMultNow() + 1e-9)) + " (" + rkFm(rkMultNow()) + ")"; }
+      rkRAF = requestAnimationFrame(rkLoop);
+    } else rkDraw();
+  }
+  function rkKick(){ if (!rkRAF) rkRAF = requestAnimationFrame(rkLoop); }
+  function rkSetPanels(){
+    var fly = rkPhase === "fly";
+    $("rkSetup").style.display = fly ? "none" : "";
+    $("rkFly").style.display = fly ? "" : "none";
+  }
+  function rkCdLeft(){ return Math.max(0, Math.ceil((rkCdEnd - Date.now()) / 1000)); }
+  function rkCdTick(){
+    var left = rkCdLeft(), b = $("rkStart"), c = $("rkCd");
+    var off = !rocket || !rocket.unlocked || rocket.disabled;
+    if (rkPhase === "fly") { c.textContent = ""; return; }
+    if (left > 0) { b.disabled = true; b.textContent = "⏳ " + fa(left) + " ثانیه تا پرتاب بعدی"; c.textContent = ""; }
+    else { b.disabled = off || rkBusy; b.textContent = "🚀 پرتاب موشک"; c.textContent = ""; if (rkCdTimer) { clearInterval(rkCdTimer); rkCdTimer = null; } }
+  }
+  function rkCdStart(sec){
+    rkCdEnd = Date.now() + sec * 1000;
+    if (rkCdTimer) clearInterval(rkCdTimer);
+    rkCdTimer = setInterval(rkCdTick, 500); rkCdTick();
+  }
+  function rkChipCls(m){ return m < 1.5 ? "lo" : (m < 3 ? "mid" : (m < 10 ? "hi" : "big")); }
+  function rkDrawHist(){
+    var box = $("rkHist"); box.innerHTML = "";
+    if (!rocket || !rocket.history || !rocket.history.length) { var e = document.createElement("span"); e.className = "muted"; e.style.margin = "0"; e.textContent = "هنوز بازی‌ای نکردی"; box.appendChild(e); return; }
+    rocket.history.forEach(function(h){
+      var sp = document.createElement("span"); sp.className = "rk-chip " + rkChipCls(h.crash);
+      sp.textContent = rkFm(h.crash).replace("×", "") + "×"; box.appendChild(sp);
+    });
+  }
+  function rkSetAmt(v){
+    v = Math.floor(Number(v) || 0);
+    if (rocket) v = Math.min(v, rocket.max_entry);
+    rkAmt = v; $("rkAmt").value = v ? v : "";
+    var bs = $("rkChips").children, i;
+    for (i = 0; i < bs.length; i++) bs[i].className = (Number(bs[i].getAttribute("data-v")) === v) ? "on" : "";
+  }
+  function rkDrawChips(){
+    var chips = $("rkChips"); chips.innerHTML = "";
+    if (!rocket) return;
+    [1000, 5000, 25000, 100000, 500000, 1000000, 2500000].forEach(function(v){
+      if (v < rocket.min_entry || v > rocket.max_entry) return;
+      var b = document.createElement("button"); b.type = "button"; b.textContent = fa(v); b.setAttribute("data-v", v);
+      b.onclick = function(){ if (!rkBusy) rkSetAmt(v); }; chips.appendChild(b);
+    });
+  }
+  function rkStopPoll(){ if (rkPoll) { clearInterval(rkPoll); rkPoll = null; } }
+  function rkStartPoll(){
+    rkStopPoll();
+    rkPoll = setInterval(function(){
+      if (rkPhase !== "fly" || rkPollBusy || rkBusy) return;
+      rkPollBusy = true;
+      api("/api/rocket").then(function(d){
+        if (d.settled && rkPhase === "fly") rkEnd(d.settled);
+        else if (!d.game && !d.settled && rkPhase === "fly") { rkPhase = "idle"; rkSetPanels(); rkKick(); }
+      }).catch(function(){}).then(function(){ rkPollBusy = false; });
+    }, 700);
+  }
+  function rkBegin(game){
+    rkGame = { bet: game.bet, auto: game.auto_cash, t0: Date.now() - game.elapsed * 1000 };
+    rkPhase = "fly"; rkFinal = 1;
+    $("rkRes").textContent = ""; $("rkRes").className = "rk-res";
+    rkSetPanels(); rkStartPoll(); rkKick();
+    var cb = $("rkCash"); cb.disabled = false;
+  }
+  function rkEnd(r){
+    rkStopPoll();
+    var crashed = r.ended === "crashed";
+    rkPhase = crashed ? "crashed" : "cashed";
+    rkFinal = crashed ? r.crash_point : r.mult;
+    rkBoomAt = Date.now();
+    if (rocket) {
+      rocket.balance = r.balance; rocket.cooldown_left = r.cooldown;
+      rocket.history = [{ crash: r.crash_point, status: r.ended }].concat(rocket.history || []).slice(0, 12);
+    }
+    $("rkBal").textContent = fa(r.balance);
+    var el = $("rkRes"); el.textContent = r.message; el.className = "rk-res " + (crashed ? "lose" : "win");
+    try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(crashed ? "heavy" : "light"); } catch(e){}
+    rkSetPanels(); rkDrawHist(); rkCdStart(r.cooldown || 0); rkKick();
+  }
+  function loadRocket(){
+    return api("/api/rocket").then(function(d){
+      rocket = d;
+      $("rkBal").textContent = fa(d.balance);
+      $("rkRule").textContent = d.disabled ? "🛠 کازینو فعلاً غیرفعاله." :
+        d.unlocked ? ("حداقل " + fa(d.min_entry) + " و حداکثر " + fa(d.max_entry) + " روب‌پوینت. سقف ضریب " + fa(d.max_mult) + "×؛ با «برداشت خودکار» می‌تونی یه ضریب هدف بذاری تا خودش برداشت کنه.") :
+        ("🔒 کازینو از سطح " + fa(d.unlock_level) + " باز می‌شه. (سطح تو: " + fa(d.level) + ")");
+      rkDrawChips();
+      if (!rkAmt) rkSetAmt(Math.max(d.min_entry, 1000)); else rkSetAmt(rkAmt);
+      rkDrawHist();
+      if (d.settled) { rkEnd(d.settled); }
+      else if (d.game) { rkBegin(d.game); }
+      else if (rkPhase === "fly") { rkPhase = "idle"; rkSetPanels(); }
+      if (!d.game && d.cooldown_left > 0 && rkCdLeft() < d.cooldown_left) rkCdStart(d.cooldown_left);
+      rkSetPanels(); rkCdTick(); rkKick(); stamp();
+    }).catch(function(e){ if (!e.gate) toast(e.message, false); });
+  }
+  $("rkAmt").addEventListener("input", function(){ rkAmt = Math.floor(Number($("rkAmt").value) || 0); var bs = $("rkChips").children, i; for (i = 0; i < bs.length; i++) bs[i].className = (Number(bs[i].getAttribute("data-v")) === rkAmt) ? "on" : ""; });
+  $("rkHalf").onclick = function(){ if (!rkBusy) rkSetAmt(Math.max(rocket ? rocket.min_entry : 1, Math.floor(rkAmt / 2))); };
+  $("rkDouble").onclick = function(){ if (!rkBusy) rkSetAmt(rkAmt * 2); };
+  $("rkStart").onclick = function(){
+    if (rkBusy || !rocket || rkPhase === "fly") return;
+    if (rkCdLeft() > 0) { toast("⏳ " + fa(rkCdLeft()) + " ثانیه‌ی دیگه می‌تونی دوباره پرتاب کنی.", false); return; }
+    var amt = rkAmt;
+    if (!amt || amt < rocket.min_entry) { toast("حداقل مبلغ ورودی " + fa(rocket.min_entry) + " روب‌پوینته.", false); return; }
+    if (amt > rocket.max_entry) { toast("سقف مبلغ ورودی " + fa(rocket.max_entry) + " روب‌پوینته.", false); return; }
+    var autoRaw = $("rkAuto").value.trim(), auto = null;
+    if (autoRaw !== "") {
+      auto = Math.round(Number(autoRaw) * 100) / 100;
+      if (!(auto >= rocket.min_auto && auto <= rocket.max_mult)) { toast("ضریب برداشت خودکار باید بین " + rkFm(rocket.min_auto) + " و " + rkFm(rocket.max_mult) + " باشه.", false); return; }
+    }
+    rkBusy = true; $("rkStart").disabled = true;
+    api("/api/rocket/start", "POST", { amount: amt, auto_cash: auto }).then(function(r){
+      rocket.balance = r.balance; $("rkBal").textContent = fa(r.balance);
+      rkBegin(r.game);
+      if (r.resumed) toast("🔁 بازی نیمه‌کاره‌ات ادامه پیدا کرد.", true);
+    }).catch(function(e){ toast(e.message, false); loadRocket(); }).then(function(){ rkBusy = false; rkCdTick(); });
+  };
+  $("rkCash").onclick = function(){
+    if (rkBusy || rkPhase !== "fly") return;
+    rkBusy = true; $("rkCash").disabled = true;
+    api("/api/rocket/cashout", "POST").then(function(r){ rkEnd(r); })
+      .catch(function(e){ toast(e.message, false); loadRocket(); }).then(function(){ rkBusy = false; });
+  };
+
   // ---------- بازی بمب 💥 ----------
   var bomb = null, bombBusy = false, bombMode = "wheel", bombCdAt = 0, bombTick = null;
   function bombCd(){ return bomb ? Math.max(0, bomb.cooldown_left - Math.floor((Date.now() - bombCdAt) / 1000)) : 0; }
@@ -1457,6 +1699,9 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     $("segWheel").classList.toggle("on", m === "wheel");
     $("segBomb").classList.toggle("on", m === "bomb");
     $("segPlinko").classList.toggle("on", m === "plinko");
+    $("segRocket").classList.toggle("on", m === "rocket");
+    $("rocketCard").style.display = m === "rocket" ? "" : "none";
+    if (m === "rocket") loadRocket();
     $("wheelCard").style.display = m === "wheel" ? "" : "none";
     $("bombCard").style.display = m === "bomb" ? "" : "none";
     $("plinkoCard").style.display = m === "plinko" ? "" : "none";
@@ -1467,6 +1712,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   $("segWheel").onclick = function(){ setBombMode("wheel"); };
   $("segBomb").onclick = function(){ setBombMode("bomb"); };
   $("segPlinko").onclick = function(){ setBombMode("plinko"); };
+  $("segRocket").onclick = function(){ setBombMode("rocket"); };
   function drawBombCd(){
     if (!bomb || bombMode !== "bomb") return;
     var l = bombCd(), el = $("bCd");
