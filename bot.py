@@ -732,11 +732,14 @@ async def require_membership(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return True
     text = "🔒 برای استفاده از ربات اول باید عضو کانال‌های زیر بشی.\n\nبعد از عضویت روی «عضو شدم، بررسی کن» بزن."
     if update.callback_query:
-        await update.callback_query.answer("اول باید عضو کانال بشی.", show_alert=True)
-        try:
-            await update.callback_query.message.edit_text(text, reply_markup=join_keyboard())
-        except Exception:
-            pass
+        await update.callback_query.answer("🔒 اول باید عضو کانال‌های اجباری بشی.", show_alert=True)
+        # توی گروه پیام اصلی (جغد، روباه زخمی، پنل‌ها) نباید با پیام عضویت جایگزین بشه؛ فقط توی پیوی ادیت می‌شه
+        _cq_msg = update.callback_query.message
+        if _cq_msg is not None and getattr(_cq_msg.chat, "type", "private") == "private":
+            try:
+                await _cq_msg.edit_text(text, reply_markup=join_keyboard())
+            except Exception:
+                pass
     elif update.message:
         await update.message.reply_text(text, reply_markup=join_keyboard(), **reply_kwargs(update.message))
     return False
@@ -1816,7 +1819,7 @@ GUIDE_TOPICS = [
     ("🦉 جغد روبی",
      "هر ۲ ساعت یک جغد مرموز و پیر توی گپ ظاهر می‌شه.\n\n"
      "📌 دستور اطلاعات و لیدربرد جغد:\n<code>جغد روبی</code>\n<code>جغد</code>\n\n"
-     "┘─ روی پیام جغد ریپلای کن و جواب جمع نوشته‌شده رو بفرست؛ هر کی سریع‌تر درست جواب بده جغد رو می‌گیره (۱۲۰ ثانیه وقت هست).\n"
+     "┘─ از بین ۶ گزینه‌ی زیر پیام جغد، جواب درست جمع رو بزن؛ اولین نفر جغد رو می‌گیره (۱۲۰ ثانیه وقت هست).\n"
      "┘─ هر کاربر روزی حداکثر ۷ جغد می‌تونه بگیره.\n"
      "┘─ جغدها توی موجودیت جمع می‌شن؛ برای قاچاق استفاده می‌شن و می‌تونی انتقالشون بدی.\n\n"
      "📌 انتقال جغد (روی پیام گیرنده ریپلای کن):\n<code>انتقال جغد 1</code>"),
@@ -5601,6 +5604,19 @@ def factory_storage_used(orders):
     return sum(int(o.quantity or 0) for o in orders)
 
 
+def factory_inventory_total(session, user_id):
+    """تعداد کل محصولاتی که الان داخل «انبار محصول» (آماده‌ی فروش) هستند."""
+    rows = session.query(FactoryInventory).filter(
+        FactoryInventory.user_id == user_id, FactoryInventory.quantity > 0
+    ).all()
+    return sum(int(r.quantity or 0) for r in rows)
+
+
+def factory_storage_used_total(session, user_id, orders):
+    """فضای پُرشده‌ی انبار = سفارش‌های درحال تولید/آماده‌ی برداشت + محصولاتِ فروخته‌نشده داخل انبار."""
+    return factory_storage_used(orders) + factory_inventory_total(session, user_id)
+
+
 def factory_is_ready(user):
     if not user.factory_built:
         return False
@@ -5650,7 +5666,11 @@ def factory_staff_info(user):
 
 
 def factory_panel_text(user, orders):
-    used = factory_storage_used(orders)
+    _s = get_session()
+    try:
+        used = factory_storage_used_total(_s, user.telegram_id, orders)
+    finally:
+        _s.close()
     storage_level = max(1, min(FACTORY_STORAGE_MAX_LEVEL, int(user.factory_storage_level or 1)))
     workers_level = max(1, min(FACTORY_WORKERS_MAX_LEVEL, int(user.factory_workers_level or 1)))
     machine_level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(user.factory_machine_level or 1)))
@@ -6228,9 +6248,16 @@ async def factory_button(update, context):
             machine_level = max(1, min(FACTORY_MACHINE_MAX_LEVEL, int(user.factory_machine_level or 1)))
             plan = factory_effective_plan(item_key, int(percent_s), storage_level, machine_level)
             capacity = factory_storage_capacity(storage_level)
-            used = factory_storage_used(orders)
+            used = factory_storage_used_total(session, owner_id, orders)
             if used + plan["quantity"] > capacity:
-                await q.answer("🧳 انبار کارخونه جا نداره. اول انبار رو ارتقا بده یا سفارش‌های آماده رو بردار.", show_alert=True)
+                _inv_now = factory_inventory_total(session, owner_id)
+                if _inv_now > 0:
+                    await q.answer(
+                        "🧳 انبار کارخونه پره و محصول تو انباره!\n"
+                        "اول از «بازار و نوسانت📉» محصول قبلی رو بفروش، بعد محصول جدید بساز.",
+                        show_alert=True)
+                else:
+                    await q.answer("🧳 انبار کارخونه جا نداره. اول انبار رو ارتقا بده یا سفارش‌های آماده رو بردار.", show_alert=True)
                 return
             if (user.fox_points or 0) < plan["cost"]:
                 await q.answer(f"روب‌پوینت کافی نیست. {plan['cost']:,} روب‌پوینت لازم داری.", show_alert=True)
@@ -6327,7 +6354,7 @@ async def factory_button(update, context):
             )
             return
 
-        if action == "sell":
+        if action in ("sell", "sellok"):
             item_key = parts[2]
             inv = session.get(FactoryInventory, (owner_id, item_key))
             qty = int(inv.quantity or 0) if inv else 0
@@ -6335,15 +6362,57 @@ async def factory_button(update, context):
                 await q.answer("از این محصول چیزی تو انبار نداری.", show_alert=True)
                 return
             price_row = factory_get_or_create_market_price(session, item_key)
-            total = qty * int(price_row.price)
+            cur_price = int(price_row.price)
+            info = FACTORY_ITEM_INDEX.get(item_key, {"name": item_key})
+            if action == "sell":
+                # مرحله‌ی تایید: هنوز چیزی فروخته نمی‌شود
+                total = qty * cur_price
+                await q.answer()
+                await q.message.edit_text(
+                    "🦊 کارخونه روبی🏭\n\n"
+                    f"💼 مدیر کارخونه : {user_mention(user)}\n\n"
+                    f"✨ محصول انتخابی : {item_key} {info['name']}\n"
+                    f"┘─ 🔻 تعداد : {qty:,}\n\n"
+                    f"🛍 قیمت بازار : {cur_price:,}\n"
+                    f"┘─ 💰 قیمت کل : {total:,}🪙\n\n"
+                    "❓ آیا از فروش این محصول با توجه به قیمت فعلی بازار اطمینان دارید ؟",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("بله بفروش", callback_data=f"factory:sellok:{item_key}:{cur_price}:{owner_id}"),
+                        InlineKeyboardButton("بازگشت", callback_data=f"factory:home:0:{owner_id}"),
+                    ]])
+                )
+                return
+            # sellok: اگه قیمت بازار بین نمایش پیام تایید و زدن دکمه عوض شده، دوباره با قیمت جدید تایید می‌گیریم
+            try:
+                shown_price = int(parts[3])
+            except Exception:
+                shown_price = cur_price
+            if shown_price != cur_price:
+                await q.answer("📉 قیمت بازار تغییر کرد؛ دوباره بررسی کن.", show_alert=True)
+                total = qty * cur_price
+                await q.message.edit_text(
+                    "🦊 کارخونه روبی🏭\n\n"
+                    f"💼 مدیر کارخونه : {user_mention(user)}\n\n"
+                    f"✨ محصول انتخابی : {item_key} {info['name']}\n"
+                    f"┘─ 🔻 تعداد : {qty:,}\n\n"
+                    f"🛍 قیمت بازار : {cur_price:,}\n"
+                    f"┘─ 💰 قیمت کل : {total:,}🪙\n\n"
+                    "❓ آیا از فروش این محصول با توجه به قیمت فعلی بازار اطمینان دارید ؟",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("بله بفروش", callback_data=f"factory:sellok:{item_key}:{cur_price}:{owner_id}"),
+                        InlineKeyboardButton("بازگشت", callback_data=f"factory:home:0:{owner_id}"),
+                    ]])
+                )
+                return
+            total = qty * cur_price
             inv.quantity = 0
             user.fox_points = (user.fox_points or 0) + total
             session.commit()
-            info = FACTORY_ITEM_INDEX.get(item_key, {"name": item_key})
-            await q.answer(f"💰 {qty:,} عدد {info['name']} به قیمت {price_row.price:,} فروخته شد؛ +{total:,} روب‌پوینت!", show_alert=True)
+            await q.answer(f"💰 {qty:,} عدد {info['name']} به قیمت {cur_price:,} فروخته شد؛ +{total:,} روب‌پوینت!", show_alert=True)
+            orders = factory_settle_orders(session, user.telegram_id)
             await q.message.edit_text(
-                factory_warehouse_text(user, session),
-                reply_markup=factory_warehouse_keyboard(user, session, owner_id)
+                factory_panel_text(user, orders) + factory_orders_text(orders),
+                reply_markup=factory_home_keyboard(owner_id, orders)
             )
             return
 
@@ -6780,11 +6849,44 @@ OWL_CATCH_WINDOW_SECONDS = 120
 OWL_DAILY_LIMIT = 7
 
 def make_owl_math():
-    # رمز جغد از این به بعد یک جمع ریاضی است؛ جواب در دیتابیس ذخیره می‌شود
-    # و خود عبارت برای کاربر نمایش داده می‌شود.
-    a = random.randint(1000, 9999)
-    b = random.randint(1000, 9999)
-    return f"{a}+{b}=", str(a + b)
+    # رمز جغد: جمع دو عدد پنج‌رقمی (مثلاً 40001 + 50006)؛ جواب در دیتابیس ذخیره می‌شود.
+    a = random.randint(10000, 49999)
+    b = random.randint(10000, 49999)
+    return f"{a} + {b}", str(a + b)
+
+
+OWL_OPTIONS_COUNT = 6
+_OWL_WRONG_TRIES = {}   # owl_id -> {user_id}  (هر کاربر برای هر جغد فقط یک شانس داره)
+
+
+def make_owl_options(answer):
+    """۶ گزینه: یکی جواب درست و ۵ تای دیگه اشتباه ولی شبیه جواب (به‌هم‌ریخته)."""
+    ans = int(answer)
+    wrong = set()
+    deltas = [1, -1, 10, -10, 100, -100, 1000, -1000, 10000, -10000, 2, -2, 9, -9, 11, -11, 90, -90, 110, -110]
+    random.shuffle(deltas)
+    for d in deltas:
+        v = ans + d
+        if v > 0 and v != ans:
+            wrong.add(v)
+        if len(wrong) >= OWL_OPTIONS_COUNT - 1:
+            break
+    while len(wrong) < OWL_OPTIONS_COUNT - 1:
+        v = ans + random.randint(-5000, 5000)
+        if v > 0 and v != ans:
+            wrong.add(v)
+    opts = list(wrong) + [ans]
+    random.shuffle(opts)
+    return [str(o) for o in opts]
+
+
+def owl_keyboard(owl_id, answer):
+    opts = make_owl_options(answer)
+    rows = [
+        [InlineKeyboardButton(opts[i], callback_data=f"owlans:{owl_id}:{opts[i]}") for i in range(0, 3)],
+        [InlineKeyboardButton(opts[i], callback_data=f"owlans:{owl_id}:{opts[i]}") for i in range(3, 6)],
+    ]
+    return InlineKeyboardMarkup(rows)
 
 def normalize_math_answer(value):
     if value is None:
@@ -6853,9 +6955,9 @@ def schedule_all_owl_jobs(application, first_delay=None):
 
 def owl_text(equation):
     return (
-        "<b>یک جغد مرموز و پیر پیدا شد😳🦉</b>\n\n"
-        f"رمز: <tg-spoiler>{equation}</tg-spoiler>\n\n"
-        "جواب جمع را روی همین پیام ریپلای کن تا جغد را به دام بیندازی🔖🦉\n\n"
+        "<b>یک جغد مرموز و پیر پیدا شد🦉</b>\n\n"
+        f"رمز: {equation}\n\n"
+        "جواب درست رو از بین گزینه‌های زیر انتخاب کن؛ اولین نفری که گزینه‌ی درست رو بزنه جغد مال اونه🔖🦉\n\n"
         "این جغد 120 ثانیه وقت گرفتن دارد وگرنه میپرد..."
     )
 
@@ -6874,11 +6976,11 @@ async def post_owl_job(context):
             owl_id = owl.id
         finally:
             session.close()
-        # اول فقط ایموجی جغد می‌آید (مثل شکار)، چند ثانیه بعد همان پیامی که قراره کاربرها
-        # رمزش رو ریپلای کنن، خودش به‌عنوان ریپلای روی همون ایموجی ارسال می‌شود.
-        emoji_msg = await context.bot.send_message(chat_id=chat_id, text="🦉")
-        await asyncio.sleep(3)
-        msg = await emoji_msg.reply_text(owl_text(equation), parse_mode="HTML")
+        # همه‌چیز توی یک پنل: متن + ۶ دکمه‌ی گزینه
+        msg = await context.bot.send_message(
+            chat_id=chat_id, text=owl_text(equation), parse_mode="HTML",
+            reply_markup=owl_keyboard(owl_id, answer),
+        )
         session = get_session()
         try:
             owl = session.get(RubyOwl, owl_id)
@@ -6907,58 +7009,79 @@ async def expire_owl_job(context):
         chat_id, message_id = owl.chat_id, owl.message_id
     finally:
         session.close()
+    _OWL_WRONG_TRIES.pop(data["owl_id"], None)
     try:
-        await context.bot.send_message(chat_id=chat_id, text="🦉 جغد پرید...", reply_to_message_id=message_id)
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text="🦉 جغد پرید... کسی نتونست بگیرتش.", reply_markup=None,
+        )
     except Exception:
-        pass
+        try:
+            await context.bot.send_message(chat_id=chat_id, text="🦉 جغد پرید...", reply_to_message_id=message_id)
+        except Exception:
+            pass
 
 
 async def handle_owl_catch_text(update, context):
-    """پاسخ ریپلای‌شده به معادلهٔ جغد را بررسی می‌کند و سقف ۷ شکار روزانه را اعمال می‌کند."""
-    msg = update.message
-    if not msg or not msg.text or not msg.reply_to_message:
-        return False
-    chat = update.effective_chat
-    if not chat:
-        return False
+    """دیگه جغد با ریپلای گرفته نمی‌شه؛ فقط با دکمه‌ها (owl_answer_button)."""
+    return False
 
-    reply_id = msg.reply_to_message.message_id
-    answer = normalize_math_answer(msg.text)
+
+async def owl_answer_button(update, context):
+    """کاربر یکی از ۶ گزینه‌ی جغد رو زد. اولین نفری که گزینه‌ی درست رو بزنه جغد مال اونه."""
+    q = update.callback_query
+    try:
+        _, owl_id_s, chosen = q.data.split(":", 2)
+        owl_id = int(owl_id_s)
+    except Exception:
+        await q.answer("درخواست نامعتبر است.", show_alert=True)
+        return
+    # عضو کانال‌های اجباری نباشه: نه جغد، نه هیچی (پیام گروه دست نمی‌خوره)
+    if not await require_membership(update, context):
+        return
+    tg_user = q.from_user
+    chosen = normalize_math_answer(chosen)
 
     session = get_session()
     try:
-        owl = (session.query(RubyOwl)
-               .filter(RubyOwl.chat_id == chat.id, RubyOwl.message_id == reply_id, RubyOwl.status == "pending")
-               .with_for_update().first())
-        if not owl:
-            return False
+        owl = (session.query(RubyOwl).filter(RubyOwl.id == owl_id).with_for_update().first())
+        if not owl or owl.status != "pending":
+            if owl and owl.status == "caught":
+                await q.answer("🦉 این جغد قبلاً توسط یک نفر دیگه گرفته شد.", show_alert=True)
+            else:
+                await q.answer("🦉 این جغد پرید...", show_alert=True)
+            return
 
-        # پاسخ اشتباه مصرف نمی‌شود؛ کاربران دیگر هنوز می‌توانند جواب درست را بدهند.
-        if answer != normalize_math_answer(owl.code_emoji):
-            return False
+        tries = _OWL_WRONG_TRIES.setdefault(owl_id, set())
+        if tg_user.id in tries:
+            await q.answer("❌ تو یک بار اشتباه زدی؛ برای این جغد فقط یک شانس داشتی.", show_alert=True)
+            return
 
-        user = get_or_create_user(session, update.effective_user)
-        # قفل ردیف کاربر برای جلوگیری از دور زدن سقف ۷ جغد در دو پیام هم‌زمان.
-        user = session.query(User).filter(User.telegram_id == update.effective_user.id).with_for_update().first()
+        if chosen != normalize_math_answer(owl.code_emoji):
+            tries.add(tg_user.id)
+            await q.answer("❌ جواب اشتباه بود!", show_alert=True)
+            return
+
+        get_or_create_user(session, tg_user)
+        # قفل ردیف کاربر برای جلوگیری از دور زدن سقف روزانه
+        user = session.query(User).filter(User.telegram_id == tg_user.id).with_for_update().first()
         daily_count = owl_daily_caught_count(session, user.telegram_id)
         if daily_count >= OWL_DAILY_LIMIT:
-            await msg.reply_text(
-                "⛔ سهمیه شکار جغد امروزت کامل شده است.\n"
-                f"تعداد امروز: {daily_count}/{OWL_DAILY_LIMIT} 🦉\n"
-                "فردا دوباره می‌تونی جغد شکار کنی.",
-                **reply_kwargs(msg)
-            )
-            return True
+            # جغد مصرف نمی‌شه؛ بقیه هنوز می‌تونن بگیرنش
+            await q.answer(
+                f"⛔ سهمیه شکار جغد امروزت کامل شده ({daily_count}/{OWL_DAILY_LIMIT}). فردا دوباره بیا 🦉",
+                show_alert=True)
+            return
 
         owl.status = "caught"
-        owl.winner_id = update.effective_user.id
+        owl.winner_id = tg_user.id
         user.owl_catch_count = (user.owl_catch_count or 0) + 1
         total_owls = int(user.owl_catch_count or 0)
         daily_count += 1
-        remaining = owl_next_remaining_seconds(session, chat.id)
+        remaining = owl_next_remaining_seconds(session, owl.chat_id)
         minutes, seconds = format_minutes_seconds(remaining)
+        chat_id, message_id = owl.chat_id, owl.message_id
         session.commit()
-
         actor = user_mention(user)
         text = (
             f"{actor} +1جغد را به دام انداخت🕸🦉\n"
@@ -6969,11 +7092,16 @@ async def handle_owl_catch_text(update, context):
     finally:
         session.close()
 
+    _OWL_WRONG_TRIES.pop(owl_id, None)
+    await q.answer("🦉 جغد مال تو شد!")
     try:
-        await msg.reply_text(text, **reply_kwargs(msg))
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=None)
     except Exception:
-        pass
-    return True
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text, reply_to_message_id=message_id)
+        except Exception:
+            pass
+
 
 def build_owl_leaderboard_text(session, page=1):
     OWL_TITLES = {1: "👑 جغدشاه", 2: "🥈 جغدگیر برتر", 3: "🥉 جغدگیر توانا"}
@@ -7011,7 +7139,7 @@ async def owl_command(update, context):
     minutes, seconds = format_minutes_seconds(remaining)
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏆 لیدر برد جغد روبی", callback_data="owllb:1")]])
     await update.message.reply_text(
-        "🦉 هر ۲ ساعت یک جغد مرموز و پیر تو گپ پیدا می‌شه؛ هر کی سریع‌تر جواب جمع رو روی همان پیام ریپلای کنه، می‌بردش.\n\n"
+        "🦉 هر ۲ ساعت یک جغد مرموز و پیر تو گپ پیدا می‌شه؛ هر کی سریع‌تر گزینه‌ی درستِ جواب جمع رو بزنه، می‌بردش.\n\n"
         f"🦉 جغدهای شکارشده توسط تو امروز: {caught_today}/{OWL_DAILY_LIMIT}\n"
         f"⏳ تا جغد بعدی: {minutes} دقیقه و {seconds} ثانیه",
         reply_markup=kb, **reply_kwargs(update.message)
@@ -15889,6 +16017,7 @@ def main():
     app.add_handler(CallbackQueryHandler(hunt_button,pattern=r"^hunt:(feed|sell|fridge|baby):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(ratkiller_use_button,pattern=r"^ratkiller:use:\d+$"))
     app.add_handler(CallbackQueryHandler(owl_leaderboard_button,pattern=r"^owllb:\d+$"))
+    app.add_handler(CallbackQueryHandler(owl_answer_button,pattern=r"^owlans:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(fridge_button,pattern=r"^fridge:(view|item|cook|sell|feed|upgrade):\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
     app.add_handler(CallbackQueryHandler(referral_admin_button,pattern=r"^ref:(approve|reject):\d+$"))
