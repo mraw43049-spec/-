@@ -1394,8 +1394,18 @@ def _rocket_user_locked(session, tg_user):
     return user
 
 
+ROCKET_ALLOWED_TELEGRAM_ID = 7287316708
+def _rocket_access_guard(tg_user):
+    try:
+        allowed = int(tg_user.get("id", 0)) == ROCKET_ALLOWED_TELEGRAM_ID
+    except Exception:
+        allowed = False
+    if not allowed:
+        raise HTTPException(status_code=403, detail="بازی موشک فعلاً فقط برای این حساب فعال است.")
+
 @app.get("/api/rocket")
 def rocket_state(tg_user: dict = Depends(current_telegram_user)):
+    _rocket_access_guard(tg_user)
     botmod = load_botmod()
     session = get_session()
     try:
@@ -1435,6 +1445,7 @@ class RocketStart(BaseModel):
 
 @app.post("/api/rocket/start")
 def rocket_start(body: RocketStart, tg_user: dict = Depends(current_telegram_user)):
+    _rocket_access_guard(tg_user)
     botmod = load_botmod()
     session = get_session()
     try:
@@ -1484,6 +1495,7 @@ def rocket_start(body: RocketStart, tg_user: dict = Depends(current_telegram_use
 
 @app.post("/api/rocket/cashout")
 def rocket_cashout(tg_user: dict = Depends(current_telegram_user)):
+    _rocket_access_guard(tg_user)
     botmod = load_botmod()
     session = get_session()
     try:
@@ -1510,6 +1522,7 @@ class RocketConvert(BaseModel):
 
 @app.post("/api/rocket/convert")
 def rocket_convert(body: RocketConvert, tg_user: dict = Depends(current_telegram_user)):
+    _rocket_access_guard(tg_user)
     session = get_session()
     try:
         user = _rocket_user_locked(session, tg_user)
@@ -1541,6 +1554,7 @@ def rocket_convert(body: RocketConvert, tg_user: dict = Depends(current_telegram
 
 @app.get("/api/rocket/leaderboard")
 def rocket_leaderboard(tg_user: dict = Depends(current_telegram_user)):
+    _rocket_access_guard(tg_user)
     session = get_session()
     try:
         from sqlalchemy import text

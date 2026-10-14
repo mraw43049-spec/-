@@ -425,7 +425,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 #rocketCard{background:linear-gradient(160deg,#0f1530,#0a0d20 70%);border:1px solid #34408a;box-shadow:0 10px 35px #0006}
 .rk-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
 .rk-top b{color:#ffc46b}
-.rk-canvas{width:100%;display:block;border-radius:16px;background:#070a1a;direction:ltr;touch-action:manipulation}
+.rk-canvas{width:100%;height:auto;display:block;border-radius:16px;background:#070a1a;direction:ltr;touch-action:manipulation;min-height:360px}
 .rk-res{text-align:center;font-weight:900;margin:10px 0 4px;min-height:22px;line-height:1.8;font-size:13.5px}
 .rk-res.win{color:#7dffb3}.rk-res.lose{color:#ff8a8a}
 .rk-hist{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:8px 0;direction:ltr;min-height:26px}
@@ -672,9 +672,9 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     <div class="muted" style="margin-top:8px;line-height:1.9">۱۲ خانه داریم و ۳ تاش بمبه. هر خانه‌ی سالم پاداشش رو بالا می‌بره؛ بمب پیدا کنی همه‌چی می‌سوزه.</div>
   </div>
   <div id="rocketCard" class="card" style="display:none">
-    <div class="section-title">🦉 پرواز جغد</div>
+    <div class="section-title">🚀 موشک</div>
     <div class="rk-top"><span>💰 موجودی: <b id="rkBal">—</b></span><span id="rkCd" class="muted"></span></div>
-    <canvas id="rkCanvas" class="rk-canvas" width="320" height="300" aria-label="جغد در حال پرواز"></canvas><div class="muted" style="text-align:center">هر ۱ روب‌تون = ۱٬۰۰۰٬۰۰۰ روب‌پوینت؛ هر ۱٬۵۰۰٬۰۰۰ روب‌پوینت = ۱ روب‌تون</div><div class="rk-convert-row"><button class="rk-small" id="rkToToon" type="button">روب‌پوینت ⟶ روب‌تون <b>Ⓣ</b></button><button class="rk-small" id="rkToPoints" type="button">روب‌تون <b>Ⓣ</b> ⟶ روب‌پوینت</button></div><div class="rk-balances"><span>🪙 روب‌تون <b id="rkBalInline">—</b></span><span>🟡 روب‌پوینت <b id="rkPoints">—</b></span></div><div class="section-title">🏆 لیدربورد ۲۴ ساعته</div><div id="rkLeaderboard" class="rk-hist">درحال بارگذاری…</div><button id="rkMyFlightsBtn" class="rk-small rk-flights-btn" type="button">✈️ پروازهای من</button><div id="rkMyFlights" class="rk-hist" style="display:none"></div>
+    <canvas id="rkCanvas" class="rk-canvas" width="360" height="420" aria-label="موشک در حال پرواز"></canvas><div class="muted" style="text-align:center">هر ۱ روب‌تون = ۱٬۰۰۰٬۰۰۰ روب‌پوینت؛ هر ۱٬۵۰۰٬۰۰۰ روب‌پوینت = ۱ روب‌تون</div><div class="rk-convert-row" id="rkConvertRow"><button class="rk-small" id="rkToToon" type="button">روب‌پوینت ⟶ روب‌تون <b>Ⓣ</b></button><button class="rk-small" id="rkToPoints" type="button">روب‌تون <b>Ⓣ</b> ⟶ روب‌پوینت</button></div><div class="rk-balances" id="rkBalancesRow"><span>🪙 روب‌تون <b id="rkBalInline">—</b></span><span>🟡 روب‌پوینت <b id="rkPoints">—</b></span></div><button id="rkLeaderboardBtn" class="rk-small rk-flights-btn" type="button">🏆 لیدربورد ۲۴ ساعته</button><div id="rkLeaderboard" class="rk-hist" style="display:none">درحال بارگذاری…</div><button id="rkMyFlightsBtn" class="rk-small rk-flights-btn" type="button">✈️ پروازهای من</button><div id="rkMyFlights" class="rk-hist" style="display:none"></div>
     <div id="rkRes" class="rk-res"></div>
     <div class="rk-hist" id="rkHist"></div>
     <div id="rkSetup">
@@ -688,7 +688,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
         <label for="rkAuto">🎯 برداشت خودکار در ضریب</label>
         <input id="rkAuto" type="number" inputmode="decimal" step="0.1" placeholder="اختیاری، مثلاً ۲" autocomplete="off">
       </div>
-      <button id="rkStart" class="action" style="width:100%">🦉 پرواز جغد</button>
+      <button id="rkStart" class="action" style="width:100%">🚀 پرتاب موشک</button>
     </div>
     <div id="rkFly" style="display:none">
       <button id="rkCash" class="action">💰 برداشت</button>
@@ -1518,7 +1518,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   function rkColor(m){ return m < 1.5 ? "#9fe8ff" : (m < 3 ? "#7dffb3" : (m < 10 ? "#ffe08a" : "#ff9ae8")); }
   function rkDraw(){
     var cv = $("rkCanvas"); if (!cv) return;
-    var dpr = window.devicePixelRatio || 1, W = 320, H = 300;
+    var dpr = window.devicePixelRatio || 1, W = 360, H = 420;
     if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
     var c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
     var g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#0b1030"); g.addColorStop(1, "#04060f");
@@ -1546,30 +1546,19 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     for (k = 1; k <= N; k++) { var t = T * k / N, mm = Math.exp(growth * t); prevX = tipX; prevY = tipY; tipX = px(t); tipY = py(mm); c.lineTo(tipX, tipY); }
     c.lineWidth = 3; c.strokeStyle = col; c.lineJoin = "round"; c.shadowColor = col; c.shadowBlur = 10; c.stroke(); c.shadowBlur = 0;
     c.lineTo(tipX, H - padB); c.lineTo(px(0), H - padB); c.closePath(); c.fillStyle = fg; c.fill();
-    // جغد برداریِ نقاشی‌شده با Canvas (بدون ایموجی یا تصویر آماده)
+    // موشک برداری با شعله‌ی متحرک (بدون ایموجی یا تصویر آماده)
     c.save(); c.translate(tipX, tipY);
     if (rkPhase === "crashed") {
-      var age = Math.min(1, (now - rkBoomAt) / 400);
-      c.globalAlpha = 1-age*.55; c.strokeStyle="#ff9a67"; c.lineWidth=3;
-      for(var q=0;q<8;q++){var aa=q*Math.PI/4, rr=9+age*24;c.beginPath();c.moveTo(Math.cos(aa)*5,Math.sin(aa)*5);c.lineTo(Math.cos(aa)*rr,Math.sin(aa)*rr);c.stroke();}
+      var age = Math.min(1, (now-rkBoomAt)/500); c.globalAlpha=1-age*.55; c.strokeStyle="#ff9a67"; c.lineWidth=4;
+      for(var q=0;q<10;q++){var aa=q*Math.PI/5,rr=10+age*30;c.beginPath();c.moveTo(Math.cos(aa)*5,Math.sin(aa)*5);c.lineTo(Math.cos(aa)*rr,Math.sin(aa)*rr);c.stroke();}
     } else {
-      var ang = Math.atan2(tipY - prevY, tipX - prevX); if (rkPhase === "idle") ang = -Math.PI / 4;
-      c.rotate(ang); var flap = Math.sin(now/90)*7;
-      // دم و بال پشتی
-      c.fillStyle="#7a4a2d";c.beginPath();c.moveTo(-22,2);c.lineTo(-33,-5);c.lineTo(-27,7);c.lineTo(-36,11);c.lineTo(-17,12);c.closePath();c.fill();
-      c.fillStyle="#b87943";c.beginPath();c.ellipse(-2,2,21,14,0,0,Math.PI*2);c.fill();
-      // بال متحرک
-      c.save();c.translate(-3,-3);c.rotate(-.35+flap*.025);c.fillStyle="#8b5736";c.beginPath();c.ellipse(0,-12,9,19,-.35,0,Math.PI*2);c.fill();c.strokeStyle="#d6a36a";c.lineWidth=1.4;for(var wi=0;wi<4;wi++){c.beginPath();c.moveTo(-4,-20+wi*5);c.lineTo(4,-13+wi*5);c.stroke();}c.restore();
-      // سر و گوش‌ها
-      c.fillStyle="#c58b50";c.beginPath();c.moveTo(-14,-5);c.lineTo(-20,-23);c.lineTo(-5,-15);c.quadraticCurveTo(2,-21,10,-15);c.lineTo(20,-23);c.lineTo(17,-4);c.quadraticCurveTo(22,12,2,15);c.quadraticCurveTo(-17,13,-14,-5);c.fill();
-      // صورت روشن و چشم‌ها
-      c.fillStyle="#f2dfbd";c.beginPath();c.ellipse(-5,-2,8,10,-.2,0,Math.PI*2);c.ellipse(7,-2,8,10,.2,0,Math.PI*2);c.fill();
-      c.fillStyle="#f8f5e9";c.beginPath();c.arc(-5,-5,4.5,0,Math.PI*2);c.arc(7,-5,4.5,0,Math.PI*2);c.fill();
-      c.fillStyle="#171a27";c.beginPath();c.arc(-4,-5,2.1,0,Math.PI*2);c.arc(6,-5,2.1,0,Math.PI*2);c.fill();
-      c.fillStyle="#f7b84b";c.beginPath();c.moveTo(0,0);c.lineTo(4,4);c.lineTo(-1,5);c.closePath();c.fill();
-      // پرهای سینه
-      c.strokeStyle="#e8c99a";c.lineWidth=1;for(var pi=0;pi<3;pi++){c.beginPath();c.moveTo(-5+pi*5,7);c.lineTo(-3+pi*5,11);c.stroke();}
-      if (rkPhase === "fly") {c.globalAlpha=.65;c.fillStyle="#b9e9ff";for(var sp=0;sp<4;sp++){c.beginPath();c.arc(-28-sp*5,8+Math.sin(now/70+sp)*5,1.5,0,Math.PI*2);c.fill();}}
+      var ang = Math.atan2(tipY-prevY,tipX-prevX); if(rkPhase==="idle") ang=-Math.PI/4; c.rotate(ang);
+      var flame=10+Math.sin(now/45)*5; var fg2=c.createLinearGradient(-30,0,-8,0);fg2.addColorStop(0,"rgba(255,70,30,0)");fg2.addColorStop(.55,"#ff642e");fg2.addColorStop(1,"#ffe58a");
+      c.fillStyle=fg2;c.beginPath();c.moveTo(-18,-7);c.quadraticCurveTo(-28,-flame,-42,-2);c.quadraticCurveTo(-29,flame,-18,7);c.closePath();c.fill();
+      c.fillStyle="#d9e6ff";c.strokeStyle="#8ea9df";c.lineWidth=1.5;c.beginPath();c.moveTo(-23,-10);c.quadraticCurveTo(-12,-18,3,-15);c.lineTo(19,0);c.lineTo(3,15);c.quadraticCurveTo(-12,18,-23,10);c.closePath();c.fill();c.stroke();
+      c.fillStyle="#ef4055";c.beginPath();c.moveTo(-15,-10);c.lineTo(-24,-20);c.lineTo(-3,-14);c.closePath();c.fill();c.beginPath();c.moveTo(-15,10);c.lineTo(-24,20);c.lineTo(-3,14);c.closePath();c.fill();
+      c.fillStyle="#ffcf6e";c.beginPath();c.arc(3,0,7,0,Math.PI*2);c.fill();c.fillStyle="#245080";c.beginPath();c.arc(3,0,4,0,Math.PI*2);c.fill();
+      if(rkPhase==="fly"){c.globalAlpha=.5;c.strokeStyle="#b9e9ff";c.lineWidth=2;for(var sp=0;sp<4;sp++){c.beginPath();c.moveTo(-34-sp*6,Math.sin(now/60+sp)*8);c.lineTo(-48-sp*7,Math.sin(now/60+sp)*8);c.stroke();}}
     }
     c.restore();
     // عدد ضریب
@@ -1586,7 +1575,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     rkRAF = 0;
     if (rkPhase === "fly" || (rkPhase === "crashed" && Date.now() - rkBoomAt < 500)) {
       rkDraw();
-      if (rkPhase === "fly") { var cb = $("rkCash"); if (cb) cb.textContent = "💰 برداشت · " + fa(Math.floor(rkGame.bet * rkMultNow() + 1e-9)) + " (" + rkFm(rkMultNow()) + ")"; }
+      if (rkPhase === "fly") { var cb = $("rkCash"); if (cb) cb.textContent = "💰 برداشت در " + rkFm(rkMultNow()) + " · " + fa(Math.floor(rkGame.bet * rkMultNow() + 1e-9)) + " Ⓣ"; }
       rkRAF = requestAnimationFrame(rkLoop);
     } else rkDraw();
   }
@@ -1595,6 +1584,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     var fly = rkPhase === "fly";
     $("rkSetup").style.display = fly ? "none" : "";
     $("rkFly").style.display = fly ? "" : "none";
+    ["rkConvertRow","rkBalancesRow","rkLeaderboardBtn","rkMyFlightsBtn","rkRule"].forEach(function(id){var el=$(id);if(el)el.style.display=fly?"none":"";}); ["rkLeaderboard","rkMyFlights","rkHist"].forEach(function(id){var el=$(id);if(el&&fly)el.style.display="none";});
   }
   function rkCdLeft(){ return Math.max(0, Math.ceil((rkCdEnd - Date.now()) / 1000)); }
   function rkCdTick(){
@@ -1602,7 +1592,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     var off = !rocket || !rocket.unlocked || rocket.disabled;
     if (rkPhase === "fly") { c.textContent = ""; return; }
     if (left > 0) { b.disabled = true; b.textContent = "⏳ " + fa(left) + " ثانیه تا پرتاب بعدی"; c.textContent = ""; }
-    else { b.disabled = off || rkBusy; b.textContent = "🦉 پرواز جغد"; c.textContent = ""; if (rkCdTimer) { clearInterval(rkCdTimer); rkCdTimer = null; } }
+    else { b.disabled = off || rkBusy; b.textContent = "🚀 پرتاب موشک"; c.textContent = ""; if (rkCdTimer) { clearInterval(rkCdTimer); rkCdTimer = null; } }
   }
   function rkCdStart(sec){
     rkCdEnd = Date.now() + sec * 1000;
@@ -1686,6 +1676,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     }).catch(function(e){ if (!e.gate) toast(e.message, false); });
   }
   function rkLoadLeaderboard(){ api("/api/rocket/leaderboard").then(function(d){ var box=$("rkLeaderboard"); box.innerHTML=""; (d.items||[]).forEach(function(x,i){ var row=document.createElement("div"); row.className="rk-chip "+rkChipCls(x.best); row.style.cssText="display:flex;justify-content:space-between;width:100%;margin:4px 0"; row.textContent=(i+1)+". "+x.player+" — ×"+rkFm(x.best).replace("×","")+" · "+fa(x.games)+" بازی"; box.appendChild(row); }); if(!box.children.length) box.textContent="هنوز رکوردی در ۲۴ ساعت گذشته ثبت نشده."; }).catch(function(){ $("rkLeaderboard").textContent="لیدربورد فعلاً در دسترس نیست."; }); }
+  $("rkLeaderboardBtn").onclick=function(){var box=$("rkLeaderboard"),show=box.style.display==="none";box.style.display=show?"flex":"none";if(show)rkLoadLeaderboard();};
   $("rkMyFlightsBtn").onclick=function(){ var box=$("rkMyFlights"); var show=box.style.display==="none"; box.style.display=show?"flex":"none"; $("rkMyFlightsBtn").textContent=show?"✈️ بستن پروازهای من":"✈️ پروازهای من"; if(show){box.innerHTML="";if(rocket&&rocket.history&&rocket.history.length){rocket.history.forEach(function(h){var row=document.createElement("span");row.className="rk-chip "+rkChipCls(h.status==="cashed"?h.mult:h.crash);row.textContent=(h.status==="cashed"?"برد · "+rkFm(h.mult):"سقوط · "+rkFm(h.crash))+" · ورودی "+fa(h.bet||0)+" Ⓣ";box.appendChild(row);});}else{box.textContent="هنوز پروازی ثبت نشده.";}} };
   $("rkToToon").onclick=function(){ var n=prompt("چند روب‌پوینت تبدیل شود؟ فقط مضرب ۱٬۵۰۰٬۰۰۰ (مثلاً ۱۵۰۰۰۰۰)"); if(!n)return; api("/api/rocket/convert","POST",{direction:"points_to_toon",amount:Number(n)}).then(function(d){toast("تبدیل انجام شد."); if(rocket){rocket.balance=d.balance;rocket.rob_points=d.rob_points;$("rkBal").textContent=fa(d.balance);$("rkBalInline").textContent=fa(d.balance);$("rkPoints").textContent=fa(d.rob_points);}}).catch(function(e){toast(e.message,false);}); };
   $("rkToPoints").onclick=function(){ var n=prompt("چند روب‌تون به روب‌پوینت تبدیل شود؟"); if(!n)return; api("/api/rocket/convert","POST",{direction:"toon_to_points",amount:Number(n)}).then(function(d){toast("تبدیل انجام شد."); if(rocket){rocket.balance=d.balance;rocket.rob_points=d.rob_points;$("rkBal").textContent=fa(d.balance);$("rkBalInline").textContent=fa(d.balance);$("rkPoints").textContent=fa(d.rob_points);}}).catch(function(e){toast(e.message,false);}); };
@@ -1738,7 +1729,8 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   $("segWheel").onclick = function(){ setBombMode("wheel"); };
   $("segBomb").onclick = function(){ setBombMode("bomb"); };
   $("segPlinko").onclick = function(){ setBombMode("plinko"); };
-  $("segRocket").onclick = function(){ setBombMode("rocket"); };
+  try { var rkUserId = tg && tg.initDataUnsafe && tg.initDataUnsafe.user && String(tg.initDataUnsafe.user.id); if (rkUserId !== "7287316708") { var rb=$("segRocket"); if(rb) rb.style.display="none"; } } catch(e) {}
+  $("segRocket").onclick = function(){ if(String(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.id)!=="7287316708") return; setBombMode("rocket"); };
   function drawBombCd(){
     if (!bomb || bombMode !== "bomb") return;
     var l = bombCd(), el = $("bCd");
