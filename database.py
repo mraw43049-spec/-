@@ -76,6 +76,7 @@ class User(Base):
     fox_belly = Column(Integer, nullable=False, default=3)
     fox_belly_capacity = Column(Integer, nullable=False, default=3)
     fox_points = Column(Integer, nullable=False, default=0)
+    rub_toon = Column(BigInteger, nullable=False, default=0)  # ارز اختصاصی بازی جغد/موشک
     fox_storage = Column(Integer, nullable=False, default=0)
     fox_total_earned = Column(Integer, nullable=False, default=0)
     fox_production_remainder = Column(Float, nullable=False, default=0.0)
@@ -765,6 +766,7 @@ def init_db():
         'fine_amount': 'INTEGER NOT NULL DEFAULT 0',
         'fine_reason': 'VARCHAR',
         'fine_at': DT_SQL_TYPE,
+        'rub_toon': 'BIGINT NOT NULL DEFAULT 0',
     }
     with engine.begin() as conn:
         added_user_cols = set()

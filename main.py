@@ -1360,12 +1360,12 @@ _rk.ensure_table(engine)
 def _rocket_result(botmod, user, status, mult, crash_point, bet, pay):
     profit = pay - bet
     if status == "cashed":
-        msg = f"✅ با ضریب ×{mult:g} برداشت کردی و {pay:,} روب‌پوینت گرفتی ({'+' if profit >= 0 else '-'}{abs(profit):,})."
+        msg = f"✅ با ضریب ×{mult:g} برداشت کردی و {pay:,} روب‌تون گرفتی ({'+' if profit >= 0 else '-'}{abs(profit):,})."
     else:
-        msg = f"💥 موشک تو ×{crash_point:g} سقوط کرد و {bet:,} روب‌پوینت سوخت."
+        msg = f"💥 موشک تو ×{crash_point:g} سقوط کرد و {bet:,} روب‌تون سوخت."
     return {"ended": status, "mult": float(mult), "crash_point": float(min(crash_point, _rk.MAX_MULT)),
             "bet": int(bet), "payout": int(pay), "profit": int(profit),
-            "balance": int(user.fox_points or 0), "message": msg, "cooldown": int(_rk.COOLDOWN)}
+            "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0), "message": msg, "cooldown": int(_rk.COOLDOWN)}
 
 
 def _rocket_settle(session, botmod, user, g, now, cash_request=False):
@@ -1382,7 +1382,7 @@ def _rocket_settle(session, botmod, user, g, now, cash_request=False):
     if not _rk.finish_game(session, g["id"], status, m, pay, now):
         return None                       # قبلاً تموم شده (درخواست هم‌زمان)
     if pay > 0:
-        user.fox_points = int(user.fox_points or 0) + pay
+        user.rub_toon = int(user.rub_toon or 0) + pay
     session.commit()
     return _rocket_result(botmod, user, status, m, float(g["crash_point"]), bet, pay)
 
@@ -1410,9 +1410,9 @@ def rocket_state(tg_user: dict = Depends(current_telegram_user)):
             "unlocked": int(user.level or 1) >= botmod.CASINO_UNLOCK_LEVEL,
             "unlock_level": botmod.CASINO_UNLOCK_LEVEL, "level": int(user.level or 1),
             "disabled": bool(getattr(botmod, "CASINO_DISABLED", False)),
-            "min_entry": _rk.MIN_ENTRY, "max_entry": _rk.MAX_ENTRY,
+            "min_entry": 1, "max_entry": _rk.MAX_ENTRY,
             "max_mult": _rk.MAX_MULT, "min_auto": _rk.MIN_AUTO, "growth": _rk.GROWTH,
-            "balance": int(user.fox_points or 0),
+            "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0),
             "cooldown_left": 0 if g else _rk.cooldown_left(session, user.telegram_id, now),
             "cooldown_total": int(_rk.COOLDOWN),
             "history": _rk.history(session, user.telegram_id),
@@ -1450,13 +1450,13 @@ def rocket_start(body: RocketStart, tg_user: dict = Depends(current_telegram_use
             if settled is None:
                 return {"game": {"bet": int(g["bet"]), "auto_cash": g["auto_cash"],
                                  "elapsed": max(0.0, now - float(g["started_at"]))},
-                        "balance": int(user.fox_points or 0), "resumed": True}
+                        "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0), "resumed": True}
             raise HTTPException(status_code=409, detail=settled["message"])
         amount = int(body.amount or 0)
-        if amount < _rk.MIN_ENTRY:
-            raise HTTPException(status_code=400, detail=f"❌ حداقل مبلغ ورودی موشک {_rk.MIN_ENTRY:,} روب‌پوینته.")
+        if amount < 1:
+            raise HTTPException(status_code=400, detail="❌ حداقل ورودی موشک ۱ روب‌تونه.")
         if amount > _rk.MAX_ENTRY:
-            raise HTTPException(status_code=400, detail=f"❌ سقف مبلغ ورودی موشک {_rk.MAX_ENTRY:,} روب‌پوینته.")
+            raise HTTPException(status_code=400, detail=f"❌ سقف ورودی موشک {_rk.MAX_ENTRY:,} روب‌تونه.")
         auto = body.auto_cash
         if auto is not None:
             try:
@@ -1468,13 +1468,13 @@ def rocket_start(body: RocketStart, tg_user: dict = Depends(current_telegram_use
         wait = _rk.cooldown_left(session, user.telegram_id, now)
         if wait > 0:
             raise HTTPException(status_code=429, detail=f"⏳ {wait} ثانیه‌ی دیگه می‌تونی دوباره موشک پرتاب کنی.")
-        if int(user.fox_points or 0) < amount:
-            raise HTTPException(status_code=400, detail="❌ روب‌پوینت کافی نداری.")
-        user.fox_points = int(user.fox_points or 0) - amount
+        if int(user.rub_toon or 0) < amount:
+            raise HTTPException(status_code=400, detail="❌ روب‌تون کافی نداری. هر ۱٬۵۰۰٬۰۰۰ روب‌پوینت را به ۱ روب‌تون تبدیل کن.")
+        user.rub_toon = int(user.rub_toon or 0) - amount
         _rk.create_game(session, user.telegram_id, amount, _rk.roll_crash(), auto, now)
         session.commit()
         return {"game": {"bet": amount, "auto_cash": auto, "elapsed": 0.0},
-                "balance": int(user.fox_points or 0), "resumed": False}
+                "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0), "resumed": False}
     except HTTPException:
         session.rollback()
         raise
@@ -1499,6 +1499,62 @@ def rocket_cashout(tg_user: dict = Depends(current_telegram_user)):
     except HTTPException:
         session.rollback()
         raise
+    finally:
+        session.close()
+
+
+class RocketConvert(BaseModel):
+    direction: str  # points_to_toon | toon_to_points
+    amount: int
+
+
+@app.post("/api/rocket/convert")
+def rocket_convert(body: RocketConvert, tg_user: dict = Depends(current_telegram_user)):
+    session = get_session()
+    try:
+        user = _rocket_user_locked(session, tg_user)
+        amount = int(body.amount or 0)
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="مبلغ تبدیل باید مثبت باشد.")
+        if body.direction == "points_to_toon":
+            if amount % 1500000:
+                raise HTTPException(status_code=400, detail="تبدیل روب‌پوینت باید مضربی از ۱٬۵۰۰٬۰۰۰ باشد.")
+            if int(user.fox_points or 0) < amount:
+                raise HTTPException(status_code=400, detail="روب‌پوینت کافی نداری.")
+            user.fox_points = int(user.fox_points or 0) - amount
+            user.rub_toon = int(user.rub_toon or 0) + amount // 1500000
+        elif body.direction == "toon_to_points":
+            if int(user.rub_toon or 0) < amount:
+                raise HTTPException(status_code=400, detail="روب‌تون کافی نداری.")
+            user.rub_toon = int(user.rub_toon or 0) - amount
+            user.fox_points = int(user.fox_points or 0) + amount * 1000000
+        else:
+            raise HTTPException(status_code=400, detail="نوع تبدیل نامعتبر است.")
+        session.commit()
+        return {"balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0)}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@app.get("/api/rocket/leaderboard")
+def rocket_leaderboard(tg_user: dict = Depends(current_telegram_user)):
+    session = get_session()
+    try:
+        from sqlalchemy import text
+        rows = session.execute(text("""
+            SELECT u.telegram_id, COALESCE(u.username, u.first_name, 'بازیکن') AS player,
+                   MAX(COALESCE(g.final_mult, 0)) AS best,
+                   COUNT(g.id) AS games
+            FROM rocket_games g LEFT JOIN users u ON u.telegram_id = g.user_id
+            WHERE g.ended_at >= :cutoff AND g.status IN ('cashed','crashed')
+            GROUP BY u.telegram_id, u.username, u.first_name
+            ORDER BY best DESC, games DESC LIMIT 10
+        """), {"cutoff": _time.time() - 86400}).mappings().all()
+        return {"items": [{"player": str(x["player"]), "best": float(x["best"] or 0),
+                           "games": int(x["games"] or 0)} for x in rows]}
     finally:
         session.close()
 
