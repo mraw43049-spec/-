@@ -5803,40 +5803,44 @@ def factory_get_or_create_market_price(session, item_key):
     return row
 
 
+def factory_market_item_keys(session, user_id):
+    """فقط محصول‌هایی که الان درحال تولید یا داخل انبار محصول (تولیدشده) هستن، به ترتیب خطوط تولید."""
+    inv_map = {r.item_key: int(r.quantity or 0) for r in session.query(FactoryInventory).filter(
+        FactoryInventory.user_id == user_id, FactoryInventory.quantity > 0).all()}
+    prod_map = {}
+    for o in session.query(FactoryOrder).filter(FactoryOrder.user_id == user_id, FactoryOrder.collected == 0).all():
+        prod_map[o.item_key] = prod_map.get(o.item_key, 0) + int(o.quantity or 0)
+    keys = [k for k in FACTORY_ITEM_INDEX if k in inv_map or k in prod_map]
+    return keys, inv_map, prod_map
+
+
 def factory_warehouse_text(user, session):
-    produced = factory_produced_total_of(user)
-    unlocked_tiers = factory_unlocked_tiers(produced)
-    inv_rows = session.query(FactoryInventory).filter(FactoryInventory.user_id == user.telegram_id).all()
-    inv_map = {r.item_key: int(r.quantity or 0) for r in inv_rows}
+    keys, inv_map, prod_map = factory_market_item_keys(session, user.telegram_id)
     lines = ["📦 انبار و بازار کارخونه", "", "قیمت هر محصول هر ۲۵ دقیقه یک بار تو بازار تغییر می‌کنه.", ""]
-    for t in unlocked_tiers:
-        lines.append(t["title"])
-        for emoji, name, cost, sell in t["items"]:
-            price_row = factory_get_or_create_market_price(session, emoji)
-            qty = inv_map.get(emoji, 0)
-            lines.append(
-                f"┘─ {emoji} {name} | موجودی: {qty:,} | 💰 قیمت الان: {price_row.price:,} | "
-                f"📈 بیشترین قیمت: {price_row.high_price:,} | 📉 کمترین قیمت: {price_row.low_price:,}"
-            )
-        lines.append("")
-    return "\n".join(lines).rstrip()
+    if not keys:
+        lines.append("فعلاً محصولی درحال تولید یا داخل انبار نداری.")
+        return "\n".join(lines)
+    for emoji in keys:
+        info = FACTORY_ITEM_INDEX[emoji]
+        price_row = factory_get_or_create_market_price(session, emoji)
+        extra = f" | ⏳ درحال تولید: {prod_map[emoji]:,}" if emoji in prod_map else ""
+        lines.append(
+            f"┘─ {emoji} {info['name']} | موجودی: {inv_map.get(emoji, 0):,}{extra} | 💰 قیمت الان: {price_row.price:,} | "
+            f"📈 بیشترین قیمت: {price_row.high_price:,} | 📉 کمترین قیمت: {price_row.low_price:,}"
+        )
+    return "\n".join(lines)
 
 
 def factory_warehouse_keyboard(user, session, owner_id):
-    produced = factory_produced_total_of(user)
-    unlocked_tiers = factory_unlocked_tiers(produced)
-    inv_rows = session.query(FactoryInventory).filter(
-        FactoryInventory.user_id == user.telegram_id, FactoryInventory.quantity > 0
-    ).all()
-    inv_map = {r.item_key: int(r.quantity or 0) for r in inv_rows}
+    keys, inv_map, prod_map = factory_market_item_keys(session, user.telegram_id)
     rows = []
-    for t in unlocked_tiers:
-        for emoji, name, cost, sell in t["items"]:
-            qty = inv_map.get(emoji, 0)
-            if qty > 0:
-                rows.append([InlineKeyboardButton(
-                    f"💰 فروش {emoji} {name} ({qty:,} عدد)", callback_data=f"factory:sell:{emoji}:{owner_id}"
-                )])
+    for emoji in keys:
+        qty = inv_map.get(emoji, 0)
+        if qty > 0:
+            name = FACTORY_ITEM_INDEX[emoji]["name"]
+            rows.append([InlineKeyboardButton(
+                f"💰 فروش {emoji} {name} ({qty:,} عدد)", callback_data=f"factory:sell:{emoji}:{owner_id}"
+            )])
     if inv_map:
         rows.append([InlineKeyboardButton("💰 فروش کل انبار", callback_data=f"factory:sellall:0:{owner_id}")])
     rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"factory:home:0:{owner_id}")])
@@ -6953,13 +6957,30 @@ def schedule_all_owl_jobs(application, first_delay=None):
         schedule_owl_job(application, chat_id, first_delay=delay)
 
 
+OWL_IMAGE = os.path.join(BASE_DIR, "owl_night.jpg")
+
+
 def owl_text(equation):
     return (
         "<b>یک جغد مرموز و پیر پیدا شد🦉</b>\n\n"
-        f"رمز: {equation}\n\n"
-        "جواب درست رو از بین گزینه‌های زیر انتخاب کن؛ اولین نفری که گزینه‌ی درست رو بزنه جغد مال اونه🔖🦉\n\n"
-        "این جغد 120 ثانیه وقت گرفتن دارد وگرنه میپرد..."
+        f"<b>رمز: <tg-spoiler>{equation}</tg-spoiler></b>\n\n"
+        "<b>جواب درست رو از بین گزینه‌های زیر انتخاب کن؛ اولین نفری که گزینه‌ی درست رو بزنه جغد مال اونه🔖🦉</b>\n\n"
+        "<b>این جغد 120 ثانیه وقت گرفتن دارد وگرنه میپرد...</b>"
     )
+
+
+async def owl_edit_panel(bot, chat_id, message_id, text):
+    """پنل جغد عکس‌دار است؛ کپشنش ادیت می‌شود (اگه عکس نبود، متن)."""
+    try:
+        await bot.edit_message_caption(chat_id=chat_id, message_id=message_id, caption=text, reply_markup=None)
+        return True
+    except Exception:
+        pass
+    try:
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=None)
+        return True
+    except Exception:
+        return False
 
 
 async def post_owl_job(context):
@@ -6977,10 +6998,22 @@ async def post_owl_job(context):
         finally:
             session.close()
         # همه‌چیز توی یک پنل: متن + ۶ دکمه‌ی گزینه
-        msg = await context.bot.send_message(
-            chat_id=chat_id, text=owl_text(equation), parse_mode="HTML",
-            reply_markup=owl_keyboard(owl_id, answer),
-        )
+        kb = owl_keyboard(owl_id, answer)
+        msg = None
+        if os.path.exists(OWL_IMAGE):
+            try:
+                with open(OWL_IMAGE, "rb") as _f:
+                    msg = await context.bot.send_photo(
+                        chat_id=chat_id, photo=_f, caption=owl_text(equation),
+                        parse_mode="HTML", reply_markup=kb,
+                    )
+            except Exception as _e:
+                logger.warning("owl photo failed in %s: %s", chat_id, _e)
+                msg = None
+        if msg is None:
+            msg = await context.bot.send_message(
+                chat_id=chat_id, text=owl_text(equation), parse_mode="HTML", reply_markup=kb,
+            )
         session = get_session()
         try:
             owl = session.get(RubyOwl, owl_id)
@@ -7010,12 +7043,7 @@ async def expire_owl_job(context):
     finally:
         session.close()
     _OWL_WRONG_TRIES.pop(data["owl_id"], None)
-    try:
-        await context.bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text="🦉 جغد پرید... کسی نتونست بگیرتش.", reply_markup=None,
-        )
-    except Exception:
+    if not await owl_edit_panel(context.bot, chat_id, message_id, "🦉 جغد پرید... کسی نتونست بگیرتش."):
         try:
             await context.bot.send_message(chat_id=chat_id, text="🦉 جغد پرید...", reply_to_message_id=message_id)
         except Exception:
@@ -7094,9 +7122,7 @@ async def owl_answer_button(update, context):
 
     _OWL_WRONG_TRIES.pop(owl_id, None)
     await q.answer("🦉 جغد مال تو شد!")
-    try:
-        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=None)
-    except Exception:
+    if not await owl_edit_panel(context.bot, chat_id, message_id, text):
         try:
             await context.bot.send_message(chat_id=chat_id, text=text, reply_to_message_id=message_id)
         except Exception:
