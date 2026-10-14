@@ -17,7 +17,10 @@ MAX_ENTRY = int(os.environ.get("ROCKET_MAX_ENTRY", "2500000") or 2500000)
 COOLDOWN = float(os.environ.get("ROCKET_COOLDOWN", "20") or 20)       # ثانیه؛ بعد از اتمام هر بازی
 EDGE = float(os.environ.get("ROCKET_EDGE", "0.04") or 0.04)           # سهم خانه؛ بازگشت به بازیکن ≈ ۹۶٪
 MAX_MULT = float(os.environ.get("ROCKET_MAX_MULT", "100") or 100)     # سقف ضریب؛ رسیدن بهش = برداشت خودکار با همین ضریب
-GROWTH = float(os.environ.get("ROCKET_GROWTH", "0.08") or 0.08)       # سرعت رشد ضریب؛ ×۲ ≈ ۸٫۷ ثانیه ، ×۱۰ ≈ ۲۹ ثانیه
+GROWTH = float(os.environ.get("ROCKET_GROWTH", "0.06") or 0.06)       # سرعت رشد ضریب؛ ×۲ ≈ ۱۱٫۵ ثانیه ، ×۱۰ ≈ ۳۸ ثانیه
+MIN_HOLD = float(os.environ.get("ROCKET_MIN_HOLD", "1.5") or 1.5)     # ثانیه؛ تا موشک از سکو بلند نشده «برداشت» دستی ممکن نیست (جلوگیری از پس‌گرفتن فوریِ ورودی)
+BUY_RATE = int(os.environ.get("ROCKET_BUY_RATE", "1500000") or 1500000)    # هر ۱ روب‌تون = چند روب‌پوینت (خرید روب‌تون)
+SELL_RATE = int(os.environ.get("ROCKET_SELL_RATE", "1000000") or 1000000)  # فروش ۱ روب‌تون = چند روب‌پوینت
 MIN_AUTO = 1.1                                                         # کمترین ضریب برداشت خودکار
 
 _rng = random.SystemRandom()

@@ -1377,6 +1377,8 @@ def _rocket_settle(session, botmod, user, g, now, cash_request=False):
     if status == "flying":
         if not cash_request:
             return None
+        if t < _rk.MIN_HOLD:
+            raise HTTPException(status_code=409, detail="🛫 موشک هنوز از سکو بلند نشده؛ چند لحظه صبر کن.")
         status, m = "cashed", m          # برداشت دستی با ضریب فعلی
     pay = _rk.payout(bet, m) if status == "cashed" else 0
     if not _rk.finish_game(session, g["id"], status, m, pay, now):
@@ -1422,6 +1424,7 @@ def rocket_state(tg_user: dict = Depends(current_telegram_user)):
             "disabled": bool(getattr(botmod, "CASINO_DISABLED", False)),
             "min_entry": 1, "max_entry": _rk.MAX_ENTRY,
             "max_mult": _rk.MAX_MULT, "min_auto": _rk.MIN_AUTO, "growth": _rk.GROWTH,
+            "min_hold": _rk.MIN_HOLD, "buy_rate": _rk.BUY_RATE, "sell_rate": _rk.SELL_RATE,
             "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0),
             "cooldown_left": 0 if g else _rk.cooldown_left(session, user.telegram_id, now),
             "cooldown_total": int(_rk.COOLDOWN),
@@ -1480,7 +1483,7 @@ def rocket_start(body: RocketStart, tg_user: dict = Depends(current_telegram_use
         if wait > 0:
             raise HTTPException(status_code=429, detail=f"⏳ {wait} ثانیه‌ی دیگه می‌تونی دوباره موشک پرتاب کنی.")
         if int(user.rub_toon or 0) < amount:
-            raise HTTPException(status_code=400, detail="❌ روب‌تون کافی نداری. هر ۱٬۵۰۰٬۰۰۰ روب‌پوینت را به ۱ روب‌تون تبدیل کن.")
+            raise HTTPException(status_code=400, detail=f"❌ روب‌تون کافی نداری. هر ۱ روب‌تون = {_rk.BUY_RATE:,} روب‌پوینت؛ از بخش تبدیل، روب‌تون بگیر.")
         user.rub_toon = int(user.rub_toon or 0) - amount
         _rk.create_game(session, user.telegram_id, amount, _rk.roll_crash(), auto, now)
         session.commit()
@@ -1516,8 +1519,9 @@ def rocket_cashout(tg_user: dict = Depends(current_telegram_user)):
 
 
 class RocketConvert(BaseModel):
-    direction: str  # points_to_toon | toon_to_points
-    amount: int
+    direction: str          # points_to_toon (خرید روب‌تون) | toon_to_points (فروش روب‌تون)
+    toons: int              # «چند روب‌تون؟» (دیگه روب‌پوینت وارد نمی‌شه؛ سرور هزینه رو حساب می‌کنه)
+    confirm: bool = False   # False = فقط پیش‌نمایش (چیزی کم/زیاد نمی‌شه) ، True = تایید نهایی و اعمال
 
 
 @app.post("/api/rocket/convert")
@@ -1526,25 +1530,36 @@ def rocket_convert(body: RocketConvert, tg_user: dict = Depends(current_telegram
     session = get_session()
     try:
         user = _rocket_user_locked(session, tg_user)
-        amount = int(body.amount or 0)
-        if amount <= 0:
-            raise HTTPException(status_code=400, detail="مبلغ تبدیل باید مثبت باشد.")
+        n = int(body.toons or 0)
+        if n < 1:
+            raise HTTPException(status_code=400, detail="❌ حداقل ۱ روب‌تون.")
+        if n > 100000:
+            raise HTTPException(status_code=400, detail="❌ هر بار حداکثر ۱۰۰٬۰۰۰ روب‌تون.")
+        pts = int(user.fox_points or 0)
+        toon = int(user.rub_toon or 0)
         if body.direction == "points_to_toon":
-            if amount % 1500000:
-                raise HTTPException(status_code=400, detail="تبدیل روب‌پوینت باید مضربی از ۱٬۵۰۰٬۰۰۰ باشد.")
-            if int(user.fox_points or 0) < amount:
-                raise HTTPException(status_code=400, detail="روب‌پوینت کافی نداری.")
-            user.fox_points = int(user.fox_points or 0) - amount
-            user.rub_toon = int(user.rub_toon or 0) + amount // 1500000
+            cost = n * _rk.BUY_RATE
+            if pts < cost:
+                raise HTTPException(status_code=400, detail=f"❌ روب‌پوینت کافی نداری. برای {n:,} روب‌تون، {cost:,} روب‌پوینت لازمه.")
+            new_pts, new_toon, points = pts - cost, toon + n, cost
         elif body.direction == "toon_to_points":
-            if int(user.rub_toon or 0) < amount:
-                raise HTTPException(status_code=400, detail="روب‌تون کافی نداری.")
-            user.rub_toon = int(user.rub_toon or 0) - amount
-            user.fox_points = int(user.fox_points or 0) + amount * 1000000
+            if toon < n:
+                raise HTTPException(status_code=400, detail="❌ روب‌تون کافی نداری.")
+            gain = n * _rk.SELL_RATE
+            new_pts, new_toon, points = pts + gain, toon - n, gain
         else:
             raise HTTPException(status_code=400, detail="نوع تبدیل نامعتبر است.")
+        quote = {"direction": body.direction, "toons": n, "points": int(points),
+                 "balance_after": int(new_toon), "rob_points_after": int(new_pts)}
+        if not body.confirm:
+            session.rollback()
+            return {"quote": quote, "done": False,
+                    "balance": toon, "rob_points": pts}
+        user.fox_points = new_pts
+        user.rub_toon = new_toon
         session.commit()
-        return {"balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0)}
+        return {"quote": quote, "done": True,
+                "balance": int(new_toon), "rob_points": int(new_pts)}
     except HTTPException:
         session.rollback()
         raise
