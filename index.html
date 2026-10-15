@@ -710,16 +710,65 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     <div class="muted" style="margin-top:8px;line-height:1.9">۱۲ خانه داریم و ۳ تاش بمبه. هر خانه‌ی سالم پاداشش رو بالا می‌بره؛ بمب پیدا کنی همه‌چی می‌سوزه.</div>
   </div>
   <div id="rocketCard" class="card" style="display:none">
-    <div class="section-title">🚀 چالش پرواز موشک <span class="rk-live">● تمرینی</span></div>
-    <div class="muted" style="line-height:1.9">چالش انفرادی ۱۰ ثانیه‌ای؛ بدون شرط‌بندی، کسر موجودی یا پرداخت برد. هدف ضریب صرفاً تمرینی است.</div>
-    <canvas id="rkDemoCanvas" class="rk-canvas" width="360" height="420" aria-label="انیمیشن تمرینی موشک"></canvas>
-    <div style="display:grid;gap:10px;margin-top:12px">
-      <label class="rk-lbl" for="rkDemoTarget">🎯 ضریب هدف تمرینی</label>
-      <input id="rkDemoTarget" type="number" min="1.1" max="100" step="0.1" value="2" inputmode="decimal">
-      <div id="rkDemoMult" style="text-align:center;font-size:28px;font-weight:800">-1.00×</div>
-      <div id="rkDemoTime" class="muted" style="text-align:center">۱۰ ثانیه آماده‌سازی</div>
-      <button id="rkDemoStart" class="action" type="button" style="width:100%">🚀 شروع پرواز تمرینی</button>
-      <div id="rkDemoResult" class="rk-res" aria-live="polite"></div>
+    <div class="section-title">🚀 موشک <span class="rk-live">● زنده</span></div>
+    <div class="rk-top"><span>🟡 موجودی: <b id="rkBal">—</b> روب‌پوینت</span><span id="rkRound" class="muted"></span></div>
+    <canvas id="rkCanvas" class="rk-canvas" width="360" height="420" aria-label="موشک در حال پرواز"></canvas>
+    <div id="rkRes" class="rk-res"></div>
+    <div class="rk-hist" id="rkHist"></div>
+    <div id="rkJoined" class="rk-joined" style="display:none">
+      <span id="rkJoinedTxt"></span>
+      <button id="rkCancel" class="rk-small" type="button">↩️ لغو شرط</button>
+    </div>
+    <div id="rkSetup">
+      <div class="rk-lbl">🟡 مبلغ شرط (روب‌پوینت)</div>
+      <div class="rk-chips" id="rkChips"></div>
+      <div class="rk-row">
+        <button id="rkHalf" class="rk-small" type="button">½</button>
+        <input id="rkAmt" type="number" inputmode="numeric" placeholder="چند روب‌پوینت؟" autocomplete="off">
+        <button id="rkDouble" class="rk-small" type="button">2×</button>
+      </div>
+      <div class="rk-lbl">🎯 ضریب هدف (روی چه ضریبی شرط می‌بندی؟)</div>
+      <div class="rk-chips" id="rkTgtChips"></div>
+      <div class="rk-row">
+        <input id="rkTgt" type="number" inputmode="decimal" step="0.1" placeholder="مثلاً ۲ یا ۲٫۵" autocomplete="off">
+      </div>
+      <div class="rk-prev" id="rkPrev"></div>
+      <button id="rkStart" class="action" style="width:100%" type="button">🚀 ثبت شرط</button>
+    </div>
+    <div class="rk-players" id="rkPlayersBox">
+      <div class="rk-ph"><span id="rkPlTitle">👥 بازیکنان این پرواز</span><span id="rkPlTotal" class="muted"></span></div>
+      <div id="rkPlayers"></div>
+    </div>
+    <div id="rkExtra">
+      <div class="rk-conv" id="rkConv">
+        <div class="rk-seg">
+          <button id="rkTabBuy" class="on" type="button">🟡 ⟶ <svg class="ton"><use href="#tonSym"/></svg> خرید</button>
+          <button id="rkTabSell" type="button"><svg class="ton"><use href="#tonSym"/></svg> ⟶ 🟡 فروش</button>
+        </div>
+        <div class="rk-conv-q" id="rkConvQ">چند روب‌تون می‌خوای؟</div>
+        <div class="rk-step">
+          <button id="rkMinus" class="rk-sb" type="button" aria-label="کم کن">➖</button>
+          <input id="rkConvN" type="number" inputmode="numeric" min="1" autocomplete="off">
+          <button id="rkPlus" class="rk-sb" type="button" aria-label="زیاد کن">➕</button>
+          <button id="rkMax" class="rk-sb" type="button" aria-label="حداکثر">➿</button>
+        </div>
+        <div class="rk-conv-info" id="rkConvInfo"></div>
+        <button id="rkConvGo" class="rk-go" type="button">🔁 تبدیل</button>
+      </div>
+      <div class="rk-balances" id="rkBalancesRow"><span><svg class="ton"><use href="#tonSym"/></svg> روب‌تون <b id="rkBalInline">—</b></span><span>🟡 روب‌پوینت <b id="rkPoints">—</b></span></div>
+      <button id="rkLeaderboardBtn" class="rk-small rk-flights-btn" type="button">🏆 لیدربورد ۲۴ ساعته</button>
+      <div id="rkLeaderboard" class="rk-hist" style="display:none">درحال بارگذاری…</div>
+      <button id="rkMyFlightsBtn" class="rk-small rk-flights-btn" type="button">✈️ پروازهای من</button>
+      <div id="rkMyFlights" class="rk-hist" style="display:none"></div>
+    </div>
+    <div class="muted" id="rkRule" style="margin-top:10px;line-height:1.9"></div>
+    <div class="muted" style="margin-top:6px;line-height:1.9">موشک از −۱ شروع می‌کنه و بالا می‌ره ولی تو یه لحظه‌ی تصادفی سقوط می‌کنه. اگه به ضریب هدفت برسه برنده‌ای، وگرنه شرطت می‌سوزه. نقطه‌ی سقوط از اول مشخصه و کسی (حتی ما) نمی‌تونه عوضش کنه.</div>
+  </div>
+  <div id="rkConfirm" class="modal">
+    <div class="sheet">
+      <h3 id="rkCfTitle">تایید تبدیل</h3>
+      <div id="rkCfBody" style="line-height:2;font-size:14px"></div>
+      <div class="row"><button id="rkCfNo" class="action secondary" type="button">انصراف</button><button id="rkCfYes" class="action" type="button">✅ تایید</button></div>
     </div>
   </div>
   <div id="plinkoCard" class="card" style="display:none">
@@ -1530,42 +1579,526 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   };
 
 
-  // ---------- چالش تمرینی موشک: مستقل و بدون شرط/پرداخت ----------
+  // ---------- بازی موشک 🚀 (پروازهای همگانیِ خودکار) ----------
+  // سرور هر پرواز را می‌سازد: ۵ ثانیه شرط‌بندی ← پرتاب برای همه ← سقوط ← ۵ ثانیه بعد پرواز بعدی.
+  // ضریب فقط با ساعت سرور حساب می‌شود؛ این‌جا فقط نمایش است. نقطه‌ی سقوط تا پایان پرواز دست مینی‌اپ نیست.
+  var TON_PATH = "M37.5603 15.6277H18.4386C14.9228 15.6277 12.6944 19.4202 14.4632 22.4861L26.2644 42.9409C27.0345 44.2765 28.9644 44.2765 29.7345 42.9409L41.5381 22.4861C43.3045 19.4251 41.0761 15.6277 37.5627 15.6277H37.5603ZM26.2548 36.8068L23.6847 31.8327L17.4833 20.7414C17.0742 20.0315 17.5795 19.1218 18.4362 19.1218H26.2524V36.8092L26.2548 36.8068ZM38.5108 20.739L32.3118 31.8351L29.7417 36.8068V19.1194H37.5579C38.4146 19.1194 38.9199 20.0291 38.5108 20.739Z";
+  var TON = '<svg class="ton" viewBox="0 0 56 56" aria-label="TON"><use href="#tonSym"/></svg>';
+  var rkTonImg = new Image();
+  rkTonImg.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56"><circle cx="28" cy="28" r="28" fill="#0098EA"/><path d="' + TON_PATH + '" fill="#fff"/></svg>');
+  var rocket = null, rkBusy = false, rkPoll = null, rkPollBusy = false, rkPollSoon = false, rkRAF = 0, rkAmt = 0, rkLastFrame = 0;
+  var rkRid = 0, rkLift = 0, rkMe = null, rkPlayers = [], rkRecent = [], rkFrozen = null, rkLastRound = 0;
+  var rkCrashAt = 0, rkCrashShow = false, rkFinal = 1, rkAltEnd = 0, rkEndPose = null, rkActKey = "", rkPlSig = "", rkHistSig = "";
+  var rkParts = [], rkStars = [], rkClouds = [], rkConvDir = "buy", rkConvN = 1;
   (function(){
-    var btn=document.getElementById("rkDemoStart"), canvas=document.getElementById("rkDemoCanvas");
-    if(!btn || !canvas) return;
-    var ctx=canvas.getContext("2d"), running=false, startAt=0, raf=0;
-    function draw(t, mult){
-      var w=canvas.width,h=canvas.height; ctx.clearRect(0,0,w,h);
-      var g=ctx.createLinearGradient(0,0,0,h); g.addColorStop(0,"#111b42");g.addColorStop(1,"#080d1d");
-      ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
-      for(var i=0;i<45;i++){ctx.fillStyle="rgba(255,255,255,"+((i%4+1)/8)+")";ctx.fillRect((i*71)%w,(i*43)%h,2,2);}
-      var progress=Math.max(0,Math.min(1,t/10000)), x=70+progress*205, y=h-75-progress*260;
-      ctx.save();ctx.translate(x,y);ctx.rotate(-0.35);
-      ctx.fillStyle="#dbeafe";ctx.beginPath();ctx.ellipse(0,0,13,27,0,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle="#fb7185";ctx.beginPath();ctx.moveTo(-11,-10);ctx.lineTo(-24,10);ctx.lineTo(-10,7);ctx.fill();
-      ctx.beginPath();ctx.moveTo(11,-10);ctx.lineTo(24,10);ctx.lineTo(10,7);ctx.fill();
-      ctx.fillStyle="#60a5fa";ctx.beginPath();ctx.arc(0,-8,6,0,Math.PI*2);ctx.fill();
-      if(running){ctx.fillStyle="#fbbf24";ctx.beginPath();ctx.moveTo(-6,24);ctx.lineTo(0,43+Math.random()*8);ctx.lineTo(6,24);ctx.fill();}
-      ctx.restore();
-      ctx.fillStyle="#fff";ctx.font="bold 23px sans-serif";ctx.textAlign="center";ctx.fillText(mult.toFixed(2)+"×",w/2,38);
-      ctx.fillStyle="#a5b4fc";ctx.font="13px sans-serif";ctx.fillText("پرواز تمرینی • "+(Math.max(0,10-t/1000)).toFixed(1)+" ثانیه",w/2,h-18);
-    }
-    function tick(now){
-      if(!running)return;
-      var elapsed=Math.min(10000,now-startAt), target=Math.max(1.1,Math.min(100,Number(document.getElementById("rkDemoTarget").value)||2));
-      var mult=-1+(target+1)*(elapsed/10000);
-      document.getElementById("rkDemoMult").textContent=mult.toFixed(2)+"×";
-      document.getElementById("rkDemoTime").textContent="زمان باقی‌مانده: "+((10000-elapsed)/1000).toFixed(1)+" ثانیه";
-      draw(elapsed,mult);
-      if(elapsed>=10000){running=false;btn.disabled=false;btn.textContent="🚀 پرواز دوباره";document.getElementById("rkDemoResult").textContent="✅ چالش تمرینی کامل شد؛ هیچ موجودی تغییر نکرد.";document.getElementById("rkDemoTime").textContent="پرواز ۱۰ ثانیه‌ای تمام شد.";return;}
-      raf=requestAnimationFrame(tick);
-    }
-    btn.addEventListener("click",function(){if(running)return;cancelAnimationFrame(raf);running=true;startAt=performance.now();btn.disabled=true;btn.textContent="🚀 موشک در حال پرواز…";document.getElementById("rkDemoResult").textContent="";tick(startAt);});
-    draw(0,-1);
+    var i;
+    for (i = 0; i < 70; i++) rkStars.push({ x: Math.random(), y: Math.random(), r: Math.random() * 1.3 + 0.3, s: Math.random() * 0.8 + 0.2, ph: Math.random() * 6.28 });
+    for (i = 0; i < 9; i++) rkClouds.push({ x: Math.random(), a: 120 + Math.random() * 760, w: 50 + Math.random() * 60, o: 0.35 + Math.random() * 0.4 });
   })();
-
-  // موشک قدیمیِ شرط‌بندی حذف شد؛ از چالش تمرینی مستقل بالا استفاده می‌شود.
+  function rkFm(m){ return "×" + Number(m).toLocaleString("fa-IR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function rkElapsed(){ return rkRid ? (Date.now() - rkLift) / 1000 : 99; }
+  function rkSmooth(u){ return u * u * (3 - 2 * u); }
+  function rkDisp(t){
+    if (!rocket || t <= 0) return -1;
+    var R = rocket.rise;
+    if (t < R) return -1 + 2 * rkSmooth(t / R);
+    return Math.min(rocket.max_mult, Math.floor(Math.exp(rocket.growth * (t - R)) * 100 + 1e-9) / 100);
+  }
+  function rkAltT(t){
+    if (!rocket || t <= 0) return 0;
+    var R = rocket.rise;
+    if (t < R) return 0.25 * rkSmooth(t / R);
+    return 0.25 + Math.min(Math.log(rocket.max_mult), rocket.growth * (t - R));
+  }
+  function rkDispNow(){ return rkRid ? rkDisp(rkElapsed()) : -1; }
+  function rkPay(bet, t){ return Math.floor(bet * t + 1e-9); }
+  function rkNum(v){ return Number(v).toLocaleString("fa-IR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function rkColor(m){ return m < 0 ? "#ff8a8a" : (m < 1.5 ? "#9fe8ff" : (m < 3 ? "#7dffb3" : (m < 10 ? "#ffe08a" : "#ff9ae8"))); }
+  function rkBetOpen(){ return !!rkRid && Date.now() < rkLift - 250; }
+  function rkPhaseNow(){
+    if (rkCrashShow) { if (Date.now() - rkCrashAt < 2600) return "crashed"; rkCrashShow = false; rkFrozen = null; rkPlSig = ""; }
+    if (!rkRid) return "idle";
+    return Date.now() < rkLift ? "wait" : "fly";
+  }
+  function rkMix(a, b, t){ return "rgb(" + Math.round(a[0] + (b[0] - a[0]) * t) + "," + Math.round(a[1] + (b[1] - a[1]) * t) + "," + Math.round(a[2] + (b[2] - a[2]) * t) + ")"; }
+  var RK_W = 360, RK_H = 420, RK_PAD_Y = 300;
+  // موقعیت موشک روی صفحه + مقدار پیمایش دوربین (ارتفاع = لگاریتم ضریب)
+  function rkPose(alt){
+    var climb = alt * 175;
+    var y = Math.max(RK_H * 0.46, RK_PAD_Y - climb);
+    var cam = Math.max(0, climb - (RK_PAD_Y - RK_H * 0.46));
+    return { x: RK_W / 2, y: y, cam: cam, climb: climb };
+  }
+  function rkSpawn(type, x, y, o){
+    if (rkParts.length > 260) return;
+    var p = { t: type, x: x, y: y, vx: 0, vy: 0, g: 0, life: 1, max: 1, r: 3, rot: 0, vr: 0 };
+    for (var k in o) p[k] = o[k];
+    p.max = p.life; rkParts.push(p);
+  }
+  function rkBurst(crashed, x, y){
+    var i, a, sp;
+    if (crashed) {
+      for (i = 0; i < 80; i++) { a = Math.random() * 6.2832; sp = 60 + Math.random() * 300; rkSpawn("spark", x, y, { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 240, life: 0.5 + Math.random() * 1.0, r: 1.5 + Math.random() * 2.5 }); }
+      for (i = 0; i < 20; i++) { a = Math.random() * 6.2832; sp = 70 + Math.random() * 190; rkSpawn("debris", x, y, { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 40, g: 330, life: 1.2 + Math.random() * 0.9, r: 2 + Math.random() * 3.5, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 14, c: ["#e8edf7", "#d8344a", "#7f8ca8", "#4a5266"][i % 4] }); }
+      for (i = 0; i < 16; i++) { a = Math.random() * 6.2832; sp = 20 + Math.random() * 70; rkSpawn("smoke", x, y, { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 20, life: 1.4 + Math.random() * 1.4, r: 14 + Math.random() * 16 }); }
+    } else {
+      for (i = 0; i < 46; i++) { a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4; sp = 90 + Math.random() * 260; rkSpawn("coin", x, y + 10, { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 380, life: 1.0 + Math.random() * 0.9, r: 2.5 + Math.random() * 2.5 }); }
+    }
+  }
+  function rkStep(dt, now, pose, flying, m, onPad){
+    var i, p, n;
+    if (flying) {
+      var el = rkElapsed();
+      var power = onPad ? 1.6 : 1;
+      n = Math.min(5, Math.round(dt * 150 * power));
+      for (i = 0; i < n; i++) {
+        rkSpawn("fire", pose.x + (Math.random() - 0.5) * 8, pose.y + 34, { vx: (Math.random() - 0.5) * 34, vy: 140 + Math.random() * 130, life: 0.28 + Math.random() * 0.22, r: 3 + Math.random() * 4 });
+      }
+      n = Math.round(dt * 60);
+      for (i = 0; i < n + (Math.random() < dt * 60 * 0.6 ? 1 : 0); i++) {
+        rkSpawn("smoke", pose.x + (Math.random() - 0.5) * 10, pose.y + 40, { vx: (Math.random() - 0.5) * 40, vy: 70 + Math.random() * 90, life: 0.8 + Math.random() * 0.8, r: 5 + Math.random() * 6 });
+      }
+      if (onPad || el < 2.2) {   // ابرِ دود روی سکو هنگام بلند شدن
+        var gy = pose.y + 58;
+        for (i = 0; i < 2; i++) rkSpawn("smoke", pose.x + (Math.random() - 0.5) * 20, Math.min(gy, RK_PAD_Y + 62 + pose.cam), { vx: (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 90), vy: -6 - Math.random() * 14, life: 1.1 + Math.random() * 0.9, r: 9 + Math.random() * 10 });
+      }
+    }
+    for (i = rkParts.length - 1; i >= 0; i--) {
+      p = rkParts[i]; p.life -= dt;
+      if (p.life <= 0) { rkParts.splice(i, 1); continue; }
+      p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt + ((p.t === "smoke" || p.t === "fire") ? 0 : 0); p.rot += p.vr * dt;
+      if (p.t === "smoke") { p.r += dt * 9; p.vx *= (1 - dt * 0.8); }
+    }
+  }
+  function rkDrawParts(c, kind){
+    var i, p, k;
+    for (i = 0; i < rkParts.length; i++) {
+      p = rkParts[i]; k = p.life / p.max;
+      if (kind === "smoke" && p.t === "smoke") {
+        c.globalAlpha = Math.max(0, k * 0.42); c.fillStyle = "#c9ccd6"; c.beginPath(); c.arc(p.x, p.y, p.r, 0, 6.2832); c.fill();
+      } else if (kind === "glow") {
+        if (p.t === "fire") { c.globalAlpha = Math.max(0, k); c.fillStyle = k > 0.6 ? "#fff1b0" : (k > 0.3 ? "#ff9a2e" : "#ff4a1a"); c.beginPath(); c.arc(p.x, p.y, p.r * (0.5 + k * 0.7), 0, 6.2832); c.fill(); }
+        else if (p.t === "spark") { c.globalAlpha = Math.max(0, k); c.fillStyle = k > 0.5 ? "#ffe9a0" : "#ff7a2a"; c.beginPath(); c.arc(p.x, p.y, p.r * (0.4 + k * 0.6), 0, 6.2832); c.fill(); }
+        else if (p.t === "coin") { c.globalAlpha = Math.max(0, Math.min(1, k * 1.6)); c.fillStyle = "#ffd447"; c.beginPath(); c.arc(p.x, p.y, p.r, 0, 6.2832); c.fill(); c.fillStyle = "#fff2b0"; c.beginPath(); c.arc(p.x - p.r * 0.3, p.y - p.r * 0.3, p.r * 0.4, 0, 6.2832); c.fill(); }
+      } else if (kind === "debris" && p.t === "debris") {
+        c.globalAlpha = Math.max(0, Math.min(1, k * 1.5)); c.save(); c.translate(p.x, p.y); c.rotate(p.rot); c.fillStyle = p.c; c.fillRect(-p.r, -p.r * 0.6, p.r * 2, p.r * 1.2); c.restore();
+      }
+    }
+    c.globalAlpha = 1;
+  }
+  function rkRocket(c, x, y, L, glowPulse){
+    c.save(); c.translate(x, y);
+    var i, g;
+    if (L > 0) {   // شعله‌ی موتور (سه لایه)
+      c.globalCompositeOperation = "lighter";
+      g = c.createRadialGradient(0, 34, 2, 0, 40, 46); g.addColorStop(0, "rgba(255,170,60,.55)"); g.addColorStop(1, "rgba(255,90,20,0)");
+      c.fillStyle = g; c.beginPath(); c.arc(0, 40, 46, 0, 6.2832); c.fill();
+      var ls = [[11, L, "rgba(255,80,20,.85)"], [7, L * 0.72, "rgba(255,170,40,.9)"], [3.6, L * 0.42, "rgba(255,250,215,.95)"]];
+      for (i = 0; i < 3; i++) { var w = ls[i][0], len = ls[i][1]; c.fillStyle = ls[i][2]; c.beginPath(); c.moveTo(-w, 31); c.quadraticCurveTo(-w * 0.9, 31 + len * 0.55, 0, 31 + len); c.quadraticCurveTo(w * 0.9, 31 + len * 0.55, w, 31); c.closePath(); c.fill(); }
+      c.globalCompositeOperation = "source-over";
+    }
+    // باله‌ها
+    c.fillStyle = "#c92c44"; c.strokeStyle = "#7d1426"; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(-12, 4); c.lineTo(-27, 33); c.lineTo(-12, 26); c.closePath(); c.fill(); c.stroke();
+    c.beginPath(); c.moveTo(12, 4); c.lineTo(27, 33); c.lineTo(12, 26); c.closePath(); c.fill(); c.stroke();
+    // نازل
+    c.fillStyle = "#3d4558"; c.beginPath(); c.moveTo(-7, 26); c.lineTo(7, 26); c.lineTo(10, 33); c.lineTo(-10, 33); c.closePath(); c.fill();
+    // بدنه
+    g = c.createLinearGradient(-12, 0, 12, 0); g.addColorStop(0, "#9aa6c0"); g.addColorStop(0.32, "#ffffff"); g.addColorStop(0.7, "#dbe3f2"); g.addColorStop(1, "#7f8ba8");
+    c.fillStyle = g; c.strokeStyle = "#7384a6"; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(-12, -34); c.lineTo(-12, 26); c.lineTo(12, 26); c.lineTo(12, -34); c.closePath(); c.fill(); c.stroke();
+    // دماغه
+    g = c.createLinearGradient(-12, 0, 12, 0); g.addColorStop(0, "#ff7a8c"); g.addColorStop(0.4, "#ff4a62"); g.addColorStop(1, "#a8162e");
+    c.fillStyle = g; c.beginPath(); c.moveTo(-12, -34); c.quadraticCurveTo(-10, -55, 0, -68); c.quadraticCurveTo(10, -55, 12, -34); c.closePath(); c.fill(); c.stroke();
+    // نوارها
+    c.fillStyle = "#c92c44"; c.fillRect(-12, -34, 24, 5); c.fillRect(-12, 13, 24, 5);
+    c.fillStyle = "rgba(0,0,0,.14)"; c.fillRect(-12, -29, 24, 1.5); c.fillRect(-12, 18, 24, 1.5);
+    // پنجره
+    c.fillStyle = "#56668a"; c.beginPath(); c.arc(0, -12, 8, 0, 6.2832); c.fill();
+    g = c.createRadialGradient(-2, -14, 1, 0, -12, 6.5); g.addColorStop(0, "#d7f1ff"); g.addColorStop(1, "#2b5d94");
+    c.fillStyle = g; c.beginPath(); c.arc(0, -12, 6, 0, 6.2832); c.fill();
+    c.fillStyle = "rgba(255,255,255,.7)"; c.beginPath(); c.arc(-2, -14, 1.6, 0, 6.2832); c.fill();
+    c.restore();
+  }
+  function rkDraw(){
+    var cv = $("rkCanvas"); if (!cv) return;
+    var dpr = window.devicePixelRatio || 1, W = RK_W, H = RK_H;
+    if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+    var c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var now = Date.now(), dt = Math.min(0.05, Math.max(0.001, (now - (rkLastFrame || now - 16)) / 1000)); rkLastFrame = now;
+    var ph = rkPhaseNow(), fly = ph === "fly", crashed = ph === "crashed";
+    var secsLeft = rkRid ? (rkLift - now) / 1000 : 0;
+    var ignite = (ph === "wait") && secsLeft < 0.9;
+    var rise = rocket ? rocket.rise : 2, el = fly ? rkElapsed() : 0;
+    var m = fly ? rkDispNow() : (crashed ? rkFinal : -1);
+    var alt = fly ? rkAltT(el) : (crashed ? rkAltEnd : 0);
+    var pose = crashed && rkEndPose ? rkEndPose : rkPose(alt);
+    var sp = Math.min(1, alt / 1.7), i;
+    var onPad = ignite || (fly && el < rise * 0.7);
+    var shake = 0;
+    if (ignite) shake = 1.4;
+    else if (fly && el < rise) shake = 2.2 * (1 - el / Math.max(0.5, rise)) + 0.6;
+    else if (fly) shake = Math.min(1.3, 0.3 + alt * 0.25);
+    if (crashed) shake = Math.max(0, 9 * (1 - (now - rkCrashAt) / 600));
+    c.save();
+    if (shake > 0) c.translate((Math.random() - 0.5) * shake * 2, (Math.random() - 0.5) * shake * 2);
+    var g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, rkMix([58, 132, 224], [2, 3, 12], sp)); g.addColorStop(1, rkMix([176, 218, 255], [9, 14, 44], Math.min(1, sp * 1.15)));
+    c.fillStyle = g; c.fillRect(-12, -12, W + 24, H + 24);
+    var sa = Math.max(0, (sp - 0.2) / 0.7);
+    if (sa > 0) for (i = 0; i < rkStars.length; i++) {
+      var st = rkStars[i], yy = (st.y * H + pose.cam * 0.08 * st.s) % H;
+      c.fillStyle = "rgba(255,255,255," + (sa * (0.3 + st.s * 0.5) * (0.75 + 0.25 * Math.sin(now / 400 + st.ph))) + ")";
+      c.beginPath(); c.arc(st.x * W, yy, st.r, 0, 6.2832); c.fill();
+    }
+    var ca = Math.max(0, 1 - sp * 1.5);
+    if (ca > 0) for (i = 0; i < rkClouds.length; i++) {
+      var cl = rkClouds[i], cy = (RK_PAD_Y + 60) - cl.a + pose.cam;
+      if (cy < -40 || cy > H + 40) continue;
+      c.fillStyle = "rgba(255,255,255," + (cl.o * ca) + ")";
+      c.beginPath(); c.ellipse(cl.x * W, cy, cl.w, cl.w * 0.28, 0, 0, 6.2832); c.ellipse(cl.x * W - cl.w * 0.4, cy + 4, cl.w * 0.55, cl.w * 0.2, 0, 0, 6.2832); c.ellipse(cl.x * W + cl.w * 0.45, cy + 3, cl.w * 0.6, cl.w * 0.22, 0, 0, 6.2832); c.fill();
+    }
+    if (fly && alt > 0.9) {
+      c.strokeStyle = "rgba(200,225,255," + Math.min(0.28, (alt - 0.9) * 0.2) + ")"; c.lineWidth = 1.2;
+      for (i = 0; i < 12; i++) { var lx = (i * 97 % 360), ly = ((now * 0.9 * (0.6 + (i % 4) * 0.25) + i * 53) % (H + 60)) - 30; c.beginPath(); c.moveTo(lx, ly); c.lineTo(lx, ly + 22 + (i % 3) * 8); c.stroke(); }
+    }
+    var gY = RK_PAD_Y + 45 + pose.cam;
+    if (gY < H + 60) {
+      var gg = c.createLinearGradient(0, gY, 0, gY + 80); gg.addColorStop(0, "#2a4d34"); gg.addColorStop(1, "#13251a");
+      c.fillStyle = gg; c.fillRect(-12, gY, W + 24, 120);
+      c.fillStyle = "#3a4256"; c.fillRect(W / 2 - 40, gY - 6, 80, 8);
+      c.fillStyle = "#59627c"; c.fillRect(W / 2 - 40, gY - 6, 80, 2);
+      c.fillStyle = "#4a5266"; c.fillRect(W / 2 - 78, gY - 112, 7, 112);
+      c.fillRect(W / 2 - 78, gY - 112, 30, 5); c.fillRect(W / 2 - 78, gY - 70, 30, 3);
+      c.strokeStyle = "#68718c"; c.lineWidth = 1; c.beginPath(); c.moveTo(W / 2 - 78, gY - 110); c.lineTo(W / 2 - 71, gY - 70); c.moveTo(W / 2 - 71, gY - 110); c.lineTo(W / 2 - 78, gY - 70); c.stroke();
+      c.fillStyle = (Math.floor(now / 500) % 2 && ph === "wait") ? "#ff5a5a" : "#7a2a2a"; c.beginPath(); c.arc(W / 2 - 74, gY - 117, 2.6, 0, 6.2832); c.fill();
+    }
+    rkStep(dt, now, pose, fly || ignite, m, onPad);
+    rkDrawParts(c, "smoke");
+    var col = crashed ? "#ff6b6b" : rkColor(m);
+    if (crashed) {
+      var age = (now - rkCrashAt) / 1000;
+      if (age < 0.9) {
+        var fr = 18 + 62 * Math.min(1, age / 0.35), fa2 = Math.max(0, 1 - age / 0.9);
+        c.globalCompositeOperation = "lighter";
+        var fb = c.createRadialGradient(pose.x, pose.y, 2, pose.x, pose.y, fr); fb.addColorStop(0, "rgba(255,250,220," + fa2 + ")"); fb.addColorStop(0.35, "rgba(255,170,50," + fa2 * 0.9 + ")"); fb.addColorStop(1, "rgba(255,60,10,0)");
+        c.fillStyle = fb; c.beginPath(); c.arc(pose.x, pose.y, fr, 0, 6.2832); c.fill();
+        c.globalCompositeOperation = "source-over";
+        c.strokeStyle = "rgba(255,220,170," + Math.max(0, 0.7 - age) + ")"; c.lineWidth = 3; c.beginPath(); c.arc(pose.x, pose.y, 20 + 190 * Math.min(1, age / 0.7), 0, 6.2832); c.stroke();
+      }
+    } else {
+      var L = fly ? (onPad ? 40 : 26 + Math.min(26, alt * 7)) + Math.sin(now / 38) * 5 + Math.random() * 4 : (ignite ? 12 + Math.random() * 10 : 0);
+      rkRocket(c, pose.x + (fly ? Math.sin(now / 520) * 1.2 : 0), pose.y, L, 1);
+    }
+    rkDrawParts(c, "debris"); rkDrawParts(c, "glow");
+    c.restore();
+    // نوشته‌ها
+    c.textAlign = "center"; c.textBaseline = "middle";
+    var me = rkMe, act = me && me.status === "active";
+    if (ph === "wait" || ph === "idle") {
+      if (ph === "idle") { c.font = "900 20px sans-serif"; c.fillStyle = "#1c2b55"; c.fillText("درحال اتصال…", W / 2, 40); }
+      else {
+        var n = Math.max(0, Math.ceil(secsLeft));
+        c.font = "900 54px sans-serif"; c.fillStyle = "#ffffff"; c.shadowColor = "#0098EA"; c.shadowBlur = 16; c.fillText(fa(n), W / 2, 40); c.shadowBlur = 0;
+        c.font = "800 13px sans-serif"; c.fillStyle = "#e6f3ff"; c.fillText(act ? "✅ شرطت ثبت شد؛ ثانیه تا پرتاب" : "ثانیه تا پرتاب — شرطتو ببند!", W / 2, 78);
+      }
+    } else {
+      c.font = "900 44px sans-serif"; c.fillStyle = col; c.shadowColor = col; c.shadowBlur = 14;
+      c.fillText(rkNum(m), W / 2, 36); c.shadowBlur = 0;
+      c.font = "800 13px sans-serif";
+      if (crashed) {
+        c.fillStyle = "#ff8a8a"; c.fillText("💥 سقوط کرد!  پرتاب بعدی تا " + fa(Math.max(0, Math.ceil(secsLeft))) + " ثانیه", W / 2, 68);
+      } else if (me && (me.status === "active" || me.status === "cashed")) {
+        var tg = me.target, hitNow = me.status === "cashed" || m >= tg;
+        if (hitNow) { c.fillStyle = "#7dffb3"; c.fillText("✅ به " + rkFm(tg) + " رسید! " + fa(rkPay(me.bet, tg)) + " 🟡", W / 2, 68); }
+        else { c.fillStyle = "#e6ebff"; c.fillText("🎯 هدف " + rkFm(tg) + " ← " + fa(rkPay(me.bet, tg)) + " 🟡", W / 2, 68); }
+        if (!hitNow && m >= 0) { c.font = "700 11px sans-serif"; c.fillStyle = "#aab4ff"; c.fillText("تا هدف: " + rkNum(Math.max(0, tg - m)), W / 2, 86); }
+      } else { c.fillStyle = "#e6ebff"; c.fillText(onPad ? "🛫 پرتاب شد…" : "👀 تماشای پرواز", W / 2, 68); }
+    }
+  }
+  // ---- پنل‌ها (فقط وقتی وضعیت عوض شد دست می‌خوره) ----
+  function rkRenderAction(){
+    if (!rocket) return;
+    var open = rkBetOpen(), act = !!rkMe && rkMe.status === "active";
+    var key = [open ? 1 : 0, rkMe ? rkMe.status : "-", rkMe ? rkMe.bet : 0, rkMe ? rkMe.target : 0, rocket.disabled ? 1 : 0, rocket.unlocked ? 1 : 0, rkBusy ? 1 : 0].join("|");
+    if (key === rkActKey) return; rkActKey = key;
+    var off = rocket.disabled || !rocket.unlocked;
+    $("rkJoined").style.display = act ? "" : "none";
+    $("rkSetup").style.display = act ? "none" : "";
+    if (act) {
+      $("rkJoinedTxt").innerHTML = "✅ شرط تو: <b>" + fa(rkMe.bet) + "</b> 🟡 روی <b>" + rkFm(rkMe.target) + "</b>";
+      $("rkCancel").style.display = open ? "" : "none"; $("rkCancel").disabled = rkBusy;
+    }
+    var b = $("rkStart");
+    if (rkMe && rkMe.status !== "active") { b.disabled = true; b.textContent = "✅ توی این پرواز بودی؛ منتظر پرواز بعدی"; }
+    else if (!open) { b.disabled = true; b.textContent = "⏳ پرواز جاریه؛ بعد از سقوط شرط ببند"; }
+    else { b.disabled = off || rkBusy; b.textContent = "🚀 ثبت شرط"; }
+  }
+  function rkStatusBadge(p, flying){
+    if (p.status === "cashed") return "<span class=\"rk-bd ok\">✅ " + rkFm(p.target) + " · +" + fa(p.payout - p.bet) + " 🟡</span>";
+    if (p.status === "crashed") return "<span class=\"rk-bd bad\">💥 نرسید به " + rkFm(p.target) + "</span>";
+    return "<span class=\"rk-bd\">" + (flying ? "🔥 هدف " : "🕒 هدف ") + rkFm(p.target) + "</span>";
+  }
+  function rkRenderPlayers(){
+    var list = (rkCrashShow && rkFrozen) ? rkFrozen : rkPlayers, flying = !!rkRid && Date.now() >= rkLift;
+    var sig = JSON.stringify([list, flying, rkCrashShow, rkRid]);
+    if (sig === rkPlSig) return; rkPlSig = sig;
+    var box = $("rkPlayers"), i, tot = 0; box.innerHTML = "";
+    for (i = 0; i < list.length; i++) tot += list[i].bet;
+    $("rkPlTitle").textContent = (rkCrashShow && rkFrozen) ? ("🏁 نتیجه‌ی پرواز " + fa(rkLastRound)) : ("👥 بازیکنان پرواز " + fa(rkRid) + " (" + fa(list.length) + ")");
+    $("rkPlTotal").innerHTML = list.length ? ("مجموع: <b>" + fa(tot) + "</b> 🟡") : "";
+    if (!list.length) { var e = document.createElement("div"); e.className = "rk-pl-empty"; e.textContent = "هنوز کسی توی این پرواز نیست؛ اولین نفر باش!"; box.appendChild(e); return; }
+    list.forEach(function(p){
+      var row = document.createElement("div"); row.className = "rk-pl" + (p.me ? " me" : "");
+      var nm = document.createElement("span"); nm.className = "rk-pl-n"; nm.textContent = p.name;
+      var bt = document.createElement("span"); bt.className = "rk-pl-b"; bt.textContent = fa(p.bet) + " 🟡";
+      var bd = document.createElement("span"); bd.innerHTML = rkStatusBadge(p, flying);
+      row.appendChild(nm); row.appendChild(bt); row.appendChild(bd); box.appendChild(row);
+    });
+  }
+  function rkChipCls(m){ return m < 1.5 ? "lo" : (m < 3 ? "mid" : (m < 10 ? "hi" : "big")); }
+  function rkDrawHist(){
+    var sig = JSON.stringify(rkRecent); if (sig === rkHistSig) return; rkHistSig = sig;
+    var box = $("rkHist"); box.innerHTML = "";
+    if (!rkRecent.length) { var e = document.createElement("span"); e.className = "muted"; e.style.margin = "0"; e.textContent = "هنوز پروازی تموم نشده"; box.appendChild(e); return; }
+    rkRecent.forEach(function(h){ var sp = document.createElement("span"); sp.className = "rk-chip " + rkChipCls(h.crash); sp.textContent = rkFm(h.crash); box.appendChild(sp); });
+  }
+  function rkRoundLabel(){
+    var el = $("rkRound"); if (!el) return;
+    var t = rkRid ? ("پرواز " + fa(rkRid)) : "";
+    if (el.textContent !== t) el.textContent = t;
+  }
+  function rkLoop(){
+    rkRAF = 0;
+    var card = $("rocketCard"); if (!card || card.style.display === "none" || document.hidden) return;
+    rkDraw(); rkRenderAction(); rkRenderPlayers(); rkDrawHist(); rkRoundLabel();
+    rkRAF = requestAnimationFrame(rkLoop);
+  }
+  function rkKick(){ if (!rkRAF) { rkLastFrame = Date.now() - 16; rkRAF = requestAnimationFrame(rkLoop); } }
+  // ---- دریافت وضعیت پرواز از سرور ----
+  function rkResText(last){
+    var mine = last.mine, cp = last.crash_point;
+    if (mine && mine.status === "cashed") { var pr = mine.payout - mine.bet; return ["🎉 موشک به " + rkFm(mine.target) + " رسید! " + fa(mine.payout) + " روب‌پوینت گرفتی (+" + fa(pr) + ")." + (last.capped ? "" : " موشک تو " + rkFm(cp) + " سقوط کرد."), "win"]; }
+    if (mine && mine.status === "crashed") return ["💥 موشک تو " + rkFm(cp) + " سقوط کرد؛ به " + rkFm(mine.target) + " نرسید و " + fa(mine.bet) + " روب‌پوینت سوخت.", "lose"];
+    return ["💥 پرواز " + fa(last.id) + " تو " + rkFm(cp) + " سقوط کرد.", ""];
+  }
+  function rkEndRound(last){
+    rkFinal = last.crash_point; rkAltEnd = 0.25 + Math.log(Math.max(1, rkFinal)); rkCrashAt = Date.now(); rkCrashShow = true; rkLastRound = last.id;
+    rkEndPose = rkPose(rkAltEnd); rkBurst(!last.capped, rkEndPose.x, rkEndPose.y);
+    rkFrozen = (last.players || []).map(function(p){ return p; });
+    var r = rkResText(last), el = $("rkRes"); el.textContent = r[0]; el.className = "rk-res " + r[1];
+    try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(r[1] === "win" ? "light" : "heavy"); } catch(e){}
+    rkPlSig = "";
+  }
+  function rkApply(d, t0, t1){
+    var prevMe = rkMe, mid = (t0 + t1) / 2, newLift = mid + d.round.liftoff_in * 1000;
+    rocket = d;
+    if (d.round.id !== rkRid) {
+      var prev = rkRid;
+      if (prev && d.last && d.last.id === prev) rkEndRound(d.last);
+      else if (!prev && d.last) rkLastRound = d.last.id;
+      rkRid = d.round.id; rkLift = newLift; rkActKey = ""; rkPlSig = "";
+      if (!rkCrashShow) { $("rkRes").textContent = ""; $("rkRes").className = "rk-res"; }
+    } else { rkLift += (newLift - rkLift) * 0.3; }
+    rkMe = d.me; rkPlayers = (d.players || []).map(function(p){ return p; }); rkRecent = d.recent || [];
+    // رسیدن به هدف وسط پرواز
+    if (prevMe && prevMe.status === "active" && rkMe && rkMe.status === "cashed" && d.round.phase === "flying" && !rkCrashShow) {
+      var pose = rkPose(rkAltT(rkElapsed())); rkBurst(false, pose.x, pose.y);
+      var pr2 = rkMe.payout - rkMe.bet, el = $("rkRes");
+      el.textContent = "🎉 موشک به " + rkFm(rkMe.target) + " رسید! " + fa(rkMe.payout) + " روب‌پوینت گرفتی (+" + fa(pr2) + ")."; el.className = "rk-res win";
+      try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred("success"); } catch(e){}
+    }
+    rkActKey = ""; rkSyncBal();
+  }
+  function rkPollOnce(){
+    var card = $("rocketCard");
+    if (!card || card.style.display === "none") { rkStopPoll(); return; }
+    if (document.hidden) return;
+    if (rkPollBusy) { rkPollSoon = true; return; }
+    rkPollBusy = true; var t0 = Date.now();
+    api("/api/rocket").then(function(d){ rkApply(d, t0, Date.now()); }).catch(function(){}).then(function(){
+      rkPollBusy = false; if (rkPollSoon) { rkPollSoon = false; rkPollOnce(); }
+    });
+  }
+  function rkStartPoll(){ if (!rkPoll) rkPoll = setInterval(rkPollOnce, 700); }
+  function rkStopPoll(){ if (rkPoll) { clearInterval(rkPoll); rkPoll = null; } }
+  document.addEventListener("visibilitychange", function(){ if (!document.hidden && $("rocketCard") && $("rocketCard").style.display !== "none") { rkPollOnce(); rkKick(); } });
+  // ---- مبلغ شرط، ضریب هدف و پیش‌نمایش ----
+  function rkTgtVal(){
+    var raw = $("rkTgt").value.trim(); if (raw === "") return null;
+    var a = Number(raw); return isFinite(a) ? Math.round(a * 100) / 100 : NaN;
+  }
+  function rkTgtOk(a){ return a !== null && !isNaN(a) && rocket && a >= rocket.min_target - 1e-9 && a <= rocket.max_mult + 1e-9; }
+  function rkPreview(){
+    var el = $("rkPrev"); if (!el || !rocket) return;
+    var a = rkTgtVal(), pts = rocket.rob_points || 0, txt, warn = false;
+    if (rkAmt > pts) { txt = "⚠️ روب‌پوینتت کافی نیست (موجودی " + fa(pts) + ")."; warn = true; }
+    else if (!rkTgtOk(a)) { txt = "🎯 ضریب هدف رو انتخاب کن (از " + rkFm(rocket.min_target) + " تا " + rkFm(rocket.max_mult) + ")."; warn = (a !== null); }
+    else if (rkAmt > 0) {
+      var pay = rkPay(rkAmt, a), ch = Math.min(99, (1 - rocket.edge) / a * 100);
+      txt = "🏆 اگه موشک به <b>" + rkFm(a) + "</b> برسه: <b>" + fa(pay) + "</b> 🟡 (+" + fa(pay - rkAmt) + ") · شانس ≈ <b>" + fa(Math.round(ch)) + "٪</b>";
+    } else txt = "مبلغ شرط رو انتخاب کن.";
+    el.innerHTML = txt; el.className = "rk-prev" + (warn ? " warn" : "");
+  }
+  function rkMarkChips(){
+    var bs = $("rkChips").children, i;
+    for (i = 0; i < bs.length; i++) { var d = bs[i].getAttribute("data-v"), on = d !== null && Number(d) === rkAmt; bs[i].className = (bs[i].getAttribute("data-mx") ? "mx " : "") + (on ? "on" : ""); }
+    var a = rkTgtVal(), as = $("rkTgtChips").children;
+    for (i = 0; i < as.length; i++) { var av = as[i].getAttribute("data-a"); as[i].className = (a !== null && Number(av) === a) ? "on" : ""; }
+  }
+  function rkSetAmt(v){
+    v = Math.floor(Number(v) || 0);
+    if (rocket) v = Math.min(v, rocket.max_entry);
+    rkAmt = v; $("rkAmt").value = v ? v : "";
+    rkMarkChips(); rkPreview();
+  }
+  function rkSetTgt(a){ $("rkTgt").value = a === null ? "" : String(a); rkMarkChips(); rkPreview(); }
+  var rkChipsBuilt = false;
+  function rkDrawChips(){
+    if (rkChipsBuilt || !rocket) return; rkChipsBuilt = true;
+    var chips = $("rkChips"); chips.innerHTML = "";
+    [100000, 500000, 1000000, 2000000, 5000000].forEach(function(v){
+      if (v < rocket.min_entry || v > rocket.max_entry) return;
+      var b = document.createElement("button"); b.type = "button"; b.textContent = fa(v); b.setAttribute("data-v", v);
+      b.onclick = function(){ if (!rkBusy) rkSetAmt(v); }; chips.appendChild(b);
+    });
+    var mx = document.createElement("button"); mx.type = "button"; mx.textContent = "🔥 همه"; mx.setAttribute("data-mx", "1");
+    mx.className = "mx"; mx.onclick = function(){ if (rkBusy) return; var v = Math.min(rocket.rob_points || 0, rocket.max_entry); if (v >= rocket.min_entry) rkSetAmt(v); else toast("روب‌پوینت کافی نداری.", false); };
+    chips.appendChild(mx);
+    var ac = $("rkTgtChips"); ac.innerHTML = ""; ac.className = "rk-chips auto";
+    [1.5, 2, 3, 5, 10].forEach(function(a){
+      if (a < rocket.min_target || a > rocket.max_mult) return;
+      var b = document.createElement("button"); b.type = "button"; b.textContent = rkFm(a); b.setAttribute("data-a", a); b.onclick = function(){ rkSetTgt(a); }; ac.appendChild(b);
+    });
+  }
+  function rkSyncBal(){
+    if (!rocket) return;
+    $("rkBal").textContent = fa(rocket.rob_points || 0);
+    if ($("rkBalInline")) $("rkBalInline").textContent = fa(rocket.balance || 0);
+    if ($("rkPoints")) $("rkPoints").textContent = fa(rocket.rob_points || 0);
+    rkPreview(); rkConvRender();
+  }
+  // ---- تبدیل روب‌تون ↔ روب‌پوینت (تعداد روب‌تون را می‌گویی؛ هزینه را سرور حساب می‌کند) ----
+  function rkConvMax(){
+    if (!rocket) return 0;
+    return rkConvDir === "buy" ? Math.floor((rocket.rob_points || 0) / (rocket.buy_rate || 1500000)) : (rocket.balance || 0);
+  }
+  function rkConvRender(){
+    if (!rocket) return;
+    var buy = rkConvDir === "buy", max = rkConvMax(), n = rkConvN, rate = buy ? rocket.buy_rate : rocket.sell_rate;
+    $("rkTabBuy").className = buy ? "on" : ""; $("rkTabSell").className = buy ? "" : "on";
+    $("rkConvQ").innerHTML = buy ? ("چند " + TON + " روب‌تون می‌خوای؟") : ("چند " + TON + " روب‌تون به 🟡 روب‌پوینت تبدیل بشه؟");
+    if (document.activeElement !== $("rkConvN")) $("rkConvN").value = n > 0 ? n : "";
+    var info = $("rkConvInfo"), go = $("rkConvGo"), warn = false, html;
+    if (n < 1) { html = "یه عدد وارد کن."; warn = true; go.disabled = true; }
+    else if (n > max) {
+      warn = true; go.disabled = true;
+      html = buy ? ("🟡 روب‌پوینت کافی نیست؛ برای <b>" + fa(n) + "</b> " + TON + " به <b>" + fa(n * rate) + "</b> نیاز داری." + (max > 0 ? " (حداکثر " + fa(max) + ")" : ""))
+                 : ("روب‌تون کافی نیست؛ حداکثر " + fa(max) + " " + TON + " داری.");
+    } else {
+      go.disabled = rkBusy;
+      html = buy ? ("هزینه: <b>" + fa(n * rate) + "</b> 🟡 ← می‌گیری: <b>" + fa(n) + "</b> " + TON)
+                 : ("می‌گیری: <b>" + fa(n * rate) + "</b> 🟡 ← کم می‌شه: <b>" + fa(n) + "</b> " + TON);
+    }
+    html += "<br><span class=\"rk-rate\">هر ۱ " + TON + " = " + fa(rate) + " 🟡 (" + (buy ? "خرید" : "فروش") + ")</span>";
+    info.innerHTML = html; info.className = "rk-conv-info" + (warn ? " warn" : "");
+  }
+  function rkConvSet(n){ n = Math.floor(Number(n) || 0); var max = rkConvMax(); rkConvN = Math.max(1, Math.min(n, Math.max(1, max))); rkConvRender(); }
+  function rkConvTab(dir){ rkConvDir = dir; rkConvN = 1; rkConvRender(); }
+  function rkOpenConfirm(q){
+    var buy = q.direction === "points_to_toon";
+    $("rkCfTitle").innerHTML = buy ? (TON + " تایید خرید روب‌تون") : ("🟡 تایید فروش روب‌تون");
+    $("rkCfBody").innerHTML = buy
+      ? ("<b>" + fa(q.points) + "</b> 🟡 روب‌پوینت از حسابت کم می‌شه و <b>" + fa(q.toons) + "</b> " + TON + " روب‌تون به حسابت میاد.")
+      : ("<b>" + fa(q.toons) + "</b> " + TON + " روب‌تون از حسابت کم می‌شه و <b>" + fa(q.points) + "</b> 🟡 روب‌پوینت به حسابت میاد.");
+    $("rkCfBody").innerHTML += "<div class=\"muted\" style=\"margin-top:6px\">بعد از تبدیل: " + TON + " " + fa(q.balance_after) + " · 🟡 " + fa(q.rob_points_after) + "</div>";
+    $("rkConfirm").classList.add("open");
+    var yes = $("rkCfYes"); yes.disabled = false;
+    yes.onclick = function(){
+      if (rkBusy) return; rkBusy = true; yes.disabled = true;
+      api("/api/rocket/convert", "POST", { direction: q.direction, toons: q.toons, confirm: true }).then(function(d){
+        $("rkConfirm").classList.remove("open");
+        if (rocket) { rocket.balance = d.balance; rocket.rob_points = d.rob_points; }
+        toast(buy ? ("✅ " + fa(q.toons) + " روب‌تون به حسابت اضافه شد.") : ("✅ " + fa(q.points) + " روب‌پوینت به حسابت اضافه شد."), true);
+        try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred("success"); } catch(e){}
+        rkConvN = 1; rkSyncBal();
+      }).catch(function(e){ $("rkConfirm").classList.remove("open"); toast(e.message, false); rkPollOnce(); }).then(function(){ rkBusy = false; rkActKey = ""; rkConvRender(); });
+    };
+  }
+  function rkConvGo(){
+    if (rkBusy || !rocket) return;
+    var n = rkConvN; if (n < 1 || n > rkConvMax()) { rkConvRender(); return; }
+    rkBusy = true; $("rkConvGo").disabled = true;
+    api("/api/rocket/convert", "POST", { direction: rkConvDir === "buy" ? "points_to_toon" : "toon_to_points", toons: n, confirm: false })
+      .then(function(d){ rkBusy = false; rkOpenConfirm(d.quote); })
+      .catch(function(e){ rkBusy = false; toast(e.message, false); rkPollOnce(); })
+      .then(function(){ rkBusy = false; rkConvRender(); });
+  }
+  function loadRocket(){
+    var t0 = Date.now();
+    return api("/api/rocket").then(function(d){
+      rkRid = 0; rkCrashShow = false; rkFrozen = null; rkParts = []; rkActKey = ""; rkPlSig = ""; rkHistSig = ""; rkMe = null;
+      rkApply(d, t0, Date.now());
+      $("rkRule").textContent = d.disabled ? "🛠 کازینو فعلاً غیرفعاله." :
+        d.unlocked ? ("هر پرواز " + fa(d.wait) + " ثانیه فرصت شرط‌بندی داره و بعدش برای همه پرتاب می‌شه. با روب‌پوینت روی یه ضریب هدف شرط می‌بندی؛ اگه موشک قبل از سقوط به هدفت برسه «شرط × ضریب هدف» می‌گیری (مثلاً ۱٬۰۰۰٬۰۰۰ روی ×۲ ← ۲٬۰۰۰٬۰۰۰). شمارنده از −۱ شروع می‌شه و بالا می‌ره. حداقل شرط " +
+          fa(d.min_entry) + " و سقف " + fa(d.max_entry) + " روب‌پوینت؛ ضریب هدف از " + rkFm(d.min_target) + " تا " + rkFm(d.max_mult) + ".") :
+        ("🔒 کازینو از سطح " + fa(d.unlock_level) + " باز می‌شه. (سطح تو: " + fa(d.level) + ")");
+      rkDrawChips();
+      if (!rkAmt) rkSetAmt(Math.min(1000000, d.max_entry)); else rkSetAmt(rkAmt);
+      if (!$("rkTgt").value) rkSetTgt(2);
+      rkSyncBal(); rkStartPoll(); rkKick(); stamp();
+    }).catch(function(e){ if (!e.gate) toast(e.message, false); });
+  }
+  function rkLoadLeaderboard(){ api("/api/rocket/leaderboard").then(function(d){ var box=$("rkLeaderboard"); box.innerHTML=""; (d.items||[]).forEach(function(x,i){ var row=document.createElement("div"); row.className="rk-chip "+rkChipCls(x.best); row.style.cssText="display:flex;justify-content:space-between;width:100%;margin:4px 0"; row.textContent=(i+1)+". "+x.player+" — "+rkFm(x.best)+" · "+fa(x.games)+" بازی"; box.appendChild(row); }); if(!box.children.length) box.textContent="هنوز رکوردی در ۲۴ ساعت گذشته ثبت نشده."; }).catch(function(){ $("rkLeaderboard").textContent="لیدربورد فعلاً در دسترس نیست."; }); }
+  $("rkLeaderboardBtn").onclick=function(){var box=$("rkLeaderboard"),show=box.style.display==="none";box.style.display=show?"flex":"none";if(show)rkLoadLeaderboard();};
+  $("rkMyFlightsBtn").onclick=function(){
+    var box=$("rkMyFlights"), show=box.style.display==="none"; box.style.display=show?"flex":"none";
+    $("rkMyFlightsBtn").textContent=show?"✈️ بستن پروازهای من":"✈️ پروازهای من";
+    if(!show) return; box.textContent="درحال بارگذاری…";
+    api("/api/rocket/mine").then(function(d){
+      box.innerHTML=""; var items=d.items||[];
+      if(!items.length){ box.textContent="هنوز پروازی ثبت نشده."; return; }
+      items.forEach(function(h){ var row=document.createElement("span"); row.className="rk-chip "+rkChipCls(h.status==="cashed"?h.mult:(h.crash||1));
+        row.textContent=(h.status==="cashed"?("برد · "+rkFm(h.target)):("نرسید · هدف "+rkFm(h.target)+(h.crash?" · سقوط "+rkFm(h.crash):"")))+" · شرط "+fa(h.bet)+" 🟡"+(h.status==="cashed"&&h.payout?" ← "+fa(h.payout)+" 🟡":""); box.appendChild(row); });
+    }).catch(function(e){ box.textContent=e.message; });
+  };
+  // تبدیل
+  $("rkTabBuy").onclick = function(){ rkConvTab("buy"); };
+  $("rkTabSell").onclick = function(){ rkConvTab("sell"); };
+  $("rkMinus").onclick = function(){ rkConvSet(rkConvN - 1); };
+  $("rkPlus").onclick = function(){ rkConvSet(rkConvN + 1); };
+  $("rkMax").onclick = function(){ rkConvSet(rkConvMax()); };
+  $("rkConvN").addEventListener("input", function(){ rkConvN = Math.floor(Number($("rkConvN").value) || 0); rkConvRender(); });
+  $("rkConvN").addEventListener("blur", function(){ if (rkConvN < 1) rkConvN = 1; rkConvRender(); });
+  $("rkConvGo").onclick = rkConvGo;
+  $("rkCfNo").onclick = function(){ $("rkConfirm").classList.remove("open"); };
+  $("rkConfirm").addEventListener("click", function(e){ if (e.target === $("rkConfirm")) $("rkConfirm").classList.remove("open"); });
+  // مبلغ و ضریب هدف
+  $("rkAmt").addEventListener("input", function(){ rkAmt = Math.floor(Number($("rkAmt").value) || 0); rkMarkChips(); rkPreview(); });
+  $("rkTgt").addEventListener("input", function(){ rkMarkChips(); rkPreview(); });
+  $("rkHalf").onclick = function(){ if (!rkBusy) rkSetAmt(Math.max(rocket ? rocket.min_entry : 1, Math.floor(rkAmt / 2))); };
+  $("rkDouble").onclick = function(){ if (!rkBusy) rkSetAmt(rkAmt * 2); };
+  $("rkStart").onclick = function(){
+    if (rkBusy || !rocket) return;
+    if (!rkBetOpen()) { toast("⏳ پرواز جاریه؛ بعد از سقوط می‌تونی شرط ببندی.", false); return; }
+    var amt = rkAmt, t = rkTgtVal();
+    if (!amt || amt < rocket.min_entry) { toast("حداقل شرط " + fa(rocket.min_entry) + " روب‌پوینته.", false); return; }
+    if (amt > rocket.max_entry) { toast("سقف شرط " + fa(rocket.max_entry) + " روب‌پوینته.", false); return; }
+    if (amt > (rocket.rob_points || 0)) { toast("روب‌پوینت کافی نداری.", false); return; }
+    if (!rkTgtOk(t)) { toast("ضریب هدف باید بین " + rkFm(rocket.min_target) + " و " + rkFm(rocket.max_mult) + " باشه.", false); return; }
+    rkBusy = true; rkActKey = "";
+    api("/api/rocket/bet", "POST", { amount: amt, target: t }).then(function(r){
+      rocket.balance = r.balance; rocket.rob_points = r.rob_points;
+      rkMe = { bet: r.bet, target: r.target, status: "active", mult: 0, payout: 0 };
+      rkSyncBal(); try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred("medium"); } catch(e){}
+    }).catch(function(e){ toast(e.message, false); }).then(function(){ rkBusy = false; rkActKey = ""; rkPollOnce(); });
+  };
+  $("rkCancel").onclick = function(){
+    if (rkBusy || !rkMe || rkMe.status !== "active") return;
+    rkBusy = true; rkActKey = "";
+    api("/api/rocket/cancel", "POST").then(function(r){
+      rocket.balance = r.balance; rocket.rob_points = r.rob_points; rkMe = null; rkSyncBal(); toast("↩️ شرط لغو شد و ورودی برگشت.", true);
+    }).catch(function(e){ toast(e.message, false); }).then(function(){ rkBusy = false; rkActKey = ""; rkPollOnce(); });
+  };
 
   // ---------- بازی بمب 💥 ----------
   var bomb = null, bombBusy = false, bombMode = "wheel", bombCdAt = 0, bombTick = null;

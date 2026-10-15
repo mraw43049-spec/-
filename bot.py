@@ -2987,7 +2987,7 @@ def _casino_menu_kb(owner_id):
         [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
         [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
         [InlineKeyboardButton("🔴 پلینکو",callback_data=f"plk:open:{owner_id}")],
-    ])
+    ] + ([[InlineKeyboardButton("🚀 موشک",callback_data=f"rkt:open:{owner_id}")]] if _rkt_allowed(owner_id) else []))
 
 
 # ── 🔴 پلینکو (کازینو) ──
@@ -3268,6 +3268,292 @@ async def plinko_play(q, context, owner_id, st, from_result=False):
             except Exception: pass
     finally:
         _PLK_BUSY.discard(uid)
+
+
+# ── 🚀 موشک (کازینو) ──
+# گفتن «کازینو» → دکمه‌ی «🚀 موشک» → مبلغ شرط (روب‌پوینت) + ضریب هدف → پرتاب → نتیجه به‌صورت گیف.
+# شمارنده از −۱ شروع می‌شه؛ اگه موشک قبل از سقوط به ضریب هدف برسه «ورودی × هدف» می‌گیری، وگرنه ورودی می‌سوزه.
+# فعلاً فقط برای یک حساب فعاله (rocket_core.OWNER_ID).
+import rocket_core
+import rocket_gif
+
+rocket_core.ensure_table(_plk_engine)
+RKT_AMOUNTS = [100000, 500000, 1000000, 2000000, 5000000]
+RKT_TARGETS = [1.5, 2, 3, 5, 10]
+_RKT_BUSY = set()
+
+
+def _rkt_allowed(uid):
+    try:
+        return int(uid) == int(rocket_core.OWNER_ID)
+    except Exception:
+        return False
+
+
+def _rkt_state(context, owner_id):
+    st = context.user_data.get('rocket')
+    if not st or st.get('owner_id') != owner_id:
+        st = {'owner_id': owner_id, 'amount': 1000000, 'target': 2.0, 'awaiting': None}
+        context.user_data['rocket'] = st
+    return st
+
+
+def _rkt_fmt_t(t):
+    return f"{float(t):g}"
+
+
+def _rkt_parse_target(raw):
+    s = str(raw or '').strip().lower()
+    s = s.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٫،,', '01234567890123456789...'))
+    s = s.replace('×', '').replace('x', '').replace('ایکس', '').strip()
+    t = round(float(s), 2)
+    return t
+
+
+def _rkt_panel(owner_id, st, points):
+    amount, target = st.get('amount'), st.get('target')
+    chance = ''
+    if amount and target:
+        pay = rocket_core.payout(int(amount), float(target))
+        win_p = min(99.0, (1.0 - rocket_core.EDGE) / float(target) * 100.0)
+        chance = (f"\n🏆 اگه موشک به ×{_rkt_fmt_t(target)} برسه: {pay:,} روب‌پوینت (سود {pay - int(amount):,})"
+                  f"\n🎲 شانس رسیدن ≈ {win_p:.0f}٪")
+    txt = ("🚀 موشک 🦊\n\n"
+           f"💰 موجودی کیف پول: {points:,} روب‌پوینت\n"
+           f"💵 مبلغ شرط: {(f'{int(amount):,} روب‌پوینت') if amount else 'انتخاب نشده ❌'}\n"
+           f"🎯 ضریب هدف: {('×' + _rkt_fmt_t(target)) if target else 'انتخاب نشده ❌'}"
+           f"{chance}\n\n"
+           "موشک از ‎−۱‎ شروع می‌شه و بالا می‌ره. اگه قبل از سقوط به ضریب هدفت برسه، «شرط × ضریب هدف» رو می‌گیری؛ وگرنه شرطت می‌سوزه.\n"
+           f"حداقل شرط {rocket_core.MIN_ENTRY:,} و سقف {rocket_core.MAX_ENTRY:,} روب‌پوینت · ضریب هدف از ×{rocket_core.MIN_TARGET:g} تا ×{rocket_core.MAX_MULT:g}.\n"
+           "⛔️ فقط خودت می‌تونی روی این پنل بزنی.")
+    rows = []
+    row = []
+    for a in RKT_AMOUNTS:
+        row.append(InlineKeyboardButton(("✅ " if amount == a else "") + f"{a:,}", callback_data=f"rkt:amt:{a}:{owner_id}"))
+        if len(row) == 3:
+            rows.append(row); row = []
+    if row: rows.append(row)
+    rows.append([InlineKeyboardButton("✏️ مبلغ دلخواه", callback_data=f"rkt:custom:{owner_id}")])
+    rows.append([InlineKeyboardButton(("✅ " if target is not None and abs(float(target) - t) < 1e-9 else "") + f"×{_rkt_fmt_t(t)}",
+                                      callback_data=f"rkt:tgt:{_rkt_fmt_t(t)}:{owner_id}") for t in RKT_TARGETS])
+    rows.append([InlineKeyboardButton("✏️ ضریب دلخواه", callback_data=f"rkt:tcustom:{owner_id}")])
+    if amount and target:
+        rows.append([InlineKeyboardButton("🚀 پرتاب موشک", callback_data=f"rkt:go:{owner_id}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"rkt:back:{owner_id}")])
+    return txt, InlineKeyboardMarkup(rows)
+
+
+def _rkt_panel_data(user_id, st):
+    session = get_session()
+    try:
+        u = session.get(User, user_id)
+        pts = int(u.fox_points or 0) if u else 0
+    finally:
+        session.close()
+    return _rkt_panel(user_id, st, pts)
+
+
+async def rocket_callback(update, context):
+    q = update.callback_query
+    parts = q.data.split(":")
+    if len(parts) < 3:
+        return
+    try:
+        owner_id = int(parts[-1])
+    except ValueError:
+        return
+    action = parts[1]
+    arg = parts[2] if len(parts) == 4 else None
+    if q.from_user.id != owner_id:
+        await q.answer("⛔ این پنل برای کاربر دیگری است.", show_alert=True); return
+    if not _rkt_allowed(owner_id):
+        await q.answer("🚧 بازی موشک فعلاً فقط برای یک حساب فعاله.", show_alert=True); return
+    if not await require_membership(update, context): return
+    if CASINO_DISABLED:
+        await q.answer("🃏 کازینو روبی فعلاً غیرفعال است و در حال تعمیر می‌باشد 🛠", show_alert=True); return
+    st = _rkt_state(context, owner_id)
+
+    async def show_panel(edit=True):
+        txt, kb = _rkt_panel_data(owner_id, st)
+        if edit:
+            try: await q.message.edit_text(txt, reply_markup=kb)
+            except Exception: pass
+        else:
+            await context.bot.send_message(q.message.chat_id, txt, reply_markup=kb, **_plk_reply_kw(q))
+
+    if action == 'back':
+        context.user_data.pop('rocket', None)
+        await q.answer()
+        try: await q.message.edit_text('🃏 کازینو روبی🦊\n\n❗️ قمار مورد نظر را انتخاب کن:', reply_markup=_casino_menu_kb(owner_id))
+        except Exception: pass
+        return
+    if action == 'open':
+        session = get_session()
+        try:
+            user = get_or_create_user(session, q.from_user)
+            err = plinko_guard(session, user)
+        finally: session.close()
+        if err:
+            await q.answer(err, show_alert=True); return
+        await q.answer()
+        st['awaiting'] = None
+        await show_panel(); return
+    if action == 'amt':
+        try: a = int(arg)
+        except Exception: await q.answer(); return
+        if rocket_core.MIN_ENTRY <= a <= rocket_core.MAX_ENTRY: st['amount'] = a
+        await q.answer(); await show_panel(); return
+    if action == 'tgt':
+        try: t = round(float(arg), 2)
+        except Exception: await q.answer(); return
+        if rocket_core.valid_target(t): st['target'] = t
+        await q.answer(); await show_panel(); return
+    if action in ('custom', 'tcustom'):
+        st['awaiting'] = 'amount' if action == 'custom' else 'target'
+        st['chat_id'] = q.message.chat_id; st['message_id'] = q.message.message_id
+        await q.answer()
+        if action == 'custom':
+            body = ("💰 مبلغ شرط رو بفرست (روب‌پوینت).\n"
+                    f"حداقل: {rocket_core.MIN_ENTRY:,} · سقف: {rocket_core.MAX_ENTRY:,}\n"
+                    "مثال: 1m / 1م / 750k / 2000000")
+        else:
+            body = ("🎯 ضریب هدف رو بفرست.\n"
+                    f"از ×{rocket_core.MIN_TARGET:g} تا ×{rocket_core.MAX_MULT:g} (حداکثر دو رقم اعشار)\n"
+                    "مثال: 2 / 2.5 / 3.75")
+        try:
+            await q.message.edit_text(f"🚀 موشک 🦊\n\n{body}\n\n👇 همین‌جا فقط عدد رو بفرست.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data=f"rkt:cancel:{owner_id}")]]))
+        except Exception: pass
+        return
+    if action == 'cancel':
+        st['awaiting'] = None
+        await q.answer(); await show_panel(); return
+    if action == 'panel':        # از زیر گیف نتیجه: تنظیمات
+        await q.answer()
+        try: await q.message.edit_reply_markup(reply_markup=None)
+        except Exception: pass
+        await show_panel(edit=False); return
+    if action in ('go', 'again'):
+        if action == 'again' and arg and '-' in arg:
+            a_, t_ = arg.split('-', 1)
+            try: st['amount'] = int(a_); st['target'] = round(float(t_), 2)
+            except Exception: pass
+        if not st.get('amount') or not st.get('target'):
+            await q.answer("اول مبلغ شرط و ضریب هدف رو انتخاب کن.", show_alert=True); return
+        await rocket_play(q, context, owner_id, st, from_result=(action == 'again'))
+        return
+
+
+async def handle_rocket_entry_text(update, context):
+    st = context.user_data.get('rocket')
+    if not st or st.get('awaiting') not in ('amount', 'target') or update.effective_user.id != st.get('owner_id'):
+        return False
+    if not _rkt_allowed(update.effective_user.id): return False
+    if not await require_membership(update, context): return True
+    if st['awaiting'] == 'amount':
+        try:
+            amount = parse_amount(update.message.text)
+            if amount <= 0: raise ValueError
+        except Exception:
+            await update.message.reply_text("❌ مبلغ نامعتبره؛ یک عدد بفرست (مثلاً 1m یا 500k).", **reply_kwargs(update.message)); return True
+        if amount < rocket_core.MIN_ENTRY or amount > rocket_core.MAX_ENTRY:
+            await update.message.reply_text(f"❌ مبلغ باید بین {rocket_core.MIN_ENTRY:,} و {rocket_core.MAX_ENTRY:,} روب‌پوینت باشه.", **reply_kwargs(update.message)); return True
+        st['amount'] = amount
+    else:
+        try:
+            t = _rkt_parse_target(update.message.text)
+            if not rocket_core.valid_target(t): raise ValueError
+        except Exception:
+            await update.message.reply_text(f"❌ ضریب نامعتبره؛ عددی بین {rocket_core.MIN_TARGET:g} و {rocket_core.MAX_MULT:g} بفرست (مثلاً 2.5).", **reply_kwargs(update.message)); return True
+        st['target'] = t
+    st['awaiting'] = None
+    txt, kb = _rkt_panel_data(st['owner_id'], st)
+    try:
+        await context.bot.edit_message_text(chat_id=st['chat_id'], message_id=st['message_id'], text=txt, reply_markup=kb)
+    except Exception:
+        await update.message.reply_text(txt, reply_markup=kb)
+    return True
+
+
+async def rocket_play(q, context, owner_id, st, from_result=False):
+    uid = owner_id
+    if uid in _RKT_BUSY:
+        await q.answer("⏳ موشک قبلی هنوز در حال پروازه.", show_alert=True); return
+    _RKT_BUSY.add(uid)
+    try:
+        amount, target = int(st['amount']), round(float(st['target']), 2)
+        session = get_session()
+        try:
+            user = session.query(User).filter(User.telegram_id == uid).with_for_update().first()
+            if not user:
+                await q.answer("اول ربات رو استارت کن.", show_alert=True); return
+            err = plinko_guard(session, user)
+            if err:
+                await q.answer(err, show_alert=True); return
+            if amount < rocket_core.MIN_ENTRY or amount > rocket_core.MAX_ENTRY:
+                await q.answer(f"مبلغ شرط باید بین {rocket_core.MIN_ENTRY:,} و {rocket_core.MAX_ENTRY:,} روب‌پوینت باشه.", show_alert=True); return
+            if not rocket_core.valid_target(target):
+                await q.answer(f"ضریب هدف باید بین ×{rocket_core.MIN_TARGET:g} و ×{rocket_core.MAX_MULT:g} باشه.", show_alert=True); return
+            if int(user.fox_points or 0) < amount:
+                await q.answer(f"❌ روب‌پوینت کافی نداری. موجودی: {int(user.fox_points or 0):,}", show_alert=True); return
+            cp = rocket_core.roll_crash()
+            win = rocket_core.is_win(cp, target)
+            pay = rocket_core.payout(amount, target) if win else 0
+            user.fox_points = int(user.fox_points or 0) - amount + pay
+            rocket_core.record_solo(session, uid, amount, target, cp, 'cashed' if win else 'crashed', target if win else cp, pay)
+            balance = int(user.fox_points or 0)
+            session.commit()
+        finally:
+            session.close()
+        await q.answer("🚀 موشک پرتاب شد!")
+        try:
+            if from_result:
+                await q.message.edit_reply_markup(reply_markup=None)
+            else:
+                await q.message.edit_text("🚀 موشک 🦊\n\n🔥 موشک در حال پروازه…")
+        except Exception:
+            pass
+        shown_cp = min(cp, rocket_core.MAX_MULT)
+        profit = pay - amount
+        if win:
+            head = f"🎉 موشک به ×{_rkt_fmt_t(target)} رسید! {profit:,} روب‌پوینت سود کردی."
+            fly = (f"🚀 موشک تا سقف ×{rocket_core.MAX_MULT:g} رفت." if cp >= rocket_core.MAX_MULT else f"🚀 موشک تا ×{shown_cp:g} پرواز کرد و بعدش سقوط کرد.")
+        else:
+            head = f"💥 موشک تو ×{shown_cp:g} سقوط کرد؛ به ×{_rkt_fmt_t(target)} نرسید و {amount:,} روب‌پوینت سوخت."
+            fly = ""
+        calc = (f"🧮 {amount:,} × {_rkt_fmt_t(target)} = {pay:,} روب‌پوینت\n📈 سود خالص: {profit:,}" if win else f"📉 زیان خالص: {amount:,} روب‌پوینت")
+        caption = (f"🚀 موشک\n\n{head}\n{fly}\n\n{calc}\n💼 موجودی کیف پول: {balance:,} روب‌پوینت").replace("\n\n\n", "\n\n")
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"🔁 دوباره ({amount:,} روی ×{_rkt_fmt_t(target)})", callback_data=f"rkt:again:{amount}-{_rkt_fmt_t(target)}:{owner_id}")],
+            [InlineKeyboardButton("⚙️ تنظیمات", callback_data=f"rkt:panel:{owner_id}"), InlineKeyboardButton("🔙 کازینو", callback_data=f"rkt:back:{owner_id}")],
+        ])
+        chat_id = q.message.chat_id
+        sent = None
+        anim_secs = 4.0
+        wait_caption = f"🚀 موشک\n\n🎯 هدف: ×{_rkt_fmt_t(target)} · شرط: {amount:,} روب‌پوینت\n🔥 موشک در حال پروازه…"
+        try:
+            gif, anim_secs = await asyncio.to_thread(rocket_gif.build_gif, cp, target, amount, pay, rocket_core.MAX_MULT)
+            bio = io.BytesIO(gif); bio.name = "rocket.gif"
+            sent = await context.bot.send_animation(chat_id, animation=bio, caption=wait_caption, width=rocket_gif.OW, height=rocket_gif.OH, **_plk_reply_kw(q))
+        except Exception as exc:
+            logger.warning("rocket gif failed: %s", exc)
+        if sent is None:
+            await context.bot.send_message(chat_id, caption, reply_markup=kb, **_plk_reply_kw(q))
+        else:
+            async def _reveal(msg=sent, wait_s=anim_secs):
+                await asyncio.sleep(wait_s + 0.6)
+                try:
+                    await context.bot.edit_message_caption(chat_id, msg.message_id, caption=caption, reply_markup=kb)
+                except Exception as exc2:
+                    logger.warning("rocket reveal edit failed: %s", exc2)
+                    try: await context.bot.send_message(chat_id, caption, reply_markup=kb, reply_to_message_id=msg.message_id, allow_sending_without_reply=True)
+                    except Exception: pass
+            context.application.create_task(_reveal())
+        if not from_result:
+            try: await q.message.delete()
+            except Exception: pass
+    finally:
+        _RKT_BUSY.discard(uid)
 
 
 def _ruby_games_menu_kb(owner_id):
@@ -14273,6 +14559,7 @@ async def text_router(update, context):
     if await handle_marriage_text(update, context): return
     if await handle_edu_question_text(update, context): return
     if await handle_plinko_entry_text(update, context): return
+    if await handle_rocket_entry_text(update, context): return
     if await handle_casino_entry_text(update, context): return
     if await handle_market_text(update, context): return
     if await handle_city_donate_text(update, context): return
@@ -16048,6 +16335,7 @@ def main():
     app.add_handler(CallbackQueryHandler(factory_button,pattern=r"^factory:"))
     app.add_handler(CallbackQueryHandler(referral_admin_button,pattern=r"^ref:(approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(plinko_callback,pattern=r"^plk:(?:open|mode|amt|custom|cancel|panel|drop|again|back):(?:[A-Za-z0-9_-]+:)?\d+$"))
+    app.add_handler(CallbackQueryHandler(rocket_callback,pattern=r"^rkt:(?:open|amt|tgt|custom|tcustom|cancel|panel|go|again|back):(?:[A-Za-z0-9_.-]+:)?\d+$"))
     app.add_handler(CallbackQueryHandler(ruby_game_select,pattern=r"^rg:(xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+$"))
     app.add_handler(CallbackQueryHandler(casino_setup_callback,pattern=r"^csetup:(?:amount|cancelamount|count|cancelcount|back):(?:xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+$"))
     app.add_handler(CallbackQueryHandler(casino_setup_callback,pattern=r"^csetup:setcount:(?:xo|rps|darts|basketball|bowling|cz_wheel|cz_dice|cz_rabbit|cz_pairs|cz_bomb):\d+:\d+$"))
