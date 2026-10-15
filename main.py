@@ -1446,6 +1446,7 @@ class RocketStart(BaseModel):
 
 @app.post("/api/rocket/bet")
 def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)):
+    raise HTTPException(status_code=410, detail="موشک در این نسخه فقط چالش تمرینی است و شرط‌بندی غیرفعال است.")
     _rocket_access_guard(tg_user)
     botmod = load_botmod()
     session = get_session()
@@ -1493,6 +1494,7 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
 
 @app.post("/api/rocket/cancel")
 def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
+    raise HTTPException(status_code=410, detail="موشک در این نسخه فقط چالش تمرینی است و شرط‌بندی غیرفعال است.")
     """تا قبل از پرتاب، شرط لغو و ورودی کامل برگردونده می‌شه."""
     _rocket_access_guard(tg_user)
     session = get_session()
@@ -1518,6 +1520,7 @@ def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
 
 @app.post("/api/rocket/cashout")
 def rocket_cashout(tg_user: dict = Depends(current_telegram_user)):
+    raise HTTPException(status_code=410, detail="موشک در این نسخه فقط چالش تمرینی است و شرط‌بندی غیرفعال است.")
     _rocket_access_guard(tg_user)
     session = get_session()
     try:
