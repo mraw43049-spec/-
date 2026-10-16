@@ -7,7 +7,7 @@
 - مینی‌اپ: پروازهای همگانیِ خودکار؛ هر پرواز ۳۰ ثانیه فرصت شرط‌بندی داره، بعد برای همه پرتاب می‌شه و تو یه ضریب تصادفی سقوط می‌کنه.
   ۳۰ ثانیه بعد از سقوط پرواز بعدی شروع می‌شه. ربات: هر شرط یه پرواز جداست، نتیجه به‌صورت گیف نمایش داده می‌شه و ۳۰ ثانیه بعد از پایان گیف می‌شه دوباره پرتاب کرد.
 - نقطه‌ی سقوط سمت سرور با random امن تعیین و تا پایان پرواز برای مینی‌اپ فرستاده نمی‌شه.
-- P(رسیدن به ×x) = (1 − EDGE) / x ؛ یعنی بازگشت به بازیکن ≈ ۹۴٪ برای هر ضریب هدف.
+- P(رسیدن به ×x) = (1 − EDGE) / x ؛ یعنی بازگشت به بازیکن ≈ ۹۶٪ برای هر ضریب هدف.
 - همه‌ی مقدارها با متغیرهای محیطی (Railway) قابل تنظیمه.
 """
 import math
@@ -23,10 +23,10 @@ WAIT = float(os.environ.get("ROCKET_WAIT", "30") or 30)                        #
 COOLDOWN = float(os.environ.get("ROCKET_COOLDOWN", "30") or 30)                # ثانیه؛ داخل ربات: ۳۰ ثانیه بعد از پایان گیف می‌شه دوباره پرتاب کرد
 START = float(os.environ.get("ROCKET_START", "-1.5") or -1.5)                  # شمارنده از اینجا شروع می‌شه (−۱٫۵)
 RISE = float(os.environ.get("ROCKET_RISE", "3") or 3)                          # ثانیه؛ بالا اومدن شمارنده از −۱٫۵ تا ۱ (بلند شدن از سکو)
-EDGE = float(os.environ.get("ROCKET_EDGE", "0.06") or 0.04)                    # سهم خانه؛ بازگشت به بازیکن ≈ ۹۴٪
-MAX_MULT = float(os.environ.get("ROCKET_MAX_MULT", "50") or 10)                 # سقف ضریب ×۱۰
+EDGE = float(os.environ.get("ROCKET_EDGE", "0.06") or 0.06)                    # سهم خانه؛ بازگشت به بازیکن ≈ ۹۶٪
+MAX_MULT = float(os.environ.get("ROCKET_MAX_MULT", "50") or 50)                 # سقف ضریب ×۵۰
 MIN_TARGET = float(os.environ.get("ROCKET_MIN_TARGET", "1.2") or 1.2)          # کمترین ضریب هدف: ×۱٫۲ (کمتر مجاز نیست)
-GROWTH = float(os.environ.get("ROCKET_GROWTH", "0.09") or 0.08)                # سرعت رشد ضریب بعد از ۱٫۰۰؛ ×۲ ≈ ۸٫۷ ثانیه، ×۱۰ ≈ ۲۹ ثانیه
+GROWTH = float(os.environ.get("ROCKET_GROWTH", "0.08") or 0.08)                # سرعت رشد ضریب بعد از ۱٫۰۰؛ ×۲ ≈ ۸٫۷ ثانیه، ×۱۰ ≈ ۲۹ ثانیه
 BUY_RATE = int(os.environ.get("ROCKET_BUY_RATE", "1500000") or 1500000)        # هر ۱ روب‌تون = چند روب‌پوینت (خرید روب‌تون)
 SELL_RATE = int(os.environ.get("ROCKET_SELL_RATE", "1000000") or 1000000)      # فروش ۱ روب‌تون = چند روب‌پوینت
 OWNER_ID = int(os.environ.get("ROCKET_OWNER_ID", "7287316708") or 7287316708)  # دیگه محدودیتی نیست؛ بازی برای همه بازه (فقط برای سازگاری نگه داشته شده)
