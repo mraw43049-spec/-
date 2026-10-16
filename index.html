@@ -712,12 +712,13 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   <div id="rocketCard" class="card" style="display:none">
     <div class="section-title">🚀 موشک <span class="rk-live">● زنده</span></div>
     <div class="rk-top"><span>🟡 موجودی: <b id="rkBal">—</b> روب‌پوینت</span><span id="rkRound" class="muted"></span></div>
+    <div id="rkMultiplierLine" class="rk-chips auto" aria-label="ضرایب موشک" style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:6px;margin:8px 0"><span>×۱٫۲</span><span>×۱٫۵</span><span>×۲</span><span>×۳</span><span>×۵</span><span>×۱۰</span><span>×۲۰</span><span>×۳۰</span><span>×۵۰</span></div>
     <canvas id="rkCanvas" class="rk-canvas" width="360" height="295" aria-label="موشک در حال پرواز"></canvas>
     <div id="rkRes" class="rk-res"></div>
     <div class="rk-hist" id="rkHist"></div>
     <div id="rkJoined" class="rk-joined" style="display:none">
       <span id="rkJoinedTxt"></span>
-      <button id="rkCancel" class="rk-small" type="button">↩️ لغو شرط</button>
+      <button id="rkCancel" class="rk-small" type="button" style="display:none" disabled>لغو شرط</button>
     </div>
     <div id="rkSetup">
       <div class="rk-lbl">🟡 مبلغ شرط (روب‌پوینت)</div>
@@ -740,7 +741,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       <div id="rkPlayers"></div>
     </div>
     <div id="rkExtra">
-      <div class="rk-conv" id="rkConv">
+      <div class="rk-conv" id="rkConv" style="display:none">
         <div class="rk-seg">
           <button id="rkTabBuy" class="on" type="button">🟡 ⟶ <svg class="ton"><use href="#tonSym"/></svg> خرید</button>
           <button id="rkTabSell" type="button"><svg class="ton"><use href="#tonSym"/></svg> ⟶ 🟡 فروش</button>
@@ -756,13 +757,13 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
         <button id="rkConvGo" class="rk-go" type="button">🔁 تبدیل</button>
       </div>
       <div class="rk-balances" id="rkBalancesRow"><span><svg class="ton"><use href="#tonSym"/></svg> روب‌تون <b id="rkBalInline">—</b></span><span>🟡 روب‌پوینت <b id="rkPoints">—</b></span></div>
-      <button id="rkLeaderboardBtn" class="rk-small rk-flights-btn" type="button">🏆 لیدربورد ۲۴ ساعته</button>
+      <button id="rkLeaderboardBtn" class="rk-small rk-flights-btn" type="button" style="display:none">🏆 لیدربورد ۲۴ ساعته</button>
       <div id="rkLeaderboard" class="rk-hist" style="display:none">درحال بارگذاری…</div>
-      <button id="rkMyFlightsBtn" class="rk-small rk-flights-btn" type="button">✈️ پروازهای من</button>
+      <button id="rkMyFlightsBtn" class="rk-small rk-flights-btn" type="button" style="display:none">✈️ پروازهای من</button>
       <div id="rkMyFlights" class="rk-hist" style="display:none"></div>
     </div>
     <div class="muted" id="rkRule" style="margin-top:10px;line-height:1.9"></div>
-    <div class="muted" style="margin-top:6px;line-height:1.9">موشک از −۱ شروع می‌کنه و بالا می‌ره ولی تو یه لحظه‌ی تصادفی سقوط می‌کنه. اگه به ضریب هدفت برسه برنده‌ای، وگرنه شرطت می‌سوزه. نقطه‌ی سقوط از اول مشخصه و کسی (حتی ما) نمی‌تونه عوضش کنه.</div>
+
   </div>
   <div id="rkConfirm" class="modal">
     <div class="sheet">
@@ -1957,7 +1958,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     mx.className = "mx"; mx.onclick = function(){ if (rkBusy) return; var v = Math.min(rocket.rob_points || 0, rocket.max_entry); if (v >= rocket.min_entry) rkSetAmt(v); else toast("روب‌پوینت کافی نداری.", false); };
     chips.appendChild(mx);
     var ac = $("rkTgtChips"); ac.innerHTML = ""; ac.className = "rk-chips auto";
-    [1.2, 1.5, 2, 5, 10].forEach(function(a){
+    [1.2, 1.5, 2, 3, 5, 10, 20, 30, 50].forEach(function(a){
       if (a < rocket.min_target || a > rocket.max_mult) return;
       var b = document.createElement("button"); b.type = "button"; b.textContent = rkFm(a); b.setAttribute("data-a", a); b.onclick = function(){ rkSetTgt(a); }; ac.appendChild(b);
     });
@@ -2031,7 +2032,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       rkRid = 0; rkCrashShow = false; rkFrozen = null; rkParts = []; rkActKey = ""; rkPlSig = ""; rkHistSig = ""; rkMe = null;
       rkApply(d, t0, Date.now());
       $("rkRule").textContent = d.disabled ? "🛠 کازینو فعلاً غیرفعاله." :
-        d.unlocked ? ("هر پرواز " + fa(d.wait) + " ثانیه فرصت شرط‌بندی داره و بعدش برای همه پرتاب می‌شه. با روب‌پوینت روی یه ضریب هدف شرط می‌بندی؛ اگه موشک قبل از سقوط به هدفت برسه «شرط × ضریب هدف» می‌گیری (مثلاً ۱٬۰۰۰٬۰۰۰ روی ×۲ ← ۲٬۰۰۰٬۰۰۰). شمارنده از −۱٫۵ شروع می‌شه و تا ×۱۰ بالا می‌ره؛ بعد از پایان هر پرواز ۳۰ ثانیه بعد پرواز بعدی شروع می‌شه. حداقل شرط " +
+        d.unlocked ? ("هر پرواز " + fa(d.wait) + " ثانیه فرصت شرط‌بندی داره و بعدش برای همه پرتاب می‌شه. با روب‌پوینت روی یه ضریب هدف شرط می‌بندی؛ اگه موشک قبل از سقوط به هدفت برسه «شرط × ضریب هدف» می‌گیری (مثلاً ۱٬۰۰۰٬۰۰۰ روی ×۲ ← ۲٬۰۰۰٬۰۰۰). شمارنده از −۱٫۵ شروع می‌شه و تا ×۵۰ بالا می‌ره؛ بعد از پایان هر پرواز ۳۰ ثانیه بعد پرواز بعدی شروع می‌شه. حداقل شرط " +
           fa(d.min_entry) + " و سقف " + fa(d.max_entry) + " روب‌پوینت؛ ضریب هدف از " + rkFm(d.min_target) + " تا " + rkFm(d.max_mult) + ".") :
         ("🔒 کازینو از سطح " + fa(d.unlock_level) + " باز می‌شه. (سطح تو: " + fa(d.level) + ")");
       rkDrawChips();
@@ -2084,13 +2085,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
       rkSyncBal(); try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred("medium"); } catch(e){}
     }).catch(function(e){ toast(e.message, false); }).then(function(){ rkBusy = false; rkActKey = ""; rkPollOnce(); });
   };
-  $("rkCancel").onclick = function(){
-    if (rkBusy || !rkMe || rkMe.status !== "active") return;
-    rkBusy = true; rkActKey = "";
-    api("/api/rocket/cancel", "POST").then(function(r){
-      rocket.balance = r.balance; rocket.rob_points = r.rob_points; rkMe = null; rkSyncBal(); toast("↩️ شرط لغو شد و ورودی برگشت.", true);
-    }).catch(function(e){ toast(e.message, false); }).then(function(){ rkBusy = false; rkActKey = ""; rkPollOnce(); });
-  };
+  $("rkCancel").onclick = function(){ return; };
 
   // ---------- بازی بمب 💥 ----------
   var bomb = null, bombBusy = false, bombMode = "wheel", bombCdAt = 0, bombTick = null;
@@ -2728,3 +2723,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 </script>
 </body>
 </html>
+
+<script>
+(function(){var r=document.getElementById('rocketCard');if(!r)return;r.addEventListener('contextmenu',function(e){if(!/INPUT|TEXTAREA/.test(e.target.tagName))e.preventDefault();});r.addEventListener('copy',function(e){if(!/INPUT|TEXTAREA/.test(e.target.tagName))e.preventDefault();});r.addEventListener('selectstart',function(e){if(!/INPUT|TEXTAREA/.test(e.target.tagName))e.preventDefault();});})();
+</script>
