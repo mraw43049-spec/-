@@ -29,7 +29,7 @@ MIN_TARGET = float(os.environ.get("ROCKET_MIN_TARGET", "1.2") or 1.2)          #
 GROWTH = float(os.environ.get("ROCKET_GROWTH", "0.08") or 0.08)                # سرعت رشد ضریب بعد از ۱٫۰۰؛ ×۲ ≈ ۸٫۷ ثانیه، ×۱۰ ≈ ۲۹ ثانیه
 BUY_RATE = int(os.environ.get("ROCKET_BUY_RATE", "1500000") or 1500000)        # هر ۱ روب‌تون = چند روب‌پوینت (خرید روب‌تون)
 SELL_RATE = int(os.environ.get("ROCKET_SELL_RATE", "1000000") or 1000000)      # فروش ۱ روب‌تون = چند روب‌پوینت
-OWNER_ID = int(os.environ.get("ROCKET_OWNER_ID", "7287316708") or 7287316708)  # دیگه محدودیتی نیست؛ بازی برای همه بازه (فقط برای سازگاری نگه داشته شده)
+OWNER_ID = int(os.environ.get("ROCKET_OWNER_ID", "7287316708") or 7287316708)  # فقط این حساب اجازه‌ی بازی موشک دارد
 
 _rng = random.SystemRandom()
 

@@ -2113,7 +2113,19 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   $("segWheel").onclick = function(){ setBombMode("wheel"); };
   $("segBomb").onclick = function(){ setBombMode("bomb"); };
   $("segPlinko").onclick = function(){ setBombMode("plinko"); };
-  $("segRocket").onclick = function(){ setBombMode("rocket"); };
+  // رابط موشک فقط برای حساب مجاز نمایش داده شود؛ API نیز همین محدودیت را سمت سرور بررسی می‌کند.
+  try {
+    var rocketUid = Number((tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) || 0);
+    if (rocketUid !== 7287316708) {
+      var rocketSeg = $("segRocket"); if (rocketSeg) rocketSeg.style.display = "none";
+      var rocketCardEl = $("rocketCard"); if (rocketCardEl) rocketCardEl.style.display = "none";
+    }
+  } catch (_) {}
+  $("segRocket").onclick = function(){
+    var rocketUid = Number((tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) || 0);
+    if (rocketUid !== 7287316708) { toast("🚀 بازی موشک فقط برای حساب مجاز فعال است.", false); return; }
+    setBombMode("rocket");
+  };
   function drawBombCd(){
     if (!bomb || bombMode !== "bomb") return;
     var l = bombCd(), el = $("bCd");
