@@ -1770,7 +1770,7 @@ GUIDE_TOPICS = [
      "قمارهای روبی با میز و شرط روب‌پوینت.\n\n"
      "📌 دستور:\n<code>کازینو روبی</code>\n<code>کازینو</code>\n\n"
      "┘─ از سطح ۵ فعاله.\n"
-     "┘─ 🎰 اسلات: ۱ تا ۳ نفر\n┘─ 🎲 تاس: ۱ تا ۲ نفر (تکی فرد/زوج با ضریب ۱٫۹)\n┘─ 🐇 خرگوش خور: ۲ نفر\n┘─ 🃏 بازی دوتایی‌ها: ۲ نفر\n┘─ 💥 بمب: ۱ نفر (حداقل ورودی ۵٬۰۰۰)\n┘─ 🔴 پلینکو: نتیجه به‌صورت گیف\n┘─ 🚀 موشک: ضریب تا ×۵۰، نتیجه به‌صورت گیف\n"
+     "┘─ 🎰 اسلات: ۱ تا ۳ نفر\n┘─ 🎲 تاس: ۱ تا ۲ نفر (تکی فرد/زوج با ضریب ۱٫۹)\n┘─ 🐇 خرگوش خور: ۲ نفر\n┘─ 🃏 بازی دوتایی‌ها: ۲ نفر\n┘─ 💥 بمب: ۱ نفر (حداقل ورودی ۵٬۰۰۰)\n┘─ 🔴 پلینکو: مبلغ‌های ۱٬۰۰۰ / ۵٬۰۰۰ / ۲۵٬۰۰۰ / ۱۰۰٬۰۰۰ / ۵۰۰٬۰۰۰\n"
      "┘─ حداقل ورودی ۵۰۰ و حداکثر ۵٬۰۰۰٬۰۰۰ روب‌پوینته.\n"
      "┘─ بین دو بازی ۴ دقیقه صبر لازمه.\n"
      "┘─ اگه کازینو در حال تعمیر باشه، پیام «غیرفعال» می‌بینی."),
@@ -2387,27 +2387,19 @@ async def casino_disabled_gate(update, context):
 
 async def casino_command(update, context):
     if not await require_membership(update, context): return
-    if CASINO_DISABLED:
+    owner_id=update.effective_user.id
+    rocket_owner = _rkt_allowed(owner_id)
+    if CASINO_DISABLED and not rocket_owner:
         await update.message.reply_text(CASINO_DISABLED_TEXT, **reply_kwargs(update.message)); return
     session=get_session()
     try:
         user=get_or_create_user(session,update.effective_user)
-        if await guard_fox_sickness(update, context, session, user): return
-        if user.level<CASINO_UNLOCK_LEVEL:
+        if not rocket_owner and await guard_fox_sickness(update, context, session, user): return
+        if user.level<CASINO_UNLOCK_LEVEL and not rocket_owner:
             await update.message.reply_text(f"🔒 کازینو روبی از سطح {CASINO_UNLOCK_LEVEL} باز می‌شود.\n⭐ سطح فعلی تو: {user.level}",**reply_kwargs(update.message)); return
     finally: session.close()
-    owner_id=update.effective_user.id
-    kb=InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎰 اسلات",callback_data=f"rg:cz_wheel:{owner_id}")],
-        [InlineKeyboardButton("🎲 تاس",callback_data=f"rg:cz_dice:{owner_id}")],
-        [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
-        [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
-        [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
-        [InlineKeyboardButton("🔴 پلینکو",callback_data=f"plk:open:{owner_id}")],
-    ])
-    if _rkt_allowed(owner_id):
-        kb.inline_keyboard.append([InlineKeyboardButton("🚀 موشک", callback_data=f"rkt:open:{owner_id}")])
-    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۱۲ خانه · ۳ بمب رندوم\n┘─ هر خانه‌ی سالم: ۲۵٪ اضافه روی مبلغ ورودی (تجمعی)؛ با بمب، جایزه صفر\n\n🔴 پلینکو\n┘─ یک‌نفره · ۱۴ ردیف · حالت آرام و وحشی · نتیجه به‌صورت گیف\n┘─ ضریب تا ۲۰ برابر مبلغ شرط!\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    kb=_casino_menu_kb(owner_id)
+    await update.message.reply_text(f"🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۱۲ خانه · ۳ بمب رندوم\n┘─ هر خانه‌ی سالم: ۲۵٪ اضافه روی مبلغ ورودی (تجمعی)؛ با بمب، جایزه صفر\n\n🔴 پلینکو\n┘─ یک‌نفره · ۱۴ ردیف · حالت آرام و وحشی · نتیجه به‌صورت گیف\n┘─ ضریب تا ۲۰ برابر مبلغ شرط!\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
@@ -2982,17 +2974,14 @@ async def casino_game_select(q, context, key, owner_id):
     except Exception: pass
 
 def _casino_menu_kb(owner_id):
-    rows = [
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎰 اسلات",callback_data=f"rg:cz_wheel:{owner_id}")],
         [InlineKeyboardButton("🎲 تاس",callback_data=f"rg:cz_dice:{owner_id}")],
         [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
         [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
         [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
         [InlineKeyboardButton("🔴 پلینکو",callback_data=f"plk:open:{owner_id}")],
-    ]
-    if _rkt_allowed(owner_id):
-        rows.append([InlineKeyboardButton("🚀 موشک",callback_data=f"rkt:open:{owner_id}")])
-    return InlineKeyboardMarkup(rows)
+    ] + ([[InlineKeyboardButton("🚀 موشک",callback_data=f"rkt:open:{owner_id}")]] if _rkt_allowed(owner_id) else []))
 
 
 # ── 🔴 پلینکو (کازینو) ──
@@ -3284,16 +3273,16 @@ import rocket_core
 import rocket_gif
 
 rocket_core.ensure_table(_plk_engine)
-RKT_AMOUNTS = [100000, 150000, 1000000, 2000000, 5000000]
-RKT_TARGETS = [1.5, 2.0, 2.5, 3.0, 5.0, 10.0, 25.0, 50.0]
+RKT_AMOUNTS = [100000, 500000, 1000000, 2000000, 5000000]
+RKT_TARGETS = [1.2, 1.5, 2, 5, 10]
 _RKT_BUSY = set()
 _RKT_NEXT = {}   # uid -> زمانی که دوباره می‌تونه پرتاب کنه (۳۰ ثانیه بعد از پایان گیف)
 
 
+ROCKET_ALLOWED_USER_ID = 7287316708
 def _rkt_allowed(uid):
-    # محدودیت سمت سرور؛ فقط حساب مشخص‌شده می‌تواند در ربات موشک بازی کند.
     try:
-        return int(uid) == int(getattr(rocket_core, "OWNER_ID", 7287316708))
+        return int(uid) == ROCKET_ALLOWED_USER_ID
     except (TypeError, ValueError):
         return False
 
@@ -3331,7 +3320,7 @@ def _rkt_panel(owner_id, st, points):
            f"💵 مبلغ شرط: {(f'{int(amount):,} روب‌پوینت') if amount else 'انتخاب نشده ❌'}\n"
            f"🎯 ضریب هدف: {('×' + _rkt_fmt_t(target)) if target else 'انتخاب نشده ❌'}"
            f"{chance}\n\n"
-           "موشک ممکنه حتی در ضریب پایین یا نزدیک ×۱٫۰۰ هم سقوط کنه و شرط از دست بره؛ سقف ضریب ×۵۰ است. اگه قبل از سقوط به ضریب هدفت برسه، «شرط × ضریب هدف» رو می‌گیری؛ وگرنه شرطت می‌سوزه.\n"
+           "موشک از ‎−۱٫۵‎ شروع می‌شه و تا ×۱۰ بالا می‌ره. اگه قبل از سقوط به ضریب هدفت برسه، «شرط × ضریب هدف» رو می‌گیری؛ وگرنه شرطت می‌سوزه.\n"
            f"حداقل شرط {rocket_core.MIN_ENTRY:,} و سقف {rocket_core.MAX_ENTRY:,} روب‌پوینت · ضریب هدف از ×{rocket_core.MIN_TARGET:g} (کمتر از این مجاز نیست) تا ×{rocket_core.MAX_MULT:g}.\n"
            f"⏱ هر {rocket_core.COOLDOWN:g} ثانیه بعد از پایان پرواز می‌تونی دوباره پرتاب کنی.\n"
            "⛔️ فقط خودت می‌تونی روی این پنل بزنی.")
@@ -3506,16 +3495,12 @@ async def rocket_play(q, context, owner_id, st, from_result=False):
                 await q.answer(f"مبلغ شرط باید بین {rocket_core.MIN_ENTRY:,} و {rocket_core.MAX_ENTRY:,} روب‌پوینت باشه.", show_alert=True); return
             if not rocket_core.valid_target(target):
                 await q.answer(f"ضریب هدف باید بین ×{rocket_core.MIN_TARGET:g} و ×{rocket_core.MAX_MULT:g} باشه.", show_alert=True); return
-            if abs(target - 1.5) < 1e-9 and rocket_core.daily_15_used(session, uid):
-                await q.answer("⛔️ ضریب ×۱٫۵ را امروز استفاده کردی؛ فردا دوباره در دسترسه.", show_alert=True); return
             if int(user.fox_points or 0) < amount:
                 await q.answer(f"❌ روب‌پوینت کافی نداری. موجودی: {int(user.fox_points or 0):,}", show_alert=True); return
             cp = rocket_core.roll_crash()
             win = rocket_core.is_win(cp, target)
             pay = rocket_core.payout(amount, target) if win else 0
             user.fox_points = int(user.fox_points or 0) - amount + pay
-            if abs(target - 1.5) < 1e-9:
-                rocket_core.daily_15_mark(session, uid)
             rocket_core.record_solo(session, uid, amount, target, cp, 'cashed' if win else 'crashed', target if win else cp, pay)
             balance = int(user.fox_points or 0)
             session.commit()

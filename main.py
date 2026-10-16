@@ -1367,15 +1367,15 @@ def _rocket_user_locked(session, tg_user):
     return user
 
 
+ROCKET_ALLOWED_USER_ID = 7287316708
 def _rocket_access_guard(tg_user):
-    """موشک در ربات و مینی‌اپ فقط برای شناسه‌ی مجاز فعال است."""
-    allowed_id = int(getattr(_rk, "OWNER_ID", 7287316708))
+    """موشک فقط برای حساب مجاز در ربات و مینی‌اپ قابل استفاده است."""
     try:
-        uid = int(tg_user.get("id", 0))
+        allowed = int(tg_user.get("id", 0)) == ROCKET_ALLOWED_USER_ID
     except (TypeError, ValueError):
-        uid = 0
-    if uid != allowed_id:
-        raise HTTPException(status_code=403, detail="🚀 بازی موشک فعلاً فقط برای حساب مجاز فعال است.")
+        allowed = False
+    if not allowed:
+        raise HTTPException(status_code=403, detail="🚀 بازی موشک برای این حساب فعال نیست.")
     return True
 
 

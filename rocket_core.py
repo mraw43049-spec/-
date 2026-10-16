@@ -23,13 +23,13 @@ WAIT = float(os.environ.get("ROCKET_WAIT", "30") or 30)                        #
 COOLDOWN = float(os.environ.get("ROCKET_COOLDOWN", "30") or 30)                # ثانیه؛ داخل ربات: ۳۰ ثانیه بعد از پایان گیف می‌شه دوباره پرتاب کرد
 START = float(os.environ.get("ROCKET_START", "-1.5") or -1.5)                  # شمارنده از اینجا شروع می‌شه (−۱٫۵)
 RISE = float(os.environ.get("ROCKET_RISE", "3") or 3)                          # ثانیه؛ بالا اومدن شمارنده از −۱٫۵ تا ۱ (بلند شدن از سکو)
-EDGE = float(os.environ.get("ROCKET_EDGE", "0.12") or 0.12)                    # سهم خانه؛ بازگشت به بازیکن ≈ ۹۶٪
-MAX_MULT = float(os.environ.get("ROCKET_MAX_MULT", "50") or 50)                 # سقف ضریب ×۱۰
+EDGE = float(os.environ.get("ROCKET_EDGE", "0.04") or 0.04)                    # سهم خانه؛ بازگشت به بازیکن ≈ ۹۶٪
+MAX_MULT = float(os.environ.get("ROCKET_MAX_MULT", "10") or 10)                 # سقف ضریب ×۱۰
 MIN_TARGET = float(os.environ.get("ROCKET_MIN_TARGET", "1.2") or 1.2)          # کمترین ضریب هدف: ×۱٫۲ (کمتر مجاز نیست)
 GROWTH = float(os.environ.get("ROCKET_GROWTH", "0.08") or 0.08)                # سرعت رشد ضریب بعد از ۱٫۰۰؛ ×۲ ≈ ۸٫۷ ثانیه، ×۱۰ ≈ ۲۹ ثانیه
 BUY_RATE = int(os.environ.get("ROCKET_BUY_RATE", "1500000") or 1500000)        # هر ۱ روب‌تون = چند روب‌پوینت (خرید روب‌تون)
 SELL_RATE = int(os.environ.get("ROCKET_SELL_RATE", "1000000") or 1000000)      # فروش ۱ روب‌تون = چند روب‌پوینت
-OWNER_ID = int(os.environ.get("ROCKET_OWNER_ID", "7287316708") or 7287316708)  # فقط این حساب اجازه‌ی بازی موشک دارد
+OWNER_ID = int(os.environ.get("ROCKET_OWNER_ID", "7287316708") or 7287316708)  # دیگه محدودیتی نیست؛ بازی برای همه بازه (فقط برای سازگاری نگه داشته شده)
 
 _rng = random.SystemRandom()
 
@@ -118,7 +118,6 @@ def ensure_table(engine):
                 "payout BIGINT NOT NULL DEFAULT 0, created_at DOUBLE PRECISION NOT NULL, ended_at DOUBLE PRECISION)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS rocket_bets_user_idx ON rocket_bets (user_id, status)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS rocket_bets_round_idx ON rocket_bets (round_id)"))
-            conn.execute(text("CREATE TABLE IF NOT EXISTS rocket_daily_15 (user_id BIGINT NOT NULL, play_day VARCHAR(10) NOT NULL, PRIMARY KEY (user_id, play_day))"))
             # فقط یک شرط فعال برای هر کاربر
             conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS rocket_bets_one_active ON rocket_bets (user_id) WHERE status = 'active'"))
     except Exception as exc:  # noqa: BLE001
@@ -132,16 +131,6 @@ def ensure_table(engine):
                 conn.execute(text("UPDATE rocket_games SET status='cancelled' WHERE id=:i"), {"i": int(r[0])})
     except Exception:  # noqa: BLE001
         pass   # جدول قدیمی وجود نداره؛ مشکلی نیست
-
-
-def daily_15_used(session, uid: int) -> bool:
-    day = time.strftime("%Y-%m-%d", time.gmtime())
-    return session.execute(text("SELECT 1 FROM rocket_daily_15 WHERE user_id=:u AND play_day=:d"), {"u": int(uid), "d": day}).first() is not None
-
-
-def daily_15_mark(session, uid: int):
-    day = time.strftime("%Y-%m-%d", time.gmtime())
-    session.execute(text("INSERT INTO rocket_daily_15 (user_id, play_day) VALUES (:u, :d) ON CONFLICT (user_id, play_day) DO NOTHING"), {"u": int(uid), "d": day})
 
 
 def latest_round(session):

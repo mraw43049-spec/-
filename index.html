@@ -1907,7 +1907,13 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     if (document.hidden) return;
     if (rkPollBusy) { rkPollSoon = true; return; }
     rkPollBusy = true; var t0 = Date.now();
-    api("/api/rocket").then(function(d){ rkApply(d, t0, Date.now()); }).catch(function(){}).then(function(){
+    api("/api/rocket").then(function(d){ var rb = $("segRocket"); if (rb) rb.style.display = ""; rkApply(d, t0, Date.now()); }).catch(function(err){
+      if (err && (err.status === 403 || String(err.message || "").includes("403") || String(err.message || "").includes("این حساب فعال نیست"))) {
+        var rb = $("segRocket"); if (rb) rb.style.display = "none";
+        var rc = $("rocketCard"); if (rc) rc.style.display = "none";
+        if (typeof showWheelSection === "function") showWheelSection();
+      }
+    }).then(function(){
       rkPollBusy = false; if (rkPollSoon) { rkPollSoon = false; rkPollOnce(); }
     });
   }
@@ -2113,19 +2119,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   $("segWheel").onclick = function(){ setBombMode("wheel"); };
   $("segBomb").onclick = function(){ setBombMode("bomb"); };
   $("segPlinko").onclick = function(){ setBombMode("plinko"); };
-  // رابط موشک فقط برای حساب مجاز نمایش داده شود؛ API نیز همین محدودیت را سمت سرور بررسی می‌کند.
-  try {
-    var rocketUid = Number((tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) || 0);
-    if (rocketUid !== 7287316708) {
-      var rocketSeg = $("segRocket"); if (rocketSeg) rocketSeg.style.display = "none";
-      var rocketCardEl = $("rocketCard"); if (rocketCardEl) rocketCardEl.style.display = "none";
-    }
-  } catch (_) {}
-  $("segRocket").onclick = function(){
-    var rocketUid = Number((tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) || 0);
-    if (rocketUid !== 7287316708) { toast("🚀 بازی موشک فقط برای حساب مجاز فعال است.", false); return; }
-    setBombMode("rocket");
-  };
+  $("segRocket").onclick = function(){ setBombMode("rocket"); };
   function drawBombCd(){
     if (!bomb || bombMode !== "bomb") return;
     var l = bombCd(), el = $("bCd");
