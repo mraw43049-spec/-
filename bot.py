@@ -2403,9 +2403,10 @@ async def casino_command(update, context):
         [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
         [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
         [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
-        [InlineKeyboardButton("🔴 پلینکو",callback_data=f"plk:open:{owner_id}")],
+        [InlineKeyboardButton("🔴 پلینکو (گیف)",callback_data=f"plk:open:{owner_id}")],
+        [InlineKeyboardButton("🚀 موشک (گیف)",callback_data=f"rkt:open:{owner_id}")],
     ])
-    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۱۲ خانه · ۳ بمب رندوم\n┘─ هر خانه‌ی سالم: ۲۵٪ اضافه روی مبلغ ورودی (تجمعی)؛ با بمب، جایزه صفر\n\n🔴 پلینکو\n┘─ یک‌نفره · ۱۴ ردیف · حالت آرام و وحشی · نتیجه به‌صورت گیف\n┘─ ضریب تا ۲۰ برابر مبلغ شرط!\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
+    await update.message.reply_text("🃏 کازینو روبی🦊\n\n❗️ لطفا قمار مورد نظر را انتخاب کنید ⬇️\n\n🎰 اسلات\n┘─ محدودیت بازیکن : 1 - 3 روباه🦊\n┘─ ۲ نفر یا بیشتر: بالاترین امتیاز تنها برنده‌ی کل جایزه‌ست\n\n🎲 تاس\n┘─ محدودیت بازیکن : 1 - 2 روباه🦊\n┘─ دو نفره: قانون بازی رو سازنده‌ی میز انتخاب می‌کنه و برای هر دو نفر یکسانه\n\n🐇 خرگوش خور\n┘─ محدودیت بازیکن : 2 - 2 روباه🦊\n\n🃏 بازی دوتایی‌ها\n┘─ محدودیت بازیکن : 2 روباه🦊 · 16 خانه · 8 جفت\n┘─ زمان هر نوبت: 60 ثانیه\n\n💥 بمب\n┘─ یک‌نفره · ۱۲ خانه · ۳ بمب رندوم\n┘─ هر خانه‌ی سالم: ۲۵٪ اضافه روی مبلغ ورودی (تجمعی)؛ با بمب، جایزه صفر\n\n🔴 پلینکو\n┘─ یک‌نفره · ۱۴ ردیف · حالت آرام و وحشی · نتیجه به‌صورت گیف\n┘─ ضریب تا ۲۰ برابر مبلغ شرط!\n\n🚀 موشک\n┘─ یک‌نفره · انتخاب مبلغ شرط و ضریب هدف\n┘─ پرواز و نتیجه به‌صورت گیف · ضریب هدف تا ×۵۰\n┘─ پرواز بعدی ۳۰ ثانیه پس از پایان انیمیشن\n\n⛔️ فقط خودت می‌تونی روی این پنل بزنی.",reply_markup=kb,**reply_kwargs(update.message))
 
 RUBY_GAME_CONFIG={
     # key: (نام, حداقل بازیکن, حداکثر بازیکن, امکان مبلغ ورودی)
@@ -2986,8 +2987,9 @@ def _casino_menu_kb(owner_id):
         [InlineKeyboardButton("🐇 خرگوش خور",callback_data=f"rg:cz_rabbit:{owner_id}")],
         [InlineKeyboardButton("🃏 بازی دوتایی‌ها",callback_data=f"rg:cz_pairs:{owner_id}")],
         [InlineKeyboardButton("💥 بمب",callback_data=f"rg:cz_bomb:{owner_id}")],
-        [InlineKeyboardButton("🔴 پلینکو",callback_data=f"plk:open:{owner_id}")],
-    ] + [[InlineKeyboardButton("🚀 موشک (گیف)",callback_data=f"rkt:open:{owner_id}")]])
+        [InlineKeyboardButton("🔴 پلینکو (گیف)",callback_data=f"plk:open:{owner_id}")],
+        [InlineKeyboardButton("🚀 موشک (گیف)",callback_data=f"rkt:open:{owner_id}")],
+    ])
 
 
 # ── 🔴 پلینکو (کازینو) ──
