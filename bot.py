@@ -3272,22 +3272,21 @@ async def plinko_play(q, context, owner_id, st, from_result=False):
 
 # ── 🚀 موشک (کازینو) ──
 # گفتن «کازینو» → دکمه‌ی «🚀 موشک» → مبلغ شرط (روب‌پوینت) + ضریب هدف → پرتاب → نتیجه به‌صورت گیف.
-# شمارنده از −۱ شروع می‌شه؛ اگه موشک قبل از سقوط به ضریب هدف برسه «ورودی × هدف» می‌گیری، وگرنه ورودی می‌سوزه.
-# فعلاً فقط برای یک حساب فعاله (rocket_core.OWNER_ID).
+# شمارنده از −۱٫۵ شروع می‌شه تا ×۱۰؛ اگه موشک قبل از سقوط به ضریب هدف (حداقل ×۱٫۲) برسه «ورودی × هدف» می‌گیری، وگرنه ورودی می‌سوزه.
+# برای همه‌ی کاربرها بازه؛ ۳۰ ثانیه بعد از پایان هر گیف می‌شه دوباره پرتاب کرد.
+import time as _rkt_time
 import rocket_core
 import rocket_gif
 
 rocket_core.ensure_table(_plk_engine)
 RKT_AMOUNTS = [100000, 500000, 1000000, 2000000, 5000000]
-RKT_TARGETS = [1.5, 2, 3, 5, 10]
+RKT_TARGETS = [1.2, 1.5, 2, 5, 10]
 _RKT_BUSY = set()
+_RKT_NEXT = {}   # uid -> زمانی که دوباره می‌تونه پرتاب کنه (۳۰ ثانیه بعد از پایان گیف)
 
 
 def _rkt_allowed(uid):
-    try:
-        return int(uid) == int(rocket_core.OWNER_ID)
-    except Exception:
-        return False
+    return True   # بازی موشک برای همه‌ی کاربرها بازه
 
 
 def _rkt_state(context, owner_id):
@@ -3323,8 +3322,9 @@ def _rkt_panel(owner_id, st, points):
            f"💵 مبلغ شرط: {(f'{int(amount):,} روب‌پوینت') if amount else 'انتخاب نشده ❌'}\n"
            f"🎯 ضریب هدف: {('×' + _rkt_fmt_t(target)) if target else 'انتخاب نشده ❌'}"
            f"{chance}\n\n"
-           "موشک از ‎−۱‎ شروع می‌شه و بالا می‌ره. اگه قبل از سقوط به ضریب هدفت برسه، «شرط × ضریب هدف» رو می‌گیری؛ وگرنه شرطت می‌سوزه.\n"
-           f"حداقل شرط {rocket_core.MIN_ENTRY:,} و سقف {rocket_core.MAX_ENTRY:,} روب‌پوینت · ضریب هدف از ×{rocket_core.MIN_TARGET:g} تا ×{rocket_core.MAX_MULT:g}.\n"
+           "موشک از ‎−۱٫۵‎ شروع می‌شه و تا ×۱۰ بالا می‌ره. اگه قبل از سقوط به ضریب هدفت برسه، «شرط × ضریب هدف» رو می‌گیری؛ وگرنه شرطت می‌سوزه.\n"
+           f"حداقل شرط {rocket_core.MIN_ENTRY:,} و سقف {rocket_core.MAX_ENTRY:,} روب‌پوینت · ضریب هدف از ×{rocket_core.MIN_TARGET:g} (کمتر از این مجاز نیست) تا ×{rocket_core.MAX_MULT:g}.\n"
+           f"⏱ هر {rocket_core.COOLDOWN:g} ثانیه بعد از پایان پرواز می‌تونی دوباره پرتاب کنی.\n"
            "⛔️ فقط خودت می‌تونی روی این پنل بزنی.")
     rows = []
     row = []
@@ -3479,6 +3479,9 @@ async def rocket_play(q, context, owner_id, st, from_result=False):
     uid = owner_id
     if uid in _RKT_BUSY:
         await q.answer("⏳ موشک قبلی هنوز در حال پروازه.", show_alert=True); return
+    _wait_left = float(_RKT_NEXT.get(uid, 0)) - _rkt_time.time()
+    if _wait_left > 0:
+        await q.answer(f"⏳ {int(_wait_left) + 1} ثانیه‌ی دیگه می‌تونی دوباره پرتاب کنی.", show_alert=True); return
     _RKT_BUSY.add(uid)
     try:
         amount, target = int(st['amount']), round(float(st['target']), 2)
@@ -3505,6 +3508,7 @@ async def rocket_play(q, context, owner_id, st, from_result=False):
             session.commit()
         finally:
             session.close()
+        _RKT_NEXT[uid] = _rkt_time.time() + 90      # موقت تا ساخت گیف؛ بعدش دقیق می‌شه (۳۰ ثانیه بعد از پایان گیف)
         await q.answer("🚀 موشک پرتاب شد!")
         try:
             if from_result:
@@ -3537,6 +3541,7 @@ async def rocket_play(q, context, owner_id, st, from_result=False):
             sent = await context.bot.send_animation(chat_id, animation=bio, caption=wait_caption, width=rocket_gif.OW, height=rocket_gif.OH, **_plk_reply_kw(q))
         except Exception as exc:
             logger.warning("rocket gif failed: %s", exc)
+        _RKT_NEXT[uid] = _rkt_time.time() + (anim_secs + 0.6 if sent is not None else 0.0) + rocket_core.COOLDOWN
         if sent is None:
             await context.bot.send_message(chat_id, caption, reply_markup=kb, **_plk_reply_kw(q))
         else:

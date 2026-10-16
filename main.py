@@ -1347,8 +1347,8 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
 
 # ---------------------------------------------------------------------------
 # کازینو: موشک 🚀 (ضریب‌دار؛ بازی Crash)
-# شرط روی ضریب با روب‌پوینت: پروازهای همگانیِ خودکار؛ هر پرواز ۱۰ ثانیه شرط‌بندی دارد، بعد برای همه پرتاب می‌شود.
-# اگر موشک قبل از سقوط به ضریبِ هدفِ بازیکن برسد، «ورودی × ضریب هدف» می‌گیرد؛ وگرنه ورودی می‌سوزد. شمارنده از −۱ شروع می‌شود.
+# شرط روی ضریب با روب‌پوینت: پروازهای همگانیِ خودکار؛ هر پرواز ۳۰ ثانیه شرط‌بندی دارد، بعد برای همه پرتاب می‌شود.
+# اگر موشک قبل از سقوط به ضریبِ هدفِ بازیکن برسد، «ورودی × ضریب هدف» می‌گیرد؛ وگرنه ورودی می‌سوزد. شمارنده از −۱٫۵ شروع می‌شود تا ×۱۰؛ حداقل ضریب هدف ×۱٫۲.
 # نقطه‌ی سقوط سمت سرور ذخیره می‌شه و تا پایان بازی فرستاده نمی‌شه؛ ضریب فقط با ساعت سرور حساب می‌شه.
 # تنظیمات (Railway): ROCKET_MIN_ENTRY / ROCKET_MAX_ENTRY / ROCKET_WAIT / ROCKET_RISE / ROCKET_EDGE / ROCKET_MAX_MULT / ROCKET_MIN_TARGET / ROCKET_GROWTH
 # ---------------------------------------------------------------------------
@@ -1367,19 +1367,14 @@ def _rocket_user_locked(session, tg_user):
     return user
 
 
-ROCKET_ALLOWED_TELEGRAM_ID = _rk.OWNER_ID
 def _rocket_access_guard(tg_user):
-    try:
-        allowed = int(tg_user.get("id", 0)) == ROCKET_ALLOWED_TELEGRAM_ID
-    except Exception:
-        allowed = False
-    if not allowed:
-        raise HTTPException(status_code=403, detail="بازی موشک فعلاً فقط برای این حساب فعال است.")
+    """بازی موشک برای همه‌ی کاربرها بازه (قفل سطح کازینو داخل خود endpointها اعمال می‌شه)."""
+    return True
 
 
 def _rocket_cfg():
     return {"min_entry": _rk.MIN_ENTRY, "max_entry": _rk.MAX_ENTRY, "max_mult": _rk.MAX_MULT, "min_target": _rk.MIN_TARGET,
-            "growth": _rk.GROWTH, "rise": _rk.RISE, "wait": _rk.WAIT, "edge": _rk.EDGE,
+            "growth": _rk.GROWTH, "rise": _rk.RISE, "start": _rk.START, "wait": _rk.WAIT, "edge": _rk.EDGE,
             "buy_rate": _rk.BUY_RATE, "sell_rate": _rk.SELL_RATE}
 
 
