@@ -14828,7 +14828,7 @@ def _transfer_all_user_data(session, source_id, target_id, recovery_row):
         "group_chats": ("city_owner_id", "city_mayor_id"),
         "gift_codes": ("created_by",),
         "giveaways": ("created_by",),
-        "giveaway_entries": ("inviter_id",),
+        "giveaway_entries": ("inviter_id", "repeat_blocked_by"),
         "fox_mood_songs": ("created_by",),
         "fox_mood_channels": ("added_by",),
         "bank_transactions": ("counterparty_user_id",),
@@ -15543,6 +15543,7 @@ async def gw_create(update, context, d):
             show_top=int(d['top']), channels=json.dumps(d['channels'], ensure_ascii=False),
             created_by=q.from_user.id, created_at=now_utc(),
             ends_at=now_utc() + timedelta(hours=int(d['hours'])), status='active',
+            no_repeat_invites=1,      # قرعه‌کشی‌های جدید: یک نفر فقط یک‌بار برای یک دعوت‌کننده تیکت می‌شه
         )
         session.add(g)
         session.commit()
@@ -15657,6 +15658,8 @@ def gw_admin_user(session, g, uid, page):
              f"🎟 مجموع تیکت: {tickets} (خودش: {1 if entry and entry.status == 'active' else 0} + زیرمجموعه‌ی فعال: {invited})"]
     if entry and entry.inviter_id:
         lines.append(f"🔗 دعوت‌شده توسط: {gw_user_label(session, entry.inviter_id, admin=True)}")
+    if entry and entry.repeat_blocked_by:
+        lines.append(f"🚫 با لینک {gw_user_label(session, entry.repeat_blocked_by, admin=True)} وارد شد ولی قبلاً برای اون تیکت شده بود؛ تیکتی حساب نشد.")
     lines += ['', f"👥 زیرمجموعه‌ها ({len(subs)} نفر):"]
     if not subs:
         lines.append('هنوز کسی با لینکش وارد نشده.')
@@ -15840,7 +15843,9 @@ def gw_ticket_view(session, g, uid, uname):
             f"\n✅ تو توی قرعه‌کشی ثبت‌نام شدی!\n\n🎟 تیکت‌های تو: {tickets}\n👥 دعوت‌شده‌های فعال: {invited}\n\n"
             f"🔗 لینک اختصاصی تو:\n{link}\n\n"
             "هر نفر که با لینک تو وارد بشه و عضویتش رو کامل کنه ۱ تیکت برات میاره و همون لحظه بهت خبر می‌دم. "
-            "اگه اون نفر از کانال‌ها لفت بده، تیکتش از تو حذف می‌شه.")
+            "اگه اون نفر از کانال‌ها لفت بده، تیکتش از تو حذف می‌شه." +
+            ("\n\n⚠️ هر نفر فقط یک‌بار برای تو تیکت می‌شه: کسی که قبلاً توی قرعه‌کشی دیگه‌ای با لینک تو تیکت شده، این‌بار تیکتی برات نمیاره "
+             "(خودش می‌تونه توی قرعه‌کشی شرکت کنه)." if int(getattr(g, 'no_repeat_invites', 0) or 0) else ""))
     share = f"https://t.me/share/url?url={_gw_quote(link, safe='')}&text={_gw_quote('توی قرعه‌کشی ' + g.title + ' شرکت کن! 🎁', safe='')}"
     rows = [[InlineKeyboardButton('📤 اشتراک‌گذاری لینک', url=share)]]
     if g.show_top:
@@ -15928,9 +15933,34 @@ async def giveaway_start(update, context, gid, inviter_id):
     await gw_reply(update, text, kb)
 
 
+def gw_repeat_invite_used(session, g, entry):
+    """قانون قرعه‌کشی‌های جدید: اگه «دعوت‌کننده ← این نفر» قبلاً توی یه قرعه‌کشیِ جدیدِ دیگه (غیر از لغوشده‌ها) تیکت شده باشه،
+    فقط از زمان اضافه شدن این قانون حساب می‌شه؛ تیکت‌های قرعه‌کشی‌های قدیمی سابقه نیستن.
+    این‌بار تیکتی برای دعوت‌کننده حساب نمی‌شه. خود این نفر می‌تونه عادی شرکت کنه و تیکتِ خودش رو داره.
+    «تیکت شدن» یعنی اون ورودی عضویتش تایید شده بوده (verified_at) — چه هنوز فعال باشه چه لفت داده باشه."""
+    if not int(getattr(g, 'no_repeat_invites', 0) or 0) or not entry.inviter_id:
+        return False
+    prev = (session.query(GiveawayEntry.id)
+            .join(Giveaway, Giveaway.id == GiveawayEntry.giveaway_id)
+            .filter(GiveawayEntry.user_id == entry.user_id,
+                    GiveawayEntry.inviter_id == entry.inviter_id,
+                    GiveawayEntry.giveaway_id != g.id,
+                    GiveawayEntry.verified_at.is_not(None),
+                    Giveaway.no_repeat_invites == 1,      # فقط قرعه‌کشی‌های جدید سابقه حساب می‌شن؛ قرعه‌کشی‌های قبلی از این قانون نیستن
+                    Giveaway.status != 'cancelled')
+            .first())
+    return prev is not None
+
+
 def gw_activate(session, g, entry):
-    """ثبت‌نام/برگشت شرکت‌کننده. خروجی: 'new' برای بار اول، 'back' اگه قبلاً لفت داده بود."""
+    """ثبت‌نام/برگشت شرکت‌کننده. خروجی: 'new' برای بار اول، 'back' اگه قبلاً لفت داده بود،
+    'blocked' اگه بار اول بوده ولی این نفر قبلاً برای همین دعوت‌کننده تیکت شده (تیکتی برای دعوت‌کننده حساب نمی‌شه)."""
     first = entry.verified_at is None
+    blocked = False
+    if first and gw_repeat_invite_used(session, g, entry):
+        entry.repeat_blocked_by = entry.inviter_id
+        entry.inviter_id = None           # از این‌جا به بعد برای هیچ‌کس تیکت حساب نمی‌شه (رتبه‌بندی و شمارش از inviter_id می‌خونن)
+        blocked = True
     entry.status = 'active'
     entry.verified_at = entry.verified_at or now_utc()
     entry.left_at = None
@@ -15938,6 +15968,8 @@ def gw_activate(session, g, entry):
     entry.captcha_fails = 0
     entry.last_checked_at = now_utc()
     session.commit()
+    if blocked:
+        return 'blocked'
     return 'new' if first else 'back'
 
 
@@ -15956,7 +15988,10 @@ async def gw_notify_inviter(bot, gid, title, inviter_id, user_id, kind):
         name = gw_user_label(session, user_id, admin=False)
     finally:
         session.close()
-    if kind == 'new':
+    if kind == 'blocked':
+        text = (f"ℹ️ {name} با لینک تو وارد قرعه‌کشی «{title}» شد، ولی قبلاً یک‌بار برای تو تیکت شده بود؛ این‌بار تیکتی برات حساب نمی‌شه.\n"
+                f"(خودش می‌تونه عادی توی قرعه‌کشی شرکت کنه.)\n🎟 مجموع تیکت‌هات: {total}")
+    elif kind == 'new':
         text = f"🎉 {name} با لینک تو وارد قرعه‌کشی «{title}» شد و عضویتش تایید شد!\n🎟 ۱ تیکت گرفتی. مجموع تیکت‌هات: {total}"
     elif kind == 'back':
         text = f"🔁 {name} دوباره توی کانال‌های قرعه‌کشی «{title}» عضو شد.\n🎟 ۱ تیکت برات برگشت. مجموع تیکت‌هات: {total}"
@@ -16036,7 +16071,7 @@ async def gw_user_callback(update, context):
                 kind = gw_activate(session, g, entry)
                 await q.answer('✅ برگشتی!')
                 text, kb = gw_ticket_view(session, g, uid, uname)
-                inviter, title = entry.inviter_id, g.title
+                inviter, title = (entry.repeat_blocked_by if kind == 'blocked' else entry.inviter_id), g.title
                 session.close()
                 await gw_reply(update, text, kb)
                 await gw_notify_inviter(context.bot, gid, title, inviter, uid, kind)
@@ -16077,7 +16112,7 @@ async def gw_user_callback(update, context):
             kind = gw_activate(session, g, entry)
             await q.answer('✅ درسته! ثبت‌نام شدی 🎉')
             text, kb = gw_ticket_view(session, g, uid, uname)
-            inviter, title = entry.inviter_id, g.title
+            inviter, title = (entry.repeat_blocked_by if kind == 'blocked' else entry.inviter_id), g.title
             session.close()
             await gw_reply(update, text, kb)
             await gw_notify_inviter(context.bot, gid, title, inviter, uid, kind)

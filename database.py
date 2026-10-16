@@ -300,6 +300,7 @@ class Giveaway(Base):
     winners = Column(String, nullable=True)                        # JSON برنده‌ها بعد از قرعه‌کشی
     finished_at = Column(DateTime(timezone=True), nullable=True)
     prizes = Column(String, nullable=True)                         # JSON: جایزه‌ی هر برنده به ترتیب رتبه ["جایزه نفر ۱", ...]
+    no_repeat_invites = Column(Integer, nullable=False, default=0)  # 1 = قانون «تکرار نشدنِ تیکتِ یک نفر برای یک دعوت‌کننده» (فقط قرعه‌کشی‌های جدید)
 
 
 class GiveawayEntry(Base):
@@ -311,6 +312,7 @@ class GiveawayEntry(Base):
     giveaway_id = Column(Integer, ForeignKey('giveaways.id'), nullable=False, index=True)
     user_id = Column(BigInteger, nullable=False, index=True)
     inviter_id = Column(BigInteger, nullable=True, index=True)
+    repeat_blocked_by = Column(BigInteger, nullable=True)   # دعوت‌کننده‌ای که این نفر قبلاً برایش تیکت شده بود؛ این‌بار تیکتی حساب نشد
     status = Column(String, nullable=False, default='pending', index=True)  # pending | active | left
     captcha_answer = Column(Integer, nullable=True)
     captcha_fails = Column(Integer, nullable=False, default=0)
@@ -923,6 +925,12 @@ def init_db():
             gw_cols = {c['name'] for c in inspector.get_columns('giveaways')}
             if 'prizes' not in gw_cols:
                 conn.execute(text('ALTER TABLE giveaways ADD COLUMN prizes VARCHAR'))
+            if 'no_repeat_invites' not in gw_cols:
+                conn.execute(text('ALTER TABLE giveaways ADD COLUMN no_repeat_invites INTEGER NOT NULL DEFAULT 0'))
+        if 'giveaway_entries' in inspector.get_table_names():
+            gwe_cols = {c['name'] for c in inspector.get_columns('giveaway_entries')}
+            if 'repeat_blocked_by' not in gwe_cols:
+                conn.execute(text('ALTER TABLE giveaway_entries ADD COLUMN repeat_blocked_by BIGINT'))
 
 
 def get_session():
