@@ -486,6 +486,74 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 .rk-chips button{border:1px solid #3b4a9a;background:#141b40;color:#eaf0ff;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:800;font-family:inherit}
 .rk-chips button.on{background:#ffc46b;color:#2a1204;border-color:#ffd27a}
 #rkCash{width:100%;background:linear-gradient(180deg,#5dff9f,#22c46b);color:#052414;font-size:16px;padding:16px 8px}
+
+/* ===== ظاهر جدید بخش روباه (مثل چیکو) + نوار پایین تخت ===== */
+:root{--cn-bg:#0d0f1e;--cn-card:#141729;--cn-line:#262b45;--cn-gold:#f4b63f;--cn-mut:#8e94ad}
+body{background:var(--cn-bg)!important}
+.scene{display:none!important}
+.topbar,.updated{display:none!important}
+#foxView{padding-top:2px}
+.ch-hero{position:relative;height:262px;border-radius:30px;overflow:hidden;border:1.5px solid var(--cn-line);background:#1a1d33;margin-bottom:18px;box-shadow:0 12px 30px #0009}
+.ch-bg{position:absolute;inset:0;background:radial-gradient(circle at 50% 30%,#3a3470,#14162b);display:flex;align-items:center;justify-content:center;font-size:110px}
+.ch-bg img{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block}
+.ch-hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,#0d0f1e00 38%,#0d0f1ecc 100%);pointer-events:none}
+.ch-pills{position:absolute;top:14px;right:14px;left:14px;display:flex;gap:8px;z-index:2;flex-wrap:wrap}
+.ch-pill{background:#2a2c3ecf;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border-radius:999px;padding:7px 15px;font-size:15px;font-weight:800;color:#fff;display:flex;align-items:center;gap:7px}
+.ch-pill .dot{width:11px;height:11px;border-radius:50%;background:#37d67a;box-shadow:0 0 8px #37d67a99}
+.ch-pill.bad .dot{background:#ff5d6c;box-shadow:0 0 8px #ff5d6c99}
+.ch-pill.mid .dot{background:#ffc94d;box-shadow:0 0 8px #ffc94d99}
+.ch-pill .inf{width:20px;height:20px;border:1.6px solid #ff8b6a;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:#ff8b6a;font-weight:900}
+.ch-name{position:absolute;right:22px;bottom:70px;z-index:2;font-size:44px;font-weight:900;color:#fff;line-height:1.1;text-shadow:0 3px 14px #000a;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-row{position:absolute;right:22px;left:22px;bottom:30px;z-index:2;display:flex;align-items:center;gap:8px;direction:rtl}
+.ch-lvl{background:#4a3a1fcc;color:var(--cn-gold);border-radius:999px;padding:5px 16px;font-size:19px;font-weight:900;white-space:nowrap}
+.ch-rank{color:#e6e8f2;font-weight:800;font-size:15px;flex:1;text-align:right;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-xp{color:#cfd3e4;font-weight:900;font-size:15px;direction:ltr;white-space:nowrap}
+.ch-prog{position:absolute;right:22px;left:22px;bottom:14px;z-index:2;height:5px;border-radius:5px;background:#ffffff40;overflow:hidden;direction:ltr}
+.ch-prog i{display:block;height:100%;width:0;background:#fff;border-radius:5px;transition:width .8s}
+.ch-bal{display:flex;align-items:center;gap:14px;padding:0 6px;margin-bottom:20px}
+.ch-coin{width:56px;height:56px;border-radius:50%;flex:none;background:radial-gradient(circle at 35% 30%,#ffe08a,#e59a14 70%,#b8730a);display:flex;align-items:center;justify-content:center;font-size:27px;border:2px solid #ffd978;box-shadow:0 0 14px #f4b63f55}
+.ch-bal-mid{flex:1;min-width:0}
+.ch-num{font-size:44px;font-weight:900;color:#fff;line-height:1.1;direction:ltr;text-align:right;letter-spacing:.5px}
+.ch-lab{color:var(--cn-mut);font-size:15px;font-weight:700;margin-top:2px}
+.ch-assets{background:none;border:0;color:var(--cn-mut);font-family:inherit;font-size:17px;font-weight:700;padding:6px 2px;white-space:nowrap}
+.ch-shift{width:100%;border:0;border-radius:26px;background:var(--cn-gold);color:#1a1405;padding:20px 22px;display:flex;align-items:center;gap:16px;font-family:inherit;text-align:right;margin-bottom:22px;box-shadow:0 8px 22px #f4b63f33}
+.ch-shift:disabled{opacity:.55}
+.ch-shift .sh-txt{flex:1;min-width:0}
+.ch-shift b{display:block;font-size:24px;font-weight:900;line-height:1.35}
+.ch-shift span{display:block;font-size:15.5px;font-weight:700;opacity:.85;line-height:1.6}
+.ch-shift .sh-go{width:58px;height:58px;border-radius:50%;background:#00000026;display:flex;align-items:center;justify-content:center;flex:none}
+.ch-shift .sh-go svg{width:26px;height:26px}
+.ch-circles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:22px}
+.ch-c{background:none;border:0;color:#e9ebf5;font-family:inherit;font-size:17px;font-weight:800;display:flex;flex-direction:column;align-items:center;gap:10px;padding:0}
+.ch-c .c-ico{width:84px;height:84px;border-radius:50%;background:#171a2e;border:1.5px solid #343a5a;display:flex;align-items:center;justify-content:center;transition:transform .15s,background .2s}
+.ch-c:active .c-ico{transform:scale(.92);background:#20243d}
+.ch-c:disabled{opacity:.5}
+.ch-c svg{width:38px;height:38px;stroke:#fff;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.ch-bubble{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+.ch-bubble .bb-av{width:78px;height:78px;border-radius:50%;flex:none;overflow:hidden;background:#1d2037;display:flex;align-items:center;justify-content:center;font-size:42px;border:1.5px solid #343a5a}
+.ch-bubble .bb-av img{width:100%;height:100%;object-fit:cover}
+.ch-bubble .bb-txt{flex:1;border:1.5px solid #343a5a;background:#12152a;border-radius:20px;padding:20px 20px;font-size:18px;font-weight:600;color:#f1f2fa;line-height:1.7}
+.ch-all{display:block;margin:0 auto;background:none;border:0;color:#d5d8e8;font-family:inherit;font-size:19px;font-weight:700;padding:8px 14px}
+.ch-all .ar{display:inline-block;transition:transform .2s;margin-right:8px;font-size:14px}
+.ch-all.open .ar{transform:rotate(180deg)}
+#foxMore{display:none;margin-top:14px}
+#foxMore.open{display:block}
+.ch-back{display:flex;align-items:center;gap:8px;background:none;border:0;color:var(--cn-gold);font-family:inherit;font-size:18px;font-weight:900;padding:6px 4px 12px}
+#foxPanel{display:none}
+#foxPanel.open{display:block}
+#foxHome.hide{display:none}
+#bankBackWrap{margin-bottom:2px}
+.flash-pulse{animation:flashPulse 1.1s ease-out 2}
+@keyframes flashPulse{0%{box-shadow:0 0 0 0 #f4b63fcc}100%{box-shadow:0 0 0 18px #f4b63f00}}
+
+/* نوار پایین تخت */
+.tabs{grid-template-columns:repeat(4,1fr)!important;background:#0f1122!important;border-radius:0!important;border-top:1px solid #23284a!important;box-shadow:0 -6px 20px #0008!important;padding:12px 6px calc(14px + env(safe-area-inset-bottom,0px) + var(--tg-content-safe-area-inset-bottom,0px))!important;align-items:center!important}
+.tab{color:#9aa0bb!important;font-size:15px!important;gap:6px!important;font-weight:700!important}
+.tab .ico{width:34px!important;height:34px!important;filter:none!important;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tab.active{color:var(--cn-gold)!important}
+.tab.active .ico{transform:none!important;filter:none!important}
+.tab.active::before{content:""!important;display:block!important;position:absolute;top:-12px;bottom:auto!important;width:56px;height:4px;border-radius:0 0 6px 6px;background:var(--cn-gold);box-shadow:none!important}
+@media (max-width:380px){.ch-name{font-size:36px}.ch-num{font-size:36px}.ch-c .c-ico{width:72px;height:72px}.ch-shift b{font-size:20px}}
 </style>
 </head>
 <body>
@@ -598,6 +666,50 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   <div id="banner" class="banner"></div>
   <div id="atkBox"></div>
 
+  <div id="foxHome">
+    <div class="ch-hero" id="chHero">
+      <div class="ch-bg" id="chBg">🦊</div>
+      <div class="ch-pills">
+        <span class="ch-pill" id="chStore"><span class="inf">i</span><span id="chStoreTx">انبار</span></span>
+        <span class="ch-pill" id="chMood"><span class="dot"></span><span id="chMoodTx">…</span></span>
+      </div>
+      <div class="ch-name" id="chName">…</div>
+      <div class="ch-row">
+        <span class="ch-lvl" id="chLvl">سطح —</span>
+        <span class="ch-rank" id="chRank">—</span>
+        <span class="ch-xp" id="chXp">—</span>
+      </div>
+      <div class="ch-prog"><i id="chProg"></i></div>
+    </div>
+
+    <div class="ch-bal">
+      <div class="ch-coin">🐾</div>
+      <div class="ch-bal-mid">
+        <div class="ch-num" id="chBal">—</div>
+        <div class="ch-lab">روب‌پوینت · کیف پول بازی</div>
+      </div>
+      <button class="ch-assets" id="chAssets" type="button">دارایی‌ها ›</button>
+    </div>
+
+    <button class="ch-shift" id="chShift" type="button">
+      <span class="sh-go"><svg viewBox="0 0 24 24" fill="none" stroke="#1a1405" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 5-7 7 7 7"/></svg></span>
+      <span class="sh-txt"><b id="chShiftT">برداشت آماده‌ست</b><span id="chShiftS">روباه رو بزن و روب‌پوینتت رو بردار</span></span>
+    </button>
+
+    <div class="ch-circles">
+      <button class="ch-c" id="cBank" type="button"><span class="c-ico"><svg viewBox="0 0 24 24"><path d="M3 9.5 12 4l9 5.5"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 20h18"/></svg></span>بانک</button>
+      <button class="ch-c" id="cSend" type="button"><span class="c-ico"><svg viewBox="0 0 24 24"><path d="M21 3 3 10.5l7 2.5 2.5 7z"/><path d="m10 13 11-10"/></svg></span>انتقال</button>
+      <button class="ch-c" id="cFox" type="button"><span class="c-ico"><svg viewBox="0 0 24 24"><path d="M4 4l5 3.2h6L20 4l-.8 7.5c-.4 4.6-3.2 8-7.2 9.5-4-1.5-6.8-4.9-7.2-9.5z"/><circle cx="9" cy="12" r=".6" fill="#fff"/><circle cx="15" cy="12" r=".6" fill="#fff"/><path d="M10.5 16h3l-1.5 1.6z"/></svg></span>روباه</button>
+      <button class="ch-c" id="cUp" type="button"><span class="c-ico"><svg viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg></span>ارتقا</button>
+    </div>
+
+    <div class="ch-bubble">
+      <div class="bb-av" id="bbAv">🦊</div>
+      <div class="bb-txt" id="bbTxt">امروز هم اومدی؟ آفرین، همین‌جوری ادامه بده.</div>
+    </div>
+
+    <button class="ch-all" id="chAll" type="button">همهٔ کارها و وضعیت من<span class="ar">▾</span></button>
+    <div id="foxMore">
   <div class="card player" id="playerCard">
     <div class="p-top">
       <div class="p-avatar" id="pAvatar">🦊</div>
@@ -621,6 +733,22 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     </div>
   </div>
 
+  <div class="card">
+    <div class="section-title">📊 وضعیت روباه</div>
+    <div class="stats">
+      <div class="stat">💰 موجودی<b id="points">—</b></div>
+      <div class="stat">🏆 رتبه<b id="rank">—</b></div>
+      <div class="stat">💫 تولید در ثانیه<b id="rate">—</b></div>
+      <div class="stat">🍖 شکم<b id="belly">—</b></div>
+    </div>
+    <div class="stat" style="margin-top:8px">📦 انبار روباه<b id="storage">—</b><div class="bar"><i id="storageBar"></i></div></div>
+    <div id="upgradeInfo" class="muted" style="text-align:center;margin-top:10px"></div>
+  </div>
+    </div>
+  </div>
+
+  <div id="foxPanel">
+    <button class="ch-back" id="foxBack" type="button">› برگشت</button>
   <div class="card hero">
     <div id="foxImg" class="fox-img">🦊</div>
     <div id="foxName" class="fox-name">در حال بارگذاری...</div>
@@ -643,16 +771,6 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     </div>
   </div>
 
-  <div class="card">
-    <div class="section-title">📊 وضعیت روباه</div>
-    <div class="stats">
-      <div class="stat">💰 موجودی<b id="points">—</b></div>
-      <div class="stat">🏆 رتبه<b id="rank">—</b></div>
-      <div class="stat">💫 تولید در ثانیه<b id="rate">—</b></div>
-      <div class="stat">🍖 شکم<b id="belly">—</b></div>
-    </div>
-    <div class="stat" style="margin-top:8px">📦 انبار روباه<b id="storage">—</b><div class="bar"><i id="storageBar"></i></div></div>
-    <div id="upgradeInfo" class="muted" style="text-align:center;margin-top:10px"></div>
   </div>
 </section>
 
@@ -810,6 +928,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 
 
 <section id="bankView" class="view">
+  <div id="bankBackWrap"><button class="ch-back" id="bankBack" type="button">› برگشت</button></div>
   <div class="card bk-hero">
     <div class="section-title">💼 دارایی‌های من</div>
     <div class="bk-total"><span>مجموع کل دارایی</span><b id="bkTotal">۰</b><small>روب‌پوینت</small></div>
@@ -911,11 +1030,10 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 </div></div>
 
 <nav class="tabs">
-  <button id="storeTab" class="tab"><svg class="ico"><use href="#i-store"/></svg>فروشگاه</button>
-  <button id="wheelTab" class="tab"><svg class="ico"><use href="#i-game"/></svg>بازی‌ها</button>
-  <button id="foxTab" class="tab center active"><span class="cav" id="cAvatar">🦊</span><span id="cName">روباه</span></button>
-  <button id="bankTab" class="tab"><svg class="ico"><use href="#i-bank"/></svg>بانک</button>
-  <button id="leaderTab" class="tab"><svg class="ico"><use href="#i-trophy"/></svg>لیدربرد</button>
+  <button id="foxTab" class="tab active"><svg class="ico" viewBox="0 0 24 24"><path d="M3.5 11 12 4l8.5 7"/><path d="M5.5 9.8V20h13V9.8"/><path d="M10 20v-5.5h4V20"/></svg><span id="cName">روباه</span></button>
+  <button id="wheelTab" class="tab"><svg class="ico" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4.5"/><circle cx="8.5" cy="8.5" r="1" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1" fill="currentColor"/></svg>بازی‌ها</button>
+  <button id="leaderTab" class="tab"><svg class="ico" viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 5.5H4.5a3 3 0 0 0 3.5 4M16 5.5h3.5a3 3 0 0 1-3.500 4"/><path d="M12 13v4M8.500 20h7"/></svg>لیدربرد</button>
+  <button id="storeTab" class="tab"><svg class="ico" viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6z"/><path d="M9 8V6.500a3 3 0 0 1 6 0V8"/></svg>فروشگاه</button>
 </nav>
 
 <div id="bkModal" class="modal"><div class="sheet">
@@ -943,7 +1061,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 <script>
 (function(){
   var tg = window.Telegram && window.Telegram.WebApp;
-  if (tg) { try { tg.ready(); tg.expand(); tg.setHeaderColor('#07140f'); tg.setBackgroundColor('#07140f'); tg.setBottomBarColor && tg.setBottomBarColor('#07140f'); } catch(e){} }
+  if (tg) { try { tg.ready(); tg.expand(); tg.setHeaderColor('#0d0f1e'); tg.setBackgroundColor('#0d0f1e'); tg.setBottomBarColor && tg.setBottomBarColor('#0f1122'); } catch(e){} }
   var initData = tg ? tg.initData : "";
   function $(id){ return document.getElementById(id); }
   function fa(n){ return Number(n||0).toLocaleString("fa-IR"); }
@@ -1142,15 +1260,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     $("mEarn").textContent = fa(d.total_earned);
   }
 
-  function setCenterTab(d){
-    var nm = $("cName"); nm.textContent = d.fox_name || "روباه";
-    var src = d.skin_image || d.avatar || "";
-    var cav = $("cAvatar");
-    if (!src || cav.dataset.src === src) return;
-    var im = new Image(); im.alt = ""; im.decoding = "async";
-    im.decoding = "async"; im.loading = "eager"; im.onload = function(){ cav.dataset.src = src; cav.textContent = ""; cav.appendChild(im); };
-    im.src = src;
-  }
+  function setCenterTab(d){}
   function render(d){
     current = d;
     renderAttacks(d.attacks);
@@ -1182,6 +1292,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     } else { box.textContent = "🦊"; }
     }
     setCenterTab(d);
+    try { renderHome(d); } catch(e){}
 
     $("points").textContent = fa(d.fox_points);
     $("rank").textContent = fa(d.points_rank);
@@ -2626,15 +2737,101 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   function loadStoreOrders(){return api("/api/store/orders").then(function(d){var box=$("storeOrders");box.innerHTML="";var arr=d.orders||[];if(!arr.length){box.innerHTML='<div class="muted">هنوز سفارشی ثبت نکردی.</div>';return;}arr.forEach(function(o){var el=document.createElement("div");el.className="store-order";var title=document.createElement("b");title.textContent="#"+o.id+" · "+o.item_title;el.appendChild(title);if(d.is_admin){var buyer=document.createElement("div");buyer.textContent="خریدار: @"+(o.buyer_username||"بدون یوزرنیم")+" · شناسه: "+o.buyer_id;el.appendChild(buyer);}var info=document.createElement("div");info.textContent="گیرنده: @"+o.recipient_username+" · "+storeMoney(o.price_toman);el.appendChild(info);var date=document.createElement("div");date.className="muted";date.textContent=String(o.created_at||"").replace("T"," ").slice(0,16);el.appendChild(date);var st=document.createElement("div");st.className="status";st.textContent="وضعیت: "+o.status;el.appendChild(st);if(d.is_admin){var sel=document.createElement("select");["در انتظار بررسی","در حال انجام","تکمیل شد","رد شد"].forEach(function(v){var op=document.createElement("option");op.value=v;op.textContent=v;op.selected=v===o.status;sel.appendChild(op);});sel.style.cssText="margin-top:7px;width:100%;padding:8px;background:#111326;color:#fff;border:1px solid #51416f;border-radius:8px";var save=document.createElement("button");save.className="action secondary";save.style.cssText="width:100%;margin-top:6px";save.textContent="ذخیره وضعیت";save.onclick=function(){save.disabled=true;api("/api/store/admin/order-status","POST",{order_id:o.id,status:sel.value}).then(function(){toast("وضعیت سفارش بروزرسانی شد",true);return loadStoreOrders();}).catch(function(e){toast(e.message,false);}).finally(function(){save.disabled=false;});};el.appendChild(sel);el.appendChild(save);}box.appendChild(el);});}).catch(function(e){$("storeOrders").textContent=e.message;});}
   $("storeReloadOrders").onclick=loadStoreOrders;
 
+
+  // ---------- صفحه‌ی اصلی روباه (شبیه چیکو) ----------
+  function latin(n){ return Number(n||0).toLocaleString("en-US"); }
+  function kfmt(n){ n = Number(n||0); return n >= 1000 ? (Math.round(n/100)/10).toString().replace(/\.0$/,"") + "K" : String(n); }
+  function renderHome(d){
+    var nm = d.fox_name || "روباه";
+    $("chName").textContent = nm;
+    var u = d.user_level || {};
+    $("chLvl").textContent = "سطح " + (u.level != null ? u.level : (d.fox_level || 0));
+    $("chRank").textContent = d.fox_rank || "";
+    $("chXp").textContent = u.needed ? (kfmt(u.done) + " / " + kfmt(u.needed)) : "";
+    var pc = Math.max(0, Math.min(100, u.percent || 0));
+    setTimeout(function(){ $("chProg").style.width = pc + "%"; }, 60);
+    $("chBal").textContent = latin(d.fox_points);
+
+    // تصویر پس‌زمینه (اسکین روباه یا آواتار)
+    var src = d.skin_image || d.avatar || "";
+    var bg = $("chBg");
+    if (src && bg.dataset.src !== src) {
+      var im = new Image(); im.alt = ""; im.decoding = "async";
+      im.onload = function(){ bg.dataset.src = src; bg.textContent = ""; bg.innerHTML = ""; bg.appendChild(im); };
+      im.src = src;
+    }
+    var bav = $("bbAv");
+    if (d.avatar && bav.dataset.src !== d.avatar) {
+      var im2 = new Image(); im2.alt = ""; im2.decoding = "async";
+      im2.onload = function(){ bav.dataset.src = d.avatar; bav.textContent = ""; bav.appendChild(im2); };
+      im2.src = d.avatar;
+    }
+
+    // وضعیت‌ها
+    var mood = $("chMood"), mt = $("chMoodTx");
+    mood.className = "ch-pill";
+    if (d.locked) { mood.classList.add("mid"); mt.textContent = "🔒 قفل · سطح " + fa(d.unlock_level); }
+    else if (d.sick) { mood.classList.add("bad"); mt.textContent = "🤒 مریض"; }
+    else if (d.fox_belly < 2) { mood.classList.add("mid"); mt.textContent = "😡 گرسنه"; }
+    else { mt.textContent = "سرحال"; }
+    var cap = d.storage_capacity || 0, st = d.fox_storage || 0;
+    $("chStoreTx").textContent = cap ? ("انبار " + fa(Math.round(st * 100 / cap)) + "٪") : "انبار";
+
+    // بنر زرد برداشت
+    var sh = $("chShift"), off = d.locked || d.sick;
+    sh.disabled = !!off;
+    if (d.locked) { $("chShiftT").textContent = "روباه هنوز قفله"; $("chShiftS").textContent = "از سطح " + fa(d.unlock_level) + " باز می‌شه"; }
+    else if (d.sick) { $("chShiftT").textContent = "روباهت مریضه 🤒"; $("chShiftS").textContent = "اول توی بات درمانش کن"; }
+    else if (st > 0) { $("chShiftT").textContent = "برداشتت آماده‌ست"; $("chShiftS").textContent = fa(st) + " روب‌پوینت توی انبار جمع شده؛ بزن بردار"; }
+    else { $("chShiftT").textContent = "انبار خالیه"; $("chShiftS").textContent = "روباه داره تولید می‌کنه؛ کمی بعد برگرد"; }
+
+    $("cUp").disabled = !!off || d.upgrade_cost == null;
+    $("bbTxt").textContent = d.sick ? "روباهت مریضه؛ برو درمانش کن تا دوباره کار کنه."
+      : (d.storage_capacity && st >= d.storage_capacity) ? "انبارت پر شده! برداشت بزن تا روباه دوباره کار کنه."
+      : d.fox_belly < 2 ? "روباهت گرسنه‌ست؛ بهش غذا بده تا تولید کنه."
+      : "امروز هم اومدی؟ آفرین، همین‌جوری ادامه بده.";
+  }
+  function foxSub(name){
+    $("foxHome").classList.toggle("hide", name === "fox");
+    $("foxPanel").classList.toggle("open", name === "fox");
+    try { window.scrollTo(0, 0); } catch(e){}
+  }
+  $("cFox").onclick = function(){ foxSub("fox"); };
+  $("foxBack").onclick = function(){ foxSub("home"); };
+  $("chShift").onclick = function(){ $("btnCollect").click(); };
+  $("cUp").onclick = function(){ $("btnUpgrade").click(); };
+  $("chAll").onclick = function(){
+    var open = $("foxMore").classList.toggle("open");
+    $("chAll").classList.toggle("open", open);
+    if (open) setTimeout(function(){ try { $("foxMore").scrollIntoView({behavior:"smooth", block:"start"}); } catch(e){} }, 60);
+  };
+  $("chAssets").onclick = function(){ show("bank"); };
+  $("cBank").onclick = function(){ show("bank"); };
+  $("cSend").onclick = function(){
+    show("bank");
+    var go = function(){
+      var t = $("bkTransfer");
+      var card = (t && t.offsetParent) ? t : ($("bkOpenBtn").offsetParent ? $("bkOpenBtn") : $("bkLockedMsg"));
+      if (!card) return;
+      try { card.scrollIntoView({behavior:"smooth", block:"center"}); } catch(e){}
+      card.classList.remove("flash-pulse"); void card.offsetWidth; card.classList.add("flash-pulse");
+    };
+    setTimeout(go, 700); setTimeout(go, 1500);
+  };
+  $("bankBack").onclick = function(){ show("fox"); };
+
   // ---------- ناوبری + تازه‌سازی ----------
   var view = "fox";
+  var prevView = null;
   function show(v){
+    prevView = view;
     if (v !== view) { try { window.scrollTo(0, 0); } catch(e){} }
     view = v;
     ["fox","wheel","leader","bank","store"].forEach(function(n){
       $(n + "View").classList.toggle("active", v === n);
-      $(n + "Tab").classList.toggle("active", v === n);
+      var t = $(n + "Tab"); if (t) t.classList.toggle("active", v === n || (n === "fox" && v === "bank"));
     });
+    if (v === "fox" && v !== prevView) foxSub("home");
     clearInterval(bankTickT); bankTickT = null;
     clearInterval(wheelTick); wheelTick = null;
     clearInterval(bombTick); bombTick = null;
@@ -2644,11 +2841,10 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
     else if (v === "store") { loadStore().catch(function(){}); }
     else loadProfile();
   }
-  $("foxTab").onclick = function(){ show("fox"); };
+  $("foxTab").onclick = function(){ show("fox"); foxSub("home"); };
   $("wheelTab").onclick = function(){ show("wheel"); };
   $("leaderTab").onclick = function(){ show("leader"); };
   $("storeTab").onclick = function(){ show("store"); };
-  $("bankTab").onclick = function(){ show("bank"); };
 
   function refreshNow(){
     var b = $("btnRefresh");
@@ -2727,6 +2923,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
   try {
     var qp = new URLSearchParams(location.search);
     if (qp.get("view") === "education" || qp.get("view") === "edu" || qp.get("view") === "store") initialView = "store";
+    else if (qp.get("view") === "bank") initialView = "bank";
     else if (qp.get("view") === "wheel" || qp.get("view") === "bomb") initialView = "wheel";
   } catch(e){}
   show(initialView);
