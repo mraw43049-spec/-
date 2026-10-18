@@ -7,6 +7,21 @@
 <meta name="theme-color" content="#07140f">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie_light.min.js" defer></script>
+<script>
+(function(){
+  function show(msg){
+    try{
+      var d=document.getElementById("__err");
+      if(!d){d=document.createElement("div");d.id="__err";d.style.cssText="position:fixed;top:0;left:0;right:0;z-index:99999;background:#7a1f2b;color:#fff;font:12px/1.6 sans-serif;padding:8px 36px 8px 10px;direction:ltr;word-break:break-all";
+        var x=document.createElement("b");x.textContent="\u2715";x.style.cssText="position:absolute;right:10px;top:6px;font-size:16px";x.onclick=function(){d.remove();};d.appendChild(x);
+        var t=document.createElement("span");t.id="__errt";d.appendChild(t);(document.body||document.documentElement).appendChild(d);}
+      document.getElementById("__errt").textContent=String(msg).slice(0,400);
+    }catch(e){}
+  }
+  window.addEventListener("error",function(e){show("JS: "+(e.message||"error")+" @"+(e.lineno||"")+":"+(e.colno||""));});
+  window.addEventListener("unhandledrejection",function(e){var r=e.reason;if(r&&r.gate)return;});
+})();
+</script>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#050d18;color:#f1fff6;font-family:Tahoma,Vazirmatn,system-ui,sans-serif;min-height:100vh;padding:14px 12px 170px}
@@ -484,16 +499,4 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 .rk-small{border:1px solid #3b4a9a;background:#141b40;color:#eaf0ff;border-radius:12px;padding:11px 14px;font-weight:900;font-family:inherit;font-size:14px}
 .rk-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 4px}
 .rk-chips button{border:1px solid #3b4a9a;background:#141b40;color:#eaf0ff;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:800;font-family:inherit}
-.rk-chips button.on{background:#ffc46b;color:#2a1204;border-color:#ffd27a}
-#rkCash{width:100%;background:linear-gradient(180deg,#5dff9f,#22c46b);color:#052414;font-size:16px;padding:16px 8px}
-
-/* ===== ظاهر جدید بخش روباه (مثل چیکو) + نوار پایین تخت ===== */
-:root{--cn-bg:#0d0f1e;--cn-card:#141729;--cn-line:#262b45;--cn-gold:#f4b63f;--cn-mut:#8e94ad}
-body{background:var(--cn-bg)!important}
-.scene{display:none!important}
-.topbar,.updated{display:none!important}
-#foxView{padding-top:2px}
-.ch-hero{position:relative;height:262px;border-radius:30px;overflow:hidden;border:1.5px solid var(--cn-line);background:#1a1d33;margin-bottom:18px;box-shadow:0 12px 30px #0009}
-.ch-bg{position:absolute;inset:0;background:radial-gradient(circle at 50% 30%,#3a3470,#14162b);display:flex;align-items:center;justify-content:center;font-size:110px}
-.ch-bg img{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block}
-.ch-hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,#0d0f1e00 38%,#0d0f1ecc 100%);poi
+.rk-chips button.on{background:#ffc46b;color:#2a12
