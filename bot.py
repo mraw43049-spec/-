@@ -318,6 +318,158 @@ def vip_set_skins(user, owned, active):
     user.fox_skin_active = 1 if active else 0
 
 
+import pets as pets_mod
+
+
+def pet_home_text(user):
+    owned = pets_mod.pets_owned(user)
+    active = pets_mod.pet_active(user)
+    lines = ["🐾 پت‌های روبی", "", f"💰 روب‌پوینت تو: {int(user.fox_points or 0):,}", ""]
+    for k in pets_mod.PET_ORDER:
+        p = pets_mod.PETS[k]
+        if k == active:
+            st = "🟢 فعال"
+        elif k in owned:
+            st = "✅ داری"
+        elif k == pets_mod.pet_next_to_buy(user):
+            st = f"🛒 {p['price']:,} روب‌پوینت"
+        else:
+            st = "🔒 قفل"
+        lines.append(f"{p['emoji']} {p['name']} — {st}")
+    lines += ["", "ترتیب پت‌ها: همستر ← گربه ← خرگوش ← سگ پامرانین", "هر پت بعد از خریدن پت قبلی باز میشه ⬇️"]
+    return "\n".join(lines)
+
+
+def pet_home_keyboard(user):
+    owned = pets_mod.pets_owned(user)
+    active = pets_mod.pet_active(user)
+    rows = []
+    for k in pets_mod.PET_ORDER:
+        p = pets_mod.PETS[k]
+        mark = "🟢" if k == active else ("✅" if k in owned else ("🛒" if k == pets_mod.pet_next_to_buy(user) else "🔒"))
+        rows.append([InlineKeyboardButton(f"{p['emoji']} {p['name']} {mark}", callback_data=f"pet:view:{k}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="vip:back")])
+    return InlineKeyboardMarkup(rows)
+
+
+def pet_view_text(user, key):
+    p = pets_mod.PETS[key]
+    owned = pets_mod.pets_owned(user)
+    active = pets_mod.pet_active(user)
+    if key == active:
+        st = "🟢 فعال"
+    elif key in owned:
+        st = "✅ این پت مال توئه"
+    elif key == pets_mod.pet_next_to_buy(user):
+        st = f"💰 قیمت: {p['price']:,} روب‌پوینت"
+    else:
+        prev = pets_mod.PET_ORDER[pets_mod.PET_ORDER.index(key) - 1]
+        st = f"🔒 اول باید {pets_mod.PETS[prev]['emoji']} {pets_mod.PETS[prev]['name']} رو بخری"
+    return f"{p['emoji']} {p['name']}\n\n{p['about']}\n\n{st}\n💰 روب‌پوینت تو: {int(user.fox_points or 0):,}"
+
+
+def pet_view_keyboard(user, key):
+    owned = pets_mod.pets_owned(user)
+    active = pets_mod.pet_active(user)
+    rows = []
+    if key == active:
+        rows.append([InlineKeyboardButton("🔴 غیرفعال کردن", callback_data="pet:off")])
+    elif key in owned:
+        rows.append([InlineKeyboardButton("🟢 فعال کردن", callback_data=f"pet:on:{key}")])
+    elif key == pets_mod.pet_next_to_buy(user):
+        rows.append([InlineKeyboardButton("🛒 بخرش", callback_data=f"pet:ask:{key}")])
+    rows.append([InlineKeyboardButton("🔙 پت‌ها", callback_data="pet:home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def pet_confirm_keyboard(key):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ آره بخرش", callback_data=f"pet:yes:{key}")],
+        [InlineKeyboardButton("❌ نه منصرف شدم", callback_data=f"pet:view:{key}")],
+    ])
+
+
+async def pet_command(update, context):
+    if not await require_membership(update, context):
+        return
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        text, kb = pet_home_text(user), pet_home_keyboard(user)
+        active = pets_mod.pet_active(user)
+        photo = pets_mod.pet_image_path(active) if active else None
+    finally:
+        session.close()
+    msg = update.effective_message
+    if photo and os.path.exists(photo):
+        try:
+            with open(photo, "rb") as f:
+                await msg.reply_photo(photo=InputFile(f), caption=text, reply_markup=kb)
+            return
+        except Exception as exc:
+            logger.warning("pet panel photo failed: %s", exc)
+    await msg.reply_text(text, reply_markup=kb)
+
+
+async def pet_button(update, context):
+    q = update.callback_query
+    parts = q.data.split(":")
+    if not await require_membership(update, context):
+        return
+    action = parts[1] if len(parts) > 1 else ''
+    key = parts[2] if len(parts) > 2 else ''
+    session = get_session()
+    try:
+        user = get_or_create_user(session, q.from_user)
+        if action == 'home':
+            await q.answer()
+            active = pets_mod.pet_active(user)
+            await vip_show(q, pet_home_text(user), pet_home_keyboard(user),
+                           photo_path=pets_mod.pet_image_path(active) if active else None)
+            return
+        if action == 'off':
+            pets_mod.pet_select(user, '')
+            session.commit()
+            await q.answer("🔴 پت غیرفعال شد.")
+            await vip_show(q, pet_home_text(user), pet_home_keyboard(user))
+            return
+        if key not in pets_mod.PETS:
+            await q.answer(); return
+        photo = pets_mod.pet_image_path(key)
+        if action == 'view':
+            await q.answer()
+            await vip_show(q, pet_view_text(user, key), pet_view_keyboard(user, key), photo_path=photo)
+            return
+        if action == 'on':
+            ok, msg = pets_mod.pet_select(user, key)
+            if ok:
+                session.commit()
+            await q.answer(("🟢 " if ok else "⛔ ") + msg, show_alert=not ok)
+            await vip_show(q, pet_view_text(user, key), pet_view_keyboard(user, key), photo_path=photo, same_photo=True)
+            return
+        if action == 'ask':
+            ok, msg = pets_mod.pet_can_buy(user, key)
+            if not ok:
+                await q.answer("⛔ " + msg, show_alert=True)
+                return
+            p = pets_mod.PETS[key]
+            await q.answer()
+            await vip_show(q, f"{p['emoji']} {p['name']}\n\n💰 قیمت: {p['price']:,} روب‌پوینت\n\nآیا از خرید این پت مطمئن هستی؟",
+                           pet_confirm_keyboard(key), photo_path=photo, same_photo=True)
+            return
+        if action == 'yes':
+            vip_settle_production(user)
+            ok, msg = pets_mod.pet_buy(user, key)
+            if ok:
+                session.commit()
+            await q.answer(("🎉 " if ok else "⛔ ") + msg, show_alert=True)
+            await vip_show(q, pet_view_text(user, key), pet_view_keyboard(user, key), photo_path=photo, same_photo=True)
+            return
+        await q.answer()
+    finally:
+        session.close()
+
+
 def get_or_create_group_chat(session, chat_id, title=None):
     """گپ را برمی‌گرداند و اگه نبود می‌سازد؛ در برابر درخواست‌های هم‌زمان (race) ایمن است
     (قبلاً دو پیام هم‌زمان از یک گپ جدید باعث خطای duplicate key روی group_chats می‌شد)."""
@@ -8030,6 +8182,7 @@ def gift_shop_keyboard():
     rows = [
         [InlineKeyboardButton("🎁 خرید گیفت استارزی", callback_data="gift:tiers:0:0")],
         [InlineKeyboardButton("کمد VIP 🪄", callback_data="vip:home")],
+        [InlineKeyboardButton("🐾 پت‌ها", callback_data="pet:home")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -16338,6 +16491,8 @@ def main():
     app.add_handler(CommandHandler("transfer",transfer_command))
     app.add_handler(CommandHandler("hunt",hunt_command))
     app.add_handler(CommandHandler("fox",fox_command))
+    app.add_handler(CommandHandler(["pet","pets"],pet_command))
+    app.add_handler(MessageHandler(filters.Regex(r"^/(?:پت|پت‌ها|حیوان|حیوون)(?:@\w+)?$"), pet_command), group=1)
     app.add_handler(CommandHandler("account_recovery", recovery_command))
     app.add_handler(CommandHandler("giveaway", giveaway_command))
     app.add_handler(CommandHandler("factory",factory_command))
@@ -16406,6 +16561,7 @@ def main():
     app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|opt|qty|qtyok|backshop|backopt|tiers|backtiers|notext|noop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(points_button,pattern=r"^points:(?:shop|pick|backshop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(vip_button,pattern=r"^vip:[a-z]+(?::[a-z]+){0,3}$"))
+    app.add_handler(CallbackQueryHandler(pet_button,pattern=r"^pet:[a-z]+(?::[a-z]+)?$"))
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(fake_receipt_ban_button,pattern=r"^fakeban:\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))

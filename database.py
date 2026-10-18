@@ -65,6 +65,8 @@ class User(Base):
     fox_skin_active = Column(Integer, nullable=False, default=0)
     fox_profile_locked = Column(Integer, nullable=False, default=0)
     fox_skins_active = Column(String, nullable=True, default=None)  # کلیدهای اسکین‌های فعال (با کاما)؛ None = داده‌ی قدیمی
+    pets_owned = Column(String, nullable=False, default='')   # پت‌های خریداری‌شده (همستر همیشه هست)
+    pet_active = Column(String, nullable=False, default='')   # پت فعال
     marriage_lock_until = Column(DateTime(timezone=True), nullable=True)
     potion_count = Column(Integer, nullable=False, default=0)
     ratkiller_count = Column(Integer, nullable=False, default=0)  # تعداد مرگ‌موش خریداری‌شده از مارکت روبی
@@ -761,6 +763,8 @@ def init_db():
         'fox_skin': "VARCHAR NOT NULL DEFAULT ''",
         'fox_skin_active': 'INTEGER NOT NULL DEFAULT 0',
         'fox_skins_active': 'VARCHAR',
+        'pets_owned': "VARCHAR NOT NULL DEFAULT ''",
+        'pet_active': "VARCHAR NOT NULL DEFAULT ''",
         'marriage_lock_until': DT_SQL_TYPE,
         'potion_count': 'INTEGER NOT NULL DEFAULT 0',
         'ratkiller_count': 'INTEGER NOT NULL DEFAULT 0',

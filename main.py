@@ -28,6 +28,7 @@ from sqlalchemy import func, text, Table, MetaData, Column, Integer, String, Big
 import httpx
 
 import attack_owl
+import pets as pets_mod
 from auth import extract_telegram_user, validate_init_data
 
 try:
@@ -621,6 +622,8 @@ def fox_state(session, user, botmod=None):
         "skin_title": SKIN_INFO.get(skin_key, ""),
         "skin_image": image,
         "active_skins": [SKIN_INFO[k] for k in skins],
+        "pets": pets_mod.pets_payload(user),
+        "pet_active": pets_mod.pet_active(user),
     }
     if botmod is not None:
         state["fox_rank"] = botmod.fox_rank(lvl)
@@ -832,6 +835,47 @@ def fox_upgrade(tg_user: dict = Depends(current_telegram_user)):
         user.fox_last_production_at = botmod.now_utc()
         session.commit()
         return {"message": f"🦊 روباه رفت لول {user.fox_level}! مقام: {botmod.fox_rank(user.fox_level)}"}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+class PetBody(BaseModel):
+    key: str = ""
+
+
+@app.post("/api/pet/buy")
+def pet_buy_api(body: PetBody, tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = locked_user(session, tg_user, botmod)
+        botmod.settle_fox_production(user)
+        ok, msg = pets_mod.pet_buy(user, body.key)
+        if not ok:
+            raise HTTPException(status_code=400, detail=msg)
+        session.commit()
+        return {"message": "🎉 " + msg}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@app.post("/api/pet/select")
+def pet_select_api(body: PetBody, tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = locked_user(session, tg_user, botmod)
+        ok, msg = pets_mod.pet_select(user, body.key or "")
+        if not ok:
+            raise HTTPException(status_code=400, detail=msg)
+        session.commit()
+        return {"message": "✅ " + msg}
     except HTTPException:
         session.rollback()
         raise

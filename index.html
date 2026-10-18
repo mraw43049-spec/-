@@ -629,6 +629,25 @@ body{padding-bottom:calc(120px + env(safe-area-inset-bottom,0px))!important}
 body{padding-top:calc(14px + var(--ruby-top))!important}
 .toast{top:calc(10px + var(--ruby-top))!important}
 .lb-close{top:calc(12px + var(--ruby-top))!important}
+/* toast: وقتی بسته‌ست کامل از صفحه خارج بشه (قبلاً با فاصله‌ی بالای صفحه نیمه‌باز می‌موند) */
+.toast{transform:translateY(calc(-100% - var(--ruby-top) - 40px))!important;opacity:0;visibility:hidden;transition:transform .25s ease,opacity .2s ease,visibility 0s linear .25s!important}
+.toast.show{transform:translateY(0)!important;opacity:1;visibility:visible;transition:transform .25s ease,opacity .2s ease!important}
+/* پت‌ها */
+.pet-hint{font-size:12px;line-height:1.8;margin:-2px 0 10px;text-align:center}
+.pet-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.pet-tile{background:#151832;border:1px solid #2a2f58;border-radius:16px;padding:12px 8px 10px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px}
+.pet-tile.active{border-color:#3fbf6a;box-shadow:0 0 0 1px #3fbf6a55 inset}
+.pet-tile.locked{opacity:.55}
+.pet-em{font-size:54px;line-height:1.1;filter:drop-shadow(0 4px 6px #0008);animation:petBob 2.6s ease-in-out infinite}
+.pet-tile.locked .pet-em{filter:grayscale(1) brightness(.7);animation:none}
+@keyframes petBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.pet-name{font-weight:800;font-size:14px}
+.pet-about{font-size:11px;line-height:1.7;color:#9aa0c8;min-height:38px}
+.pet-btn{width:100%;border:0;border-radius:12px;padding:9px 6px;font-size:13px;font-weight:800;font-family:inherit;color:#fff;background:#3b4cca}
+.pet-btn.buy{background:#c98a1b}
+.pet-btn.on{background:#2f9e57}
+.pet-btn.off{background:#7a3030}
+.pet-btn:disabled{background:#2a2f58;color:#8a90b8}
 
 /* ===== نسخه‌ی ۴ منوی پایین: آیکون‌های گرادیانی اختصاصی ===== */
 .tab .ti{display:flex;align-items:center;justify-content:center;width:42px;height:42px;font-size:0;filter:none!important}
@@ -831,6 +850,12 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
       <span id="genderChip" class="chip">جنسیت —</span>
       <span id="skinChip" class="chip skin" style="display:none"></span>
     </div>
+  </div>
+
+  <div class="card" id="petsCard">
+    <div class="section-title">🐾 پت‌های روبی</div>
+    <div class="pet-hint muted">همستر رایگانه؛ بعدش گربه، خرگوش و سگ پامرانین رو به‌ترتیب می‌تونی بخری.</div>
+    <div class="pet-grid" id="petGrid"></div>
   </div>
 
   <div class="card">
@@ -1407,7 +1432,50 @@ function __rubyMain(){
     var off = d.locked || d.sick;
     $("btnCollect").disabled = off; $("btnUpgrade").disabled = off || d.upgrade_cost == null;
     $("btnRename").disabled = off; $("btnGender").disabled = off;
+    renderPets(d);
   }
+
+  function renderPets(d){
+    var g = $("petGrid"); if (!g) return;
+    var pets = d.pets || [];
+    g.innerHTML = "";
+    pets.forEach(function(p){
+      var t = document.createElement("div");
+      t.className = "pet-tile" + (p.active ? " active" : "") + (p.locked ? " locked" : "");
+      var em = document.createElement("div"); em.className = "pet-em"; em.textContent = p.emoji;
+      var nm = document.createElement("div"); nm.className = "pet-name"; nm.textContent = p.name;
+      var ab = document.createElement("div"); ab.className = "pet-about"; ab.textContent = p.about;
+      var b = document.createElement("button"); b.type = "button"; b.className = "pet-btn";
+      if (p.active) { b.textContent = "🔴 غیرفعال کن"; b.className += " off"; b.onclick = function(){ act("/api/pet/select", { key: "" }); }; }
+      else if (p.owned) { b.textContent = "🟢 فعال کن"; b.className += " on"; b.onclick = function(){ act("/api/pet/select", { key: p.key }); }; }
+      else if (p.can_buy) {
+        b.textContent = "🛒 خرید " + fa(p.price) + " روب‌پوینت"; b.className += " buy";
+        b.onclick = function(){ if (confirm("خرید " + p.name + " به قیمت " + fa(p.price) + " روب‌پوینت؟")) act("/api/pet/buy", { key: p.key }); };
+      } else { b.textContent = "🔒 قفل"; b.disabled = true; }
+      t.appendChild(em); t.appendChild(nm); t.appendChild(ab); t.appendChild(b);
+      g.appendChild(t);
+    });
+  }
+
+  // فاصله‌ی بالای صفحه: safe-area گوشی + هدر تلگرام (در حالت تمام‌صفحه)؛ با هر تغییر دوباره حساب می‌شه
+  var __probe = document.createElement("div");
+  __probe.style.cssText = "position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;padding-top:env(safe-area-inset-top,0px)";
+  document.body.appendChild(__probe);
+  function applyTopInset(){
+    try {
+      var envTop = parseFloat(getComputedStyle(__probe).paddingTop) || 0;
+      var sa = (tg && tg.safeAreaInset && tg.safeAreaInset.top) || 0;
+      var ca = (tg && tg.contentSafeAreaInset && tg.contentSafeAreaInset.top) || 0;
+      var top = Math.max(envTop, sa) + ca;
+      if (!top && tg && tg.isFullscreen) top = 44;   // حالت تمام‌صفحه ولی عددی گزارش نشده
+      document.documentElement.style.setProperty("--ruby-top", top + "px");
+    } catch(e){}
+  }
+  applyTopInset();
+  try {
+    ["safeAreaChanged","contentSafeAreaChanged","fullscreenChanged","viewportChanged"].forEach(function(ev){ tg && tg.onEvent && tg.onEvent(ev, applyTopInset); });
+  } catch(e){}
+  window.addEventListener("resize", applyTopInset);
 
   // اسکین قبلی را بلافاصله از کش مرورگر نشان می‌دهیم؛ منتظر پاسخ API نمی‌مانیم.
   function paintCachedSkinInstant(){
