@@ -321,22 +321,46 @@ def vip_set_skins(user, owned, active):
 import pets as pets_mod
 
 
-def pet_home_text(user):
+def _pet_bar(v):
+    n = max(0, min(10, int(round(v / 10.0))))
+    return "▰" * n + "▱" * (10 - n)
+
+
+def _pet_fmt_left(sec):
+    sec = int(sec)
+    return f"{sec // 3600} ساعت و {(sec % 3600) // 60} دقیقه" if sec >= 3600 else f"{max(1, sec // 60)} دقیقه"
+
+
+def pet_home_text(user, user_name=''):
     owned = pets_mod.pets_owned(user)
     active = pets_mod.pet_active(user)
-    lines = ["🐾 پت‌های روبی", "", f"💰 روب‌پوینت تو: {int(user.fox_points or 0):,}", ""]
+    lines = ["🐾 پت‌های روبی", "", f"💰 روب‌پوینت تو: {int(user.fox_points or 0):,}"]
+    st = pets_mod.pet_status(user, user_name)
+    if st:
+        lines += ["",
+                  f"{st['emoji']} {st['name']} — {st['title']}",
+                  f"⭐ لول {st['level']}/{st['max_level']}   ⚔️ قدرت {st['power']}   🏆 {st['wins']} برد / {st['losses']} باخت",
+                  f"🍖 سیری  {_pet_bar(st['satiety'])} {st['satiety']}٪",
+                  f"💖 حال    {_pet_bar(st['mood'])} {st['mood']}٪",
+                  f"💬 «{st['say']}»"]
+        if st['mission']:
+            m = st['mission']
+            lines.append("🎒 ماموریت: " + ("✅ برگشته! جایزه‌ش رو بگیر" if m['done'] else f"⏳ {_pet_fmt_left(m['left'])} مونده"))
+    lines.append("")
     for k in pets_mod.PET_ORDER:
         p = pets_mod.PETS[k]
         if k == active:
-            st = "🟢 فعال"
+            stt = "🟢 فعال"
         elif k in owned:
-            st = "✅ داری"
+            stt = "✅ داری"
         elif k == pets_mod.pet_next_to_buy(user):
-            st = f"🛒 {p['price']:,} روب‌پوینت"
+            stt = f"🛒 {p['price']:,} روب‌پوینت"
         else:
-            st = "🔒 قفل"
-        lines.append(f"{p['emoji']} {p['name']} — {st}")
-    lines += ["", "ترتیب پت‌ها: همستر ← گربه ← خرگوش ← سگ پامرانین", "هر پت بعد از خریدن پت قبلی باز میشه ⬇️"]
+            stt = "🔒 قفل"
+        lines.append(f"{p['emoji']} {p['name']} — {stt}")
+    lines += ["", "ترتیب پت‌ها: همستر ← گربه ← خرگوش ← سگ پامرانین"]
+    if st:
+        lines.append("اسم‌گذاری: /petname اسم")
     return "\n".join(lines)
 
 
@@ -344,11 +368,28 @@ def pet_home_keyboard(user):
     owned = pets_mod.pets_owned(user)
     active = pets_mod.pet_active(user)
     rows = []
+    st = pets_mod.pet_status(user)
+    if st:
+        rows.append([InlineKeyboardButton("🍪 بیسکوییت (10هزار)", callback_data="pet:feed:snack"),
+                     InlineKeyboardButton("🍖 غذای کامل (40هزار)", callback_data="pet:feed:meal")])
+        rows.append([InlineKeyboardButton("🤗 نوازش", callback_data="pet:play"),
+                     InlineKeyboardButton("⚔️ نبرد", callback_data="pet:bt")])
+        if st['mission'] and st['mission']['done']:
+            rows.append([InlineKeyboardButton("🎁 گرفتن جایزه‌ی ماموریت", callback_data="pet:mc")])
+        elif not st['mission']:
+            rows.append([InlineKeyboardButton("🎒 فرستادن به ماموریت", callback_data="pet:mis")])
     for k in pets_mod.PET_ORDER:
         p = pets_mod.PETS[k]
         mark = "🟢" if k == active else ("✅" if k in owned else ("🛒" if k == pets_mod.pet_next_to_buy(user) else "🔒"))
         rows.append([InlineKeyboardButton(f"{p['emoji']} {p['name']} {mark}", callback_data=f"pet:view:{k}")])
     rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="vip:back")])
+    return InlineKeyboardMarkup(rows)
+
+
+def pet_mission_keyboard():
+    rows = [[InlineKeyboardButton(f"{m['name']} — {h} ساعت (~{m['pts']:,})", callback_data=f"pet:ms:{h}")]
+            for h, m in pets_mod.MISSIONS.items()]
+    rows.append([InlineKeyboardButton("🔙 پت‌ها", callback_data="pet:home")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -395,7 +436,7 @@ async def pet_command(update, context):
     session = get_session()
     try:
         user = get_or_create_user(session, update.effective_user)
-        text, kb = pet_home_text(user), pet_home_keyboard(user)
+        text, kb = pet_home_text(user, update.effective_user.first_name or ''), pet_home_keyboard(user)
         active = pets_mod.pet_active(user)
         photo = pets_mod.pet_image_path(active) if active else None
     finally:
@@ -411,6 +452,21 @@ async def pet_command(update, context):
     await msg.reply_text(text, reply_markup=kb)
 
 
+async def petname_command(update, context):
+    if not await require_membership(update, context):
+        return
+    name = " ".join(context.args or [])
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        ok, msg = pets_mod.pet_rename(user, name) if name.strip() else (False, "اسم رو بنویس؛ مثلاً: /petname میمی")
+        if ok:
+            session.commit()
+    finally:
+        session.close()
+    await update.effective_message.reply_text(("✅ " if ok else "⛔ ") + msg)
+
+
 async def pet_button(update, context):
     q = update.callback_query
     parts = q.data.split(":")
@@ -421,11 +477,51 @@ async def pet_button(update, context):
     session = get_session()
     try:
         user = get_or_create_user(session, q.from_user)
+        uname = q.from_user.first_name or ''
+
+        async def _home(note=None, same_photo=False):
+            act_key = pets_mod.pet_active(user)
+            text = pet_home_text(user, uname)
+            if note:
+                text = note + "\n\n━━━━━━━━━━\n\n" + text
+            await vip_show(q, text[:1020] if getattr(q.message, 'photo', None) else text, pet_home_keyboard(user),
+                           photo_path=pets_mod.pet_image_path(act_key) if act_key else None, same_photo=same_photo)
+
         if action == 'home':
             await q.answer()
-            active = pets_mod.pet_active(user)
-            await vip_show(q, pet_home_text(user), pet_home_keyboard(user),
-                           photo_path=pets_mod.pet_image_path(active) if active else None)
+            await _home()
+            return
+        if action in ('feed', 'play', 'bt', 'mc', 'ms'):
+            if action == 'feed':
+                ok, msg = pets_mod.pet_feed(user, key, uname)
+            elif action == 'play':
+                ok, msg = pets_mod.pet_play(user, uname)
+            elif action == 'bt':
+                ok, msg = pets_mod.pet_battle(session, user, uname)
+            elif action == 'mc':
+                ok, msg = pets_mod.pet_mission_collect(user, uname)
+            else:
+                try:
+                    hours = int(key)
+                except ValueError:
+                    await q.answer(); return
+                ok, msg = pets_mod.pet_mission_start(user, hours, uname)
+            if ok:
+                session.commit()
+            else:
+                await q.answer("⛔ " + msg, show_alert=True)
+                return
+            if action in ('bt', 'mc', 'ms'):
+                await q.answer()
+                await _home(note=msg, same_photo=True)
+            else:
+                await q.answer(msg[:190], show_alert=False)
+                await _home(same_photo=True)
+            return
+        if action == 'mis':
+            await q.answer()
+            await vip_show(q, "🎒 پتت رو به کدوم ماموریت بفرستی؟\n\n• هر ماموریت ۲۰٪ از سیری پت رو مصرف می‌کنه\n• پت خوشحال جایزه‌ی بیشتری میاره\n• تا برنگرده نمی‌تونه بجنگه",
+                           pet_mission_keyboard(), photo_path=pets_mod.pet_image_path(pets_mod.pet_active(user)) if pets_mod.pet_active(user) else None, same_photo=True)
             return
         if action == 'off':
             pets_mod.pet_select(user, '')
@@ -16492,6 +16588,7 @@ def main():
     app.add_handler(CommandHandler("hunt",hunt_command))
     app.add_handler(CommandHandler("fox",fox_command))
     app.add_handler(CommandHandler(["pet","pets"],pet_command))
+    app.add_handler(CommandHandler("petname",petname_command))
     app.add_handler(MessageHandler(filters.Regex(r"^/(?:پت|پت‌ها|حیوان|حیوون)(?:@\w+)?$"), pet_command), group=1)
     app.add_handler(CommandHandler("account_recovery", recovery_command))
     app.add_handler(CommandHandler("giveaway", giveaway_command))
@@ -16561,7 +16658,7 @@ def main():
     app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|opt|qty|qtyok|backshop|backopt|tiers|backtiers|notext|noop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(points_button,pattern=r"^points:(?:shop|pick|backshop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(vip_button,pattern=r"^vip:[a-z]+(?::[a-z]+){0,3}$"))
-    app.add_handler(CallbackQueryHandler(pet_button,pattern=r"^pet:[a-z]+(?::[a-z]+)?$"))
+    app.add_handler(CallbackQueryHandler(pet_button,pattern=r"^pet:[a-z]+(?::[a-z0-9]+)?$"))
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(fake_receipt_ban_button,pattern=r"^fakeban:\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))

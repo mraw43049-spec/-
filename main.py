@@ -623,6 +623,7 @@ def fox_state(session, user, botmod=None):
         "skin_image": image,
         "active_skins": [SKIN_INFO[k] for k in skins],
         "pets": pets_mod.pets_payload(user),
+        "pet": pets_mod.pet_status(user, user.first_name or ""),
         "pet_active": pets_mod.pet_active(user),
     }
     if botmod is not None:
@@ -881,6 +882,69 @@ def pet_select_api(body: PetBody, tg_user: dict = Depends(current_telegram_user)
         raise
     finally:
         session.close()
+
+
+class PetFoodBody(BaseModel):
+    food: str = ""
+
+
+class PetNameBody(BaseModel):
+    name: str = ""
+
+
+class PetMissionBody(BaseModel):
+    hours: int = 1
+
+
+def _pet_action(tg_user, fn, with_session=False):
+    """اجرای یه اکشن پت روی کاربر با قفل ردیف و commit."""
+    botmod = load_botmod()
+    session = get_session()
+    try:
+        user = locked_user(session, tg_user, botmod)
+        botmod.settle_fox_production(user)
+        name = user.first_name or ""
+        ok, msg = fn(session, user, name)
+        if not ok:
+            session.rollback()
+            raise HTTPException(status_code=400, detail=msg)
+        session.commit()
+        return {"message": msg}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@app.post("/api/pet/feed")
+def pet_feed_api(body: PetFoodBody, tg_user: dict = Depends(current_telegram_user)):
+    return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_feed(u, body.food, n))
+
+
+@app.post("/api/pet/play")
+def pet_play_api(tg_user: dict = Depends(current_telegram_user)):
+    return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_play(u, n))
+
+
+@app.post("/api/pet/rename")
+def pet_rename_api(body: PetNameBody, tg_user: dict = Depends(current_telegram_user)):
+    return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_rename(u, body.name))
+
+
+@app.post("/api/pet/mission")
+def pet_mission_api(body: PetMissionBody, tg_user: dict = Depends(current_telegram_user)):
+    return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_mission_start(u, body.hours, n))
+
+
+@app.post("/api/pet/mission/collect")
+def pet_mission_collect_api(tg_user: dict = Depends(current_telegram_user)):
+    return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_mission_collect(u, n))
+
+
+@app.post("/api/pet/battle")
+def pet_battle_api(tg_user: dict = Depends(current_telegram_user)):
+    return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_battle(s, u, n))
 
 
 class RenameBody(BaseModel):

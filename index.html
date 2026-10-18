@@ -648,6 +648,40 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
 .pet-btn.on{background:#2f9e57}
 .pet-btn.off{background:#7a3030}
 .pet-btn:disabled{background:#2a2f58;color:#8a90b8}
+.toast{white-space:pre-line}
+#petPanel{margin-bottom:12px}
+.pp{background:linear-gradient(160deg,#1a1f45,#151832);border:1px solid #2f3566;border-radius:18px;padding:14px}
+.pp-head{display:flex;align-items:center;gap:12px}
+.pp-em{font-size:64px;line-height:1;animation:petBob 2.6s ease-in-out infinite;filter:drop-shadow(0 6px 8px #0009)}
+.pp-meta{flex:1;min-width:0}
+.pp-name{font-weight:900;font-size:17px;display:flex;align-items:center;gap:6px}
+.pp-name button{background:#2a2f58;border:0;color:#cfd3ff;border-radius:8px;padding:2px 7px;font-size:12px;font-family:inherit}
+.pp-sub{font-size:12px;color:#9aa0c8;margin-top:2px}
+.pp-lvl{background:#3b4cca;border-radius:12px;padding:6px 10px;font-weight:900;font-size:13px;text-align:center;white-space:nowrap}
+.pp-bar{margin-top:10px}
+.pp-bar .lbl{display:flex;justify-content:space-between;font-size:12px;color:#b9bfe8;margin-bottom:4px}
+.pp-track{height:9px;background:#0e1130;border-radius:6px;overflow:hidden}
+.pp-fill{height:100%;border-radius:6px;transition:width .4s}
+.pp-fill.xp{background:linear-gradient(90deg,#7b5cff,#c27bff)}
+.pp-fill.sat{background:linear-gradient(90deg,#ff9a3c,#ffd23c)}
+.pp-fill.mood{background:linear-gradient(90deg,#ff5c8a,#ff9ac0)}
+.pp-fill.low{background:#e04646}
+.pp-say{margin-top:12px;background:#0e1130;border:1px solid #2a2f58;border-radius:14px;padding:10px 12px;font-size:13px;line-height:1.8;position:relative}
+.pp-stats{display:flex;gap:8px;margin-top:10px;font-size:12px;color:#cfd3ff;flex-wrap:wrap}
+.pp-stats span{background:#0e1130;border-radius:10px;padding:5px 9px}
+.pp-actions{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}
+.pp-actions button,.pp-mis button{border:0;border-radius:12px;padding:10px 6px;font-size:13px;font-weight:800;font-family:inherit;color:#fff;background:#3b4cca}
+.pp-actions button.food{background:#c98a1b}
+.pp-actions button.play{background:#d6457a}
+.pp-actions button.fight{background:#7a3030}
+.pp-actions button:disabled,.pp-mis button:disabled{background:#2a2f58;color:#8a90b8}
+.pp-mis{margin-top:12px;border-top:1px dashed #2f3566;padding-top:12px}
+.pp-mis .t{font-size:13px;font-weight:800;margin-bottom:8px}
+.pp-mis .row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.pp-mis .row button{background:#2f6f8f;font-size:12px}
+.pp-mis .go{width:100%;background:#2f9e57}
+.pp-mis .row button{white-space:pre-line;line-height:1.6}
+.pp-empty{text-align:center;color:#9aa0c8;font-size:13px;padding:10px}
 
 /* ===== نسخه‌ی ۴ منوی پایین: آیکون‌های گرادیانی اختصاصی ===== */
 .tab .ti{display:flex;align-items:center;justify-content:center;width:42px;height:42px;font-size:0;filter:none!important}
@@ -855,6 +889,7 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
   <div class="card" id="petsCard">
     <div class="section-title">🐾 پت‌های روبی</div>
     <div class="pet-hint muted">همستر رایگانه؛ بعدش گربه، خرگوش و سگ پامرانین رو به‌ترتیب می‌تونی بخری.</div>
+    <div id="petPanel"></div>
     <div class="pet-grid" id="petGrid"></div>
   </div>
 
@@ -1194,7 +1229,7 @@ function __rubyMain(){
     void t.offsetWidth;
     t.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function(){ t.classList.remove("show"); }, ok ? 3500 : 4500);
+    toastTimer = setTimeout(function(){ t.classList.remove("show"); }, (text || "").length > 70 ? 8000 : (ok ? 3500 : 4500));
     try {
       if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred(ok ? "success" : "error");
     } catch(e){}
@@ -1432,7 +1467,108 @@ function __rubyMain(){
     var off = d.locked || d.sick;
     $("btnCollect").disabled = off; $("btnUpgrade").disabled = off || d.upgrade_cost == null;
     $("btnRename").disabled = off; $("btnGender").disabled = off;
+    renderPetPanel(d.pet);
     renderPets(d);
+  }
+
+  var petTick = null;
+  function fmtLeft(sec){
+    sec = Math.max(0, Math.floor(sec));
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), x = sec % 60;
+    return (h ? fa(h) + " ساعت و " : "") + fa(m) + " دقیقه" + (h ? "" : " و " + fa(x) + " ثانیه");
+  }
+  function ppBar(cls, label, val, pct){
+    var w = document.createElement("div"); w.className = "pp-bar";
+    var l = document.createElement("div"); l.className = "lbl";
+    var a = document.createElement("span"); a.textContent = label;
+    var b = document.createElement("span"); b.textContent = val;
+    l.appendChild(a); l.appendChild(b);
+    var tr = document.createElement("div"); tr.className = "pp-track";
+    var f = document.createElement("div"); f.className = "pp-fill " + cls + ((cls === "sat" || cls === "mood") && pct < 30 ? " low" : "");
+    f.style.width = Math.max(2, Math.min(100, pct)) + "%";
+    tr.appendChild(f); w.appendChild(l); w.appendChild(tr);
+    return w;
+  }
+  function ppBtn(text, cls, fn, disabled){
+    var b = document.createElement("button"); b.type = "button"; b.textContent = text;
+    if (cls) b.className = cls;
+    if (disabled) b.disabled = true; else b.onclick = fn;
+    return b;
+  }
+  function renderPetPanel(pt){
+    var box = $("petPanel"); if (!box) return;
+    if (petTick) { clearInterval(petTick); petTick = null; }
+    box.innerHTML = "";
+    if (!pt) {
+      var e = document.createElement("div"); e.className = "pp-empty";
+      e.textContent = "یه پت فعال کن تا بتونی بهش غذا بدی، نازش کنی و بفرستیش ماموریت 👇";
+      box.appendChild(e); return;
+    }
+    var pp = document.createElement("div"); pp.className = "pp";
+    var head = document.createElement("div"); head.className = "pp-head";
+    var em = document.createElement("div"); em.className = "pp-em"; em.textContent = pt.emoji;
+    var meta = document.createElement("div"); meta.className = "pp-meta";
+    var nm = document.createElement("div"); nm.className = "pp-name";
+    var nt = document.createElement("span"); nt.textContent = pt.name;
+    var rn = document.createElement("button"); rn.type = "button"; rn.textContent = "✏️";
+    rn.onclick = function(){ var v = prompt("اسم جدید پتت (حداکثر ۱۲ حرف):", pt.name); if (v != null && v.trim()) act("/api/pet/rename", { name: v }); };
+    nm.appendChild(nt); nm.appendChild(rn);
+    var sub = document.createElement("div"); sub.className = "pp-sub"; sub.textContent = pt.type_name + " · " + pt.title;
+    meta.appendChild(nm); meta.appendChild(sub);
+    var lv = document.createElement("div"); lv.className = "pp-lvl"; lv.textContent = "لول " + fa(pt.level);
+    head.appendChild(em); head.appendChild(meta); head.appendChild(lv);
+    pp.appendChild(head);
+
+    pp.appendChild(ppBar("xp", "⭐ تجربه", pt.level >= pt.max_level ? "حداکثر" : fa(pt.xp_cur) + " / " + fa(pt.xp_need), pt.xp_frac * 100));
+    pp.appendChild(ppBar("sat", "🍖 سیری", fa(pt.satiety) + "٪", pt.satiety));
+    pp.appendChild(ppBar("mood", "💖 حال و هوا", fa(pt.mood) + "٪", pt.mood));
+
+    var say = document.createElement("div"); say.className = "pp-say"; say.textContent = "💬 " + pt.say;
+    pp.appendChild(say);
+
+    var st = document.createElement("div"); st.className = "pp-stats";
+    [ "⚔️ قدرت " + fa(pt.power), "🏆 " + fa(pt.wins) + " برد", "💔 " + fa(pt.losses) + " باخت" ].forEach(function(x){
+      var sp = document.createElement("span"); sp.textContent = x; st.appendChild(sp);
+    });
+    pp.appendChild(st);
+
+    var ac = document.createElement("div"); ac.className = "pp-actions";
+    (pt.foods || []).forEach(function(f){
+      ac.appendChild(ppBtn(f.emoji + " " + f.name + " (" + fa(f.price) + ")", "food", function(){ act("/api/pet/feed", { food: f.key }); }));
+    });
+    ac.appendChild(ppBtn(pt.play_wait > 0 ? "😴 " + fa(Math.ceil(pt.play_wait / 60)) + " دقیقه‌ی دیگه" : "🤗 نوازش", "play", function(){ act("/api/pet/play"); }, pt.play_wait > 0));
+    ac.appendChild(ppBtn("⚔️ نبرد (" + fa(pt.battles_left) + " باقی)", "fight", function(){ act("/api/pet/battle"); }, pt.battles_left <= 0 || !!pt.mission));
+    pp.appendChild(ac);
+
+    var ms = document.createElement("div"); ms.className = "pp-mis";
+    var mt = document.createElement("div"); mt.className = "t";
+    if (pt.mission) {
+      var endAt = Date.now() + pt.mission.left * 1000;
+      if (pt.mission.done) {
+        mt.textContent = "🎒 " + pt.mission.name + " تموم شد!";
+        ms.appendChild(mt);
+        var go = ppBtn("🎁 گرفتن جایزه", "go", function(){ act("/api/pet/mission/collect"); });
+        ms.appendChild(go);
+      } else {
+        mt.textContent = "🎒 " + pt.mission.name + " — ⏳ " + fmtLeft(pt.mission.left);
+        ms.appendChild(mt);
+        petTick = setInterval(function(){
+          var left = (endAt - Date.now()) / 1000;
+          if (left <= 0) { clearInterval(petTick); petTick = null; loadProfile(true); return; }
+          mt.textContent = "🎒 " + pt.mission.name + " — ⏳ " + fmtLeft(left);
+        }, 1000);
+      }
+    } else {
+      mt.textContent = "🎒 پتت رو بفرست ماموریت (۲۰٪ سیری مصرف می‌کنه)";
+      ms.appendChild(mt);
+      var row = document.createElement("div"); row.className = "row";
+      (pt.missions || []).forEach(function(m){
+        row.appendChild(ppBtn(m.name + "\n" + fa(m.hours) + " ساعت · ~" + fa(m.pts), "", function(){ act("/api/pet/mission", { hours: m.hours }); }));
+      });
+      ms.appendChild(row);
+    }
+    pp.appendChild(ms);
+    box.appendChild(pp);
   }
 
   function renderPets(d){
