@@ -142,6 +142,16 @@ def active_skins(user):
     return out[-1:] if out else []
 
 
+@app.get("/pet-image/{key}")
+def get_pet_image(key: str):
+    if key not in pets_mod.PETS:
+        raise HTTPException(status_code=404, detail="عکس پت پیدا نشد.")
+    p = pets_mod.pet_image_path(key)
+    if not p or not os.path.isfile(p):
+        raise HTTPException(status_code=404, detail="عکس پت در ریپو پیدا نشد.")
+    return FileResponse(p, headers={"Cache-Control": "public, max-age=3600"})
+
+
 @app.get("/skin/{key}/{gender}")
 def get_skin_image(key: str, gender: str):
     p = skin_image_file(key, gender)
@@ -868,6 +878,7 @@ def pet_buy_api(body: PetBody, tg_user: dict = Depends(current_telegram_user)):
 
 class PetFoodBody(BaseModel):
     food: str = ""
+    paid: bool = False
 
 
 class PetNameBody(BaseModel):
@@ -897,7 +908,12 @@ def _pet_action(tg_user, fn, with_session=False):
 
 @app.post("/api/pet/feed")
 def pet_feed_api(body: PetFoodBody, tg_user: dict = Depends(current_telegram_user)):
-    return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_feed(u, body.food, n))
+    return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_feed(u, body.food, n, paid=body.paid))
+
+
+@app.post("/api/pet/bath")
+def pet_bath_api(tg_user: dict = Depends(current_telegram_user)):
+    return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_bath(u))
 
 
 @app.post("/api/pet/play")

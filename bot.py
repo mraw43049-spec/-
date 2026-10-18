@@ -355,8 +355,12 @@ def pet_panel_keyboard(user):
     uid = user.telegram_id
     rows = []
     if pets_mod.pet_active(user):
-        rows.append([InlineKeyboardButton("🍪 بیسکوییت (۱۰ هزار)", callback_data=f"pet:feed:snack:{uid}"),
-                     InlineKeyboardButton("🍖 غذای کامل (۴۰ هزار)", callback_data=f"pet:feed:meal:{uid}")])
+        food_key = pets_mod.FAVORITE_FOODS[pets_mod.pet_active(user)]
+        food = pets_mod.FOODS[food_key]
+        price = pets_mod.PET_FEED_PRICE[pets_mod.pet_active(user)]
+        wait = pets_mod.PET_FEED_COOLDOWN[pets_mod.pet_active(user)]
+        rows.append([InlineKeyboardButton(f"{food['emoji']} {food['name']} (هر {wait//60} دقیقه رایگان)", callback_data=f"pet:feed:{food_key}:{uid}")])
+        rows.append([InlineKeyboardButton(f"⚡ غذای فوری ({price:,} روب‌پوینت)", callback_data=f"pet:feedpaid:{food_key}:{uid}")])
         rows.append([InlineKeyboardButton("🤗 نوازش", callback_data=f"pet:play:x:{uid}"),
                      InlineKeyboardButton("⚔️ نبرد", callback_data=f"pet:bt:x:{uid}")])
         rows.append([InlineKeyboardButton("✏️ تغییر اسم پت", callback_data=f"pet:ren:x:{uid}")])
@@ -530,8 +534,8 @@ async def pet_button(update, context):
         if action == 'bt':
             await q.answer("⚔️ نبرد به‌زودی میاد! 🔜", show_alert=True)
             return
-        if action in ('feed', 'play'):
-            ok, msg = pets_mod.pet_feed(user, arg, uname) if action == 'feed' else pets_mod.pet_play(user, uname)
+        if action in ('feed', 'feedpaid', 'play'):
+            ok, msg = pets_mod.pet_feed(user, arg, uname, paid=(action == 'feedpaid')) if action in ('feed', 'feedpaid') else pets_mod.pet_play(user, uname)
             if not ok:
                 await q.answer("⛔ " + msg, show_alert=True)
                 return

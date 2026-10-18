@@ -697,6 +697,16 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
 .lite .tab.active .ti svg,.paused .tab.active .ti svg{animation:none}
 .tab:active{transform:scale(.93)}
 .tab.active:active{transform:translateY(-8px) scale(.95)}
+.pp-em{width:88px;height:88px;flex:0 0 88px;padding:0;border:0;background:transparent;border-radius:18px;overflow:hidden;display:flex;align-items:center;justify-content:center}.pp-pet-image{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;user-select:none}
+.pp-bath-wrap{width:150px;height:150px;position:relative;flex:0 0 150px;margin:0 auto 8px;border-radius:24px;background:radial-gradient(circle at 50% 35%,#39477d,#151832 72%);overflow:hidden;touch-action:none;user-select:none}
+.pp-bath-wrap .pp-pet-image{padding:8px;filter:drop-shadow(0 5px 7px #0008)}
+.pp-dirt{position:absolute;width:13px;height:11px;border-radius:48% 52% 55% 45%;background:radial-gradient(circle at 35% 30%,#8b6748,#4b3527 70%);border:1px solid #3d2a20;box-shadow:0 1px 2px #0008;pointer-events:none;transition:opacity .18s,transform .18s;z-index:2}
+.pp-dirt.gone{opacity:0;transform:scale(.1)}
+.pp-soap{position:absolute;left:8px;bottom:8px;width:48px;height:40px;border-radius:14px;background:linear-gradient(145deg,#b9f7ff,#48b8f0 60%,#2775d6);border:2px solid #d9fbff;box-shadow:0 4px 9px #0008;display:flex;align-items:center;justify-content:center;font-size:24px;z-index:4;touch-action:none;cursor:grab}
+.pp-bath-caption{text-align:center;font-size:12px;color:#b9c5ff;line-height:1.8;margin:6px 0 10px}
+.pp-bath-btn{width:100%;border:0;border-radius:12px;padding:10px 8px;font-size:13px;font-weight:800;font-family:inherit;color:#fff;background:#2b9cbb;margin-top:6px}
+.pp-bath-btn:disabled{background:#2a2f58;color:#8a90b8}
+.pp-bath-wrap.cleaning{box-shadow:0 0 0 2px #55d6c2,0 0 20px #55d6c244}
 </style>
 </head>
 <body>
@@ -1496,8 +1506,8 @@ function __rubyMain(){
     var pp = document.createElement("div"); pp.className = "pp";
     if (pt) {
       var head = document.createElement("div"); head.className = "pp-head";
-      var em = document.createElement("button"); em.type = "button"; em.className = "pp-em"; em.textContent = pt.emoji;
-      em.setAttribute("aria-label", "لمس پت");
+      var em = document.createElement("button"); em.type = "button"; em.className = "pp-em"; em.setAttribute("aria-label", "لمس پت");
+      var petImg = document.createElement("img"); petImg.className = "pp-pet-image"; petImg.src = pt.image || ("/pet-image/" + pt.key); petImg.alt = pt.type_name || "پت"; em.appendChild(petImg);
       em.onclick = function(){ em.classList.remove("pet-tap-bounce"); void em.offsetWidth; em.classList.add("pet-tap-bounce"); act("/api/pet/tap"); };
       var meta = document.createElement("div"); meta.className = "pp-meta";
       var nm = document.createElement("div"); nm.className = "pp-name";
@@ -1510,6 +1520,38 @@ function __rubyMain(){
       head.appendChild(em); head.appendChild(meta);
       pp.appendChild(head);
 
+      // حمام فقط داخل مینی‌اپ: با کشیدن صابون روی لکه‌ها، چرک‌ها پاک می‌شوند.
+      var bath = document.createElement("div"); bath.className = "pp-bath";
+      var bathTitle = document.createElement("div"); bathTitle.className = "pp-name"; bathTitle.style.marginTop = "12px"; bathTitle.textContent = "🛁 حمام پت"; bath.appendChild(bathTitle);
+      var bathWrap = document.createElement("div"); bathWrap.className = "pp-bath-wrap";
+      var bathImg = document.createElement("img"); bathImg.className = "pp-pet-image"; bathImg.src = pt.image || ("/pet-image/" + pt.key); bathImg.alt = pt.type_name || "پت"; bathWrap.appendChild(bathImg);
+      var bathCaption = document.createElement("div"); bathCaption.className = "pp-bath-caption";
+      if (pt.bath_due) {
+        bathCaption.textContent = "پتت چرک شده! صابون رو روی لکه‌ها بکش تا تمیز بشه. (+۳ حال)";
+        bathWrap.classList.add("cleaning");
+        var dirtPositions = [[22,28],[68,23],[47,43],[28,61],[72,58],[52,75],[82,40],[15,46]];
+        var dirtNodes = [];
+        dirtPositions.forEach(function(pos, i){ var d = document.createElement("span"); d.className = "pp-dirt"; d.style.left = pos[0] + "%"; d.style.top = pos[1] + "%"; d.dataset.dirt = String(i); bathWrap.appendChild(d); dirtNodes.push(d); });
+        var soap = document.createElement("div"); soap.className = "pp-soap"; soap.textContent = "🧼"; soap.setAttribute("role","button"); soap.setAttribute("aria-label","صابون را روی لکه‌ها بکش"); bathWrap.appendChild(soap);
+        var cleaned = false, activePointer = null;
+        function rubAt(x,y){
+          var wr = bathWrap.getBoundingClientRect();
+          dirtNodes.forEach(function(d){ if(d.classList.contains("gone")) return; var r=d.getBoundingClientRect(); var cx=r.left+r.width/2, cy=r.top+r.height/2; if(Math.hypot(cx-x,cy-y)<31) d.classList.add("gone"); });
+          if(!cleaned && dirtNodes.every(function(d){return d.classList.contains("gone");})){
+            cleaned = true; soap.style.display = "none"; bathCaption.textContent = "✨ آفرین! پت کاملاً تمیز شد...";
+            api("/api/pet/bath", "POST", {}).then(function(r){ toast(r.message || "حمام انجام شد!", true); return loadProfile(true); }).catch(function(e){ toast(e.message, false); loadProfile(true); });
+          }
+        }
+        soap.addEventListener("pointerdown", function(ev){ if(cleaned)return; activePointer=ev.pointerId; soap.setPointerCapture(ev.pointerId); ev.preventDefault(); rubAt(ev.clientX,ev.clientY); });
+        soap.addEventListener("pointermove", function(ev){ if(cleaned || activePointer!==ev.pointerId)return; var wr=bathWrap.getBoundingClientRect(); var x=Math.max(20,Math.min(wr.width-20,ev.clientX-wr.left)); var y=Math.max(20,Math.min(wr.height-20,ev.clientY-wr.top)); soap.style.left=(x-24)+"px"; soap.style.top=(y-20)+"px"; soap.style.bottom="auto"; rubAt(ev.clientX,ev.clientY); ev.preventDefault(); });
+        function stopSoap(ev){ if(activePointer===ev.pointerId)activePointer=null; }
+        soap.addEventListener("pointerup",stopSoap); soap.addEventListener("pointercancel",stopSoap);
+      } else {
+        bathCaption.textContent = "پتت تمیزه؛ حمام بعدی تا " + fa(Math.ceil(Number(pt.bath_wait || 0)/3600)) + " ساعت دیگه لازمه.";
+        var cleanBadge = document.createElement("div"); cleanBadge.textContent = "✨ تمیز و خوشبو"; cleanBadge.style.cssText = "position:absolute;bottom:7px;left:7px;background:#207e70;color:#fff;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;z-index:3"; bathWrap.appendChild(cleanBadge);
+      }
+      bath.appendChild(bathWrap); bath.appendChild(bathCaption); pp.appendChild(bath);
+
       var maxed = pt.level >= pt.max_level;
       pp.appendChild(ppBar("xp", "⭐ لول " + fa(pt.level), maxed ? "حداکثر" : fa(Math.round(pt.xp_frac * 100)) + "٪", maxed ? 100 : pt.xp_frac * 100));
       pp.appendChild(ppBar("sat", "🍖 سیری", fa(pt.satiety) + "٪", pt.satiety));
@@ -1520,7 +1562,9 @@ function __rubyMain(){
 
       var ac = document.createElement("div"); ac.className = "pp-actions";
       (pt.foods || []).forEach(function(f){
-        ac.appendChild(ppBtn(f.emoji + " " + f.name + " (" + fa(f.price) + ")", "food", function(){ act("/api/pet/feed", { food: f.key }); }));
+        var wait = Number(f.wait || 0);
+        ac.appendChild(ppBtn(f.emoji + " " + f.name + (wait > 0 ? " (رایگان پس از " + fa(Math.ceil(wait/60)) + " دقیقه)" : " (رایگان)"), "food", function(){ act("/api/pet/feed", { food: f.key, paid: false }); }, wait > 0));
+        ac.appendChild(ppBtn("⚡ غذای فوری · " + fa(f.price) + " روب‌پوینت", "food", function(){ act("/api/pet/feed", { food: f.key, paid: true }); }));
       });
       ac.appendChild(ppBtn(pt.play_wait > 0 ? "😴 " + fa(Math.ceil(pt.play_wait / 60)) + " دقیقه‌ی دیگه" : "🤗 نوازش", "play", function(){ act("/api/pet/play"); }, pt.play_wait > 0));
       ac.appendChild(ppBtn("⚔️ نبرد", "fight", function(){ toast("⚔️ نبرد به‌زودی میاد! 🔜", true); }));
