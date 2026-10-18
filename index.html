@@ -1496,7 +1496,9 @@ function __rubyMain(){
     var pp = document.createElement("div"); pp.className = "pp";
     if (pt) {
       var head = document.createElement("div"); head.className = "pp-head";
-      var em = document.createElement("div"); em.className = "pp-em"; em.textContent = pt.emoji;
+      var em = document.createElement("button"); em.type = "button"; em.className = "pp-em"; em.textContent = pt.emoji;
+      em.setAttribute("aria-label", "لمس پت");
+      em.onclick = function(){ em.classList.remove("pet-tap-bounce"); void em.offsetWidth; em.classList.add("pet-tap-bounce"); act("/api/pet/tap"); };
       var meta = document.createElement("div"); meta.className = "pp-meta";
       var nm = document.createElement("div"); nm.className = "pp-name";
       var nt = document.createElement("span"); nt.textContent = pt.name;

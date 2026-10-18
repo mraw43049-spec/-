@@ -67,7 +67,11 @@ class User(Base):
     fox_skins_active = Column(String, nullable=True, default=None)  # کلیدهای اسکین‌های فعال (با کاما)؛ None = داده‌ی قدیمی
     pets_owned = Column(String, nullable=False, default='')   # پت‌های خریداری‌شده (همستر همیشه هست)
     pet_active = Column(String, nullable=False, default='')   # پت فعال
-    pets_data = Column(String, nullable=False, default='')    # وضعیت پت‌ها (JSON): اسم، تجربه، سیری، حال، ماموریت...
+    pets_data = Column(String, nullable=False, default='')    # وضعیت پت‌ها (JSON)
+    pet_hunger_reminders = Column(Integer, nullable=False, default=1)
+    pet_last_hunger_reminder_at = Column(Integer, nullable=False, default=0)
+    pet_daily_date = Column(String, nullable=False, default='')
+    pet_streak = Column(Integer, nullable=False, default=0)
     marriage_lock_until = Column(DateTime(timezone=True), nullable=True)
     potion_count = Column(Integer, nullable=False, default=0)
     ratkiller_count = Column(Integer, nullable=False, default=0)  # تعداد مرگ‌موش خریداری‌شده از مارکت روبی
@@ -767,6 +771,10 @@ def init_db():
         'pets_owned': "VARCHAR NOT NULL DEFAULT ''",
         'pet_active': "VARCHAR NOT NULL DEFAULT ''",
         'pets_data': "VARCHAR NOT NULL DEFAULT ''",
+        'pet_hunger_reminders': 'INTEGER NOT NULL DEFAULT 1',
+        'pet_last_hunger_reminder_at': 'INTEGER NOT NULL DEFAULT 0',
+        'pet_daily_date': "VARCHAR NOT NULL DEFAULT ''",
+        'pet_streak': 'INTEGER NOT NULL DEFAULT 0',
         'marriage_lock_until': DT_SQL_TYPE,
         'potion_count': 'INTEGER NOT NULL DEFAULT 0',
         'ratkiller_count': 'INTEGER NOT NULL DEFAULT 0',

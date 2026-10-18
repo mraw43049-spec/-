@@ -26,10 +26,27 @@ MAX_PET_LEVEL = 30
 SAT_DECAY_PER_H = 4.0      # سیری از ۱۰۰ تا صفر در ~۲۵ ساعت
 MOOD_DECAY_PER_H = 3.0
 PLAY_COOLDOWN = 20 * 60    # نوازش هر ۲۰ دقیقه
+# تنظیمات اقتصادی/زمانی قابلیت‌های پت (تغییر از همین‌جا)
+PET_FEED_XP = 1
+PET_PLAY_XP = 2
+PET_REMINDER_THRESHOLD = 30
+PET_REMINDER_COOLDOWN = 4 * 3600
+PET_DAILY_POINTS_BASE = 5_000
+PET_DAILY_XP_BASE = 5
+PET_DAILY_STREAK_BONUS_POINTS = 1_000
+PET_DAILY_STREAK_BONUS_XP = 1
+PET_DAILY_STREAK_MAX = 7
+PET_TAP_MOOD = 2
+PET_TAP_DAILY_LIMIT = 5
+PET_TAP_XP = 0
+PET_SLEEP_START_HOUR = 23
+PET_SLEEP_END_HOUR = 7
+FAVORITE_FOODS = {'hamster': 'snack', 'cat': 'meal', 'rabbit': 'carrot', 'dog': 'meal'}
 
 FOODS = {
     'snack': {'emoji': '🍪', 'name': 'بیسکوییت', 'price': 10_000, 'sat': 25, 'xp': 10},
     'meal':  {'emoji': '🍖', 'name': 'غذای کامل', 'price': 40_000, 'sat': 70, 'xp': 40},
+    'carrot': {'emoji': '🥕', 'name': 'هویج', 'price': 5_000, 'sat': 20, 'xp': 1},
 }
 
 PERSONALITY = {
@@ -66,6 +83,64 @@ PERSONALITY = {
         'played':  ["بازم! بازم! 🎾", "هاپ! بریم دنبال توپ!"],
     }},
 }
+
+
+def _is_sleeping():
+    # ساعت ایران، مستقل از timezone سرور
+    import datetime
+    from datetime import timezone, timedelta
+    hour = datetime.datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=3, minutes=30))).hour
+    return hour >= PET_SLEEP_START_HOUR or hour < PET_SLEEP_END_HOUR
+
+
+def _evolution_title(key, level):
+    titles = {10: 'قهرمان', 20: 'افسانه‌ای', 30: 'سلطان'}
+    tier = max((n for n in titles if level >= n), default=0)
+    return (PETS[key]['name'] + ' ' + titles[tier]) if tier else PETS[key]['name']
+
+
+def pet_daily_gift(user):
+    """هدیه‌ی روزانه‌ی idempotent؛ استریک بر اساس روزهای تقویمی ایران."""
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=3, minutes=30)))
+    today = now.date().isoformat()
+    last = getattr(user, 'pet_daily_date', '') or ''
+    if last == today:
+        return False, '🎁 هدیه‌ی امروزت رو گرفتی؛ فردا دوباره بیا!'
+    streak = int(getattr(user, 'pet_streak', 0) or 0)
+    yesterday = (now.date() - timedelta(days=1)).isoformat()
+    streak = min(PET_DAILY_STREAK_MAX, streak + 1) if last == yesterday else 1
+    user.pet_streak = streak
+    user.pet_daily_date = today
+    key = pet_active(user)
+    xp = PET_DAILY_XP_BASE + max(0, streak - 1) * PET_DAILY_STREAK_BONUS_XP
+    points = PET_DAILY_POINTS_BASE + max(0, streak - 1) * PET_DAILY_STREAK_BONUS_POINTS
+    if key:
+        data = _load(user); p = _get(data, key, _now()); _gain_xp(p, xp); _save(user, data)
+    else:
+        points = points  # هدیه بدون پت هم قابل دریافت است
+    user.fox_points = int(getattr(user, 'fox_points', 0) or 0) + points
+    return True, (f"🎁 پتت یه هدیه برات آورده!\n💰 +{points:,} روب‌پوینت\n⭐ +{xp} تجربه" + (f"\n🔥 استریک: {streak} روز" if streak > 1 else "\n🌱 استریکت شروع شد!"))
+
+
+def pet_toggle_reminders(user):
+    user.pet_hunger_reminders = 0 if int(getattr(user, 'pet_hunger_reminders', 1) or 0) else 1
+    return bool(user.pet_hunger_reminders)
+
+
+def pet_tap(user):
+    key = pet_active(user)
+    if not key: return False, 'اول یه پت بگیر.'
+    if _is_sleeping(): return False, '😴 پتت خوابه؛ صبح بیا نوازشش کن.'
+    from datetime import datetime, timezone, timedelta
+    now_dt = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=3, minutes=30)))
+    day = now_dt.date().isoformat(); now = _now(); data = _load(user); p = _get(data, key, now)
+    if p.get('tap_day') != day: p['tap_day'], p['tap_count'] = day, 0
+    if int(p.get('tap_count', 0)) >= PET_TAP_DAILY_LIMIT:
+        return False, '🐾 سهم لمس امروزت تموم شده؛ فردا دوباره بیا!'
+    p['tap_count'] = int(p.get('tap_count', 0)) + 1
+    p['mood'] = min(100.0, p['mood'] + PET_TAP_MOOD); _save(user, data)
+    return True, f"{PETS[key]['emoji']} پتت ذوق کرد! 💖 حالش +{PET_TAP_MOOD}٪ شد. ({p['tap_count']}/{PET_TAP_DAILY_LIMIT})"
 
 
 def pet_image_path(key):
@@ -151,7 +226,7 @@ def _save(user, data):
 
 
 def _blank(now):
-    return {'n': '', 'xp': 0, 'sat': 80.0, 'mood': 80.0, 't': now, 'pt': 0}
+    return {'n': '', 'xp': 0, 'sat': 80.0, 'mood': 80.0, 't': now, 'pt': 0, 'tap_day': '', 'tap_count': 0}
 
 
 def _decay(p, now):
@@ -217,7 +292,7 @@ def pet_status(user, user_name=''):
     kind = pet_state_kind(p)
     return {
         'key': key, 'emoji': PETS[key]['emoji'], 'type_name': PETS[key]['name'],
-        'name': p.get('n') or PETS[key]['name'], 'title': PERSONALITY[key]['title'],
+        'name': p.get('n') or PETS[key]['name'], 'title': PERSONALITY[key]['title'], 'evolution_title': _evolution_title(key, pet_level(int(p.get('xp', 0)))), 'reminders': bool(getattr(user, 'pet_hunger_reminders', 1)), 'sleeping': _is_sleeping(), 'favorite_food': FAVORITE_FOODS.get(key, 'meal'),
         'level': lvl, 'max_level': MAX_PET_LEVEL, 'xp': int(p.get('xp', 0)), 'xp_frac': round(frac, 3),
         'xp_cur': int(cur), 'xp_need': int(need),
         'satiety': int(round(p['sat'])), 'mood': int(round(p['mood'])),
@@ -275,21 +350,23 @@ def pet_feed(user, food_key, user_name=''):
     sat0, mood0 = p['sat'], p['mood']
     user.fox_points = int(user.fox_points or 0) - f['price']
     p['sat'] = min(100.0, p['sat'] + f['sat'])
-    p['mood'] = min(100.0, p['mood'] + 5)
-    up = _gain_xp(p, f['xp'])
+    p['mood'] = min(100.0, p['mood'] + (20 if food_key == FAVORITE_FOODS.get(key) else 5))
+    xp_gain = PET_FEED_XP
+    up = _gain_xp(p, xp_gain)
     _save(user, data)
     name = p.get('n') or PETS[key]['name']
     kind = pet_state_kind(p)
     lines = [
-        f"{f['emoji']} {pet_say(key, 'fed', p.get('n'), user_name)}", "",
+        (f"🥕 غذای محبوبمه! عاشقتم! 💚 {pet_say(key, 'fed', p.get('n'), user_name)}" if food_key == FAVORITE_FOODS.get(key) else f"{f['emoji']} {pet_say(key, 'fed', p.get('n'), user_name)}"), "",
         f"{f['emoji']} {f['name']} دادی به {name}  (-{f['price']:,} روب‌پوینت)",
         _delta_line("🍖", "سیری", sat0, p['sat']),
         _delta_line("💖", "حال", mood0, p['mood']),
-        f"⭐ +{f['xp']} تجربه",
+        f"⭐ +{xp_gain} تجربه",
         f"🙂 حال {name} الان: {_STATE_LABEL[kind]}",
     ]
     if up:
         lines.append(f"🎉 {name} رفت لول {up}!")
+        if up in (10, 20, 30): lines.append(f"🌟 تکامل جدید! از این به بعد لقبش «{_evolution_title(key, up)}»ـه! تبریک! 🎊")
     return True, "\n".join(lines)
 
 
@@ -303,13 +380,15 @@ def pet_play(user, user_name=''):
     wait = PLAY_COOLDOWN - (now - int(p.get('pt', 0)))
     if wait > 0:
         return False, f"پتت خسته‌ست؛ {int(math.ceil(wait / 60))} دقیقه‌ی دیگه بازم نازش کن 😴"
+    if _is_sleeping():
+        return False, "😴 پتت خوابه؛ بعد از ساعت ۷ صبح بیدار می‌شه."
     if p['sat'] < 10:
         return False, "پتت خیلی گرسنه‌ست، اول غذا بده 🍪"
     sat0, mood0 = p['sat'], p['mood']
     p['pt'] = now
     p['mood'] = min(100.0, p['mood'] + 18)
     p['sat'] = max(0.0, p['sat'] - 3)
-    up = _gain_xp(p, 4)
+    up = _gain_xp(p, PET_PLAY_XP)
     _save(user, data)
     name = p.get('n') or PETS[key]['name']
     kind = pet_state_kind(p)
@@ -318,9 +397,10 @@ def pet_play(user, user_name=''):
         f"🤗 {name} رو نازش کردی",
         _delta_line("💖", "حال", mood0, p['mood']),
         _delta_line("🍖", "سیری", sat0, p['sat']),
-        "⭐ +4 تجربه",
+        f"⭐ +{PET_PLAY_XP} تجربه",
         f"🙂 حال {name} الان: {_STATE_LABEL[kind]}",
     ]
     if up:
         lines.append(f"🎉 {name} رفت لول {up}!")
+        if up in (10, 20, 30): lines.append(f"🌟 تکامل جدید! از این به بعد لقبش «{_evolution_title(key, up)}»ـه! تبریک! 🎊")
     return True, "\n".join(lines)

@@ -345,7 +345,9 @@ def pet_panel_text(user, user_name=''):
         "",
         f"💬 «{st['say']}»", "",
         f"💰 روب‌پوینت تو: {int(user.fox_points or 0):,}",
-        "✏️ اسم‌گذاری: /petname اسم",
+        f"🏷 لقب: {st.get('evolution_title', st['type_name'])}",
+        ("😴 پتت خوابه؛ صبح بیدار می‌شه." if st.get("sleeping") else "🌙 شب‌ها پت می‌خوابه."),
+        "✏️ برای تغییر اسم، دکمه‌ی پایین رو بزن.",
     ])
 
 
@@ -357,6 +359,9 @@ def pet_panel_keyboard(user):
                      InlineKeyboardButton("🍖 غذای کامل (۴۰ هزار)", callback_data=f"pet:feed:meal:{uid}")])
         rows.append([InlineKeyboardButton("🤗 نوازش", callback_data=f"pet:play:x:{uid}"),
                      InlineKeyboardButton("⚔️ نبرد", callback_data=f"pet:bt:x:{uid}")])
+        rows.append([InlineKeyboardButton("✏️ تغییر اسم پت", callback_data=f"pet:ren:x:{uid}")])
+        rows.append([InlineKeyboardButton("🎁 هدیه‌ی روزانه", callback_data=f"pet:gift:x:{uid}"),
+                     InlineKeyboardButton("🔔 یادآوری گرسنگی: "+("روشن" if int(getattr(user,'pet_hunger_reminders',1) or 0) else "خاموش"), callback_data=f"pet:rem:x:{uid}")])
     nxt = pets_mod.pet_next_to_buy(user)
     if nxt:
         p = pets_mod.PETS[nxt]
@@ -427,6 +432,57 @@ async def petname_command(update, context):
     await update.effective_message.reply_text(("✅ " if ok else "⛔ ") + msg)
 
 
+async def pet_rename_text_handler(update, context):
+    if not context.user_data.get('pet_rename_wait'):
+        if re.fullmatch(r"/?(?:پت|پتم|پت\s+من|پت‌ها|حیوان|حیوون)(?:@\w+)?", (update.effective_message.text or '').strip()):
+            await pet_command(update, context)
+        return
+    context.user_data.pop('pet_rename_wait', None)
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        ok, msg = pets_mod.pet_rename(user, update.effective_message.text)
+        if ok: session.commit()
+    finally:
+        session.close()
+    await update.effective_message.reply_text(('✅ ' if ok else '⛔ ') + msg)
+    if ok:
+        await pet_command(update, context)
+
+
+async def pet_hunger_reminder_job(context):
+    """یادآوری خصوصی با کول‌داون؛ خطای ارسال برای کاربر مسدودکننده نادیده گرفته می‌شود."""
+    session = get_session()
+    now = int(time.time())
+    try:
+        users = session.query(User).filter(User.pet_active != '').all()
+        from datetime import datetime, timezone, timedelta
+        tehran = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=3, minutes=30)))
+        for user in users:
+            st = pets_mod.pet_status(user, user.first_name or '')
+            if not st: continue
+            data = pets_mod._load(user); pet_data = data.get(st['key'], {})
+            wake_day = tehran.date().isoformat()
+            if 7 <= tehran.hour < 8 and pet_data.get('wake_day') != wake_day:
+                try:
+                    await context.bot.send_message(chat_id=user.telegram_id, text=f"☀️ صبح بخیر! {pets_mod.PETS[st['key']]['emoji']} {st['name']} بیدار شد و منتظرته!")
+                    pet_data['wake_day'] = wake_day; data[st['key']] = pet_data; pets_mod._save(user, data); session.commit()
+                except Exception:
+                    session.rollback()
+            if not int(getattr(user, 'pet_hunger_reminders', 1) or 0): continue
+            if st['satiety'] >= pets_mod.PET_REMINDER_THRESHOLD: continue
+            if now - int(getattr(user, 'pet_last_hunger_reminder_at', 0) or 0) < pets_mod.PET_REMINDER_COOLDOWN: continue
+            msg = pets_mod.pet_say(st['key'], 'hungry', st['name'], user.first_name or '')
+            try:
+                await context.bot.send_message(chat_id=user.telegram_id, text='🐾 ' + msg + '\n\nبرای رسیدگی بنویس «پت» یا دکمه‌ی مینی‌اپ رو باز کن.')
+                user.pet_last_hunger_reminder_at = now
+                session.commit()
+            except Exception:
+                session.rollback()
+    finally:
+        session.close()
+
+
 async def pet_button(update, context):
     q = update.callback_query
     parts = q.data.split(":")
@@ -450,6 +506,26 @@ async def pet_button(update, context):
         if action == 'home':
             await q.answer()
             await _refresh(same_photo=False)
+            return
+        if action == 'ren':
+            context.user_data['pet_rename_wait'] = True
+            await q.answer()
+            await q.message.reply_text('✏️ اسم جدید پتت رو بفرست (حداکثر ۱۲ حرف):')
+            return
+        if action == 'gift':
+            ok, msg = pets_mod.pet_daily_gift(user)
+            if ok: session.commit()
+            await q.answer('🎁 هدیه رسید!' if ok else msg, show_alert=True)
+            if ok:
+                try: await q.message.reply_text(msg, reply_to_message_id=q.message.message_id)
+                except Exception: pass
+                await _refresh(same_photo=True)
+            return
+        if action == 'rem':
+            enabled = pets_mod.pet_toggle_reminders(user)
+            session.commit()
+            await q.answer('یادآوری گرسنگی روشن شد 🔔' if enabled else 'یادآوری گرسنگی خاموش شد 🔕', show_alert=True)
+            await _refresh(same_photo=True)
             return
         if action == 'bt':
             await q.answer("⚔️ نبرد به‌زودی میاد! 🔜", show_alert=True)
@@ -2500,7 +2576,7 @@ async def profile_command(update, context):
         text = (
             f"👤 آمار {mention_of(user.telegram_id, user.first_name or 'کاربر')}\n\n"
             f"💰 پوینت فعلی: {user.points}\n📈 پوینت کسب‌شده: {user.total_earned}\n"
-            f"⭐ سطح: {user.level}\n⏳ {next_text}\n🎮 بازی‌های باز: {games}"
+            f"⭐ سطح: {user.level}\n⏳ {next_text}\n🎮 بازی‌های باز: {games}" + (f"\n🐾 پت: {pets_mod.PETS[pets_mod.pet_active(user)]['emoji']} لول {pets_mod.pet_status(user, user.first_name or "")['level']}" if pets_mod.pet_active(user) else "\n🐾 پت: هنوز پت نگرفتی")
         )
     finally:
         session.close()
@@ -13364,6 +13440,16 @@ def build_city_leaderboard_text(session, field, title, page=1):
     return _render_leaderboard_page(title, entries, page)
 
 
+def _pet_leaderboard_badge(user):
+    try:
+        key = pets_mod.pet_active(user)
+        if not key: return ''
+        st = pets_mod.pet_status(user, user.first_name or '')
+        return f" {pets_mod.PETS[key]['emoji']} لول {st['level']}"
+    except Exception:
+        return ''
+
+
 def build_leaderboard_text(session, field, title, page=1):
     titles = LEADERBOARD_TITLES.get(field, {})
     def _pfx(i): return f'{titles[i]} ' if i in titles else ''
@@ -13372,17 +13458,17 @@ def build_leaderboard_text(session, field, title, page=1):
         users = session.query(User).filter(User.telegram_id.in_(list(counts.keys()) or [0]), _no_admins()).all()
         users.sort(key=lambda u:(-counts.get(u.telegram_id,0),u.telegram_id))
         users=users[:LEADERBOARD_LIMIT]
-        entries=[f'{i}. {_pfx(i)}{user_mention(u)} — {counts.get(u.telegram_id,0):,} رفرال' for i,u in enumerate(users,1)]
+        entries=[f'{i}. {_pfx(i)}{user_mention(u)}{_pet_leaderboard_badge(u)} — {counts.get(u.telegram_id,0):,} رفرال' for i,u in enumerate(users,1)]
     elif field == 'edu_correct':
         rows = (session.query(User, EducationProgress.correct_answers)
                 .join(EducationProgress, EducationProgress.user_id == User.telegram_id)
                 .filter(EducationProgress.correct_answers > 0, _no_admins())
                 .order_by(EducationProgress.correct_answers.desc(), User.telegram_id.asc())
                 .limit(LEADERBOARD_LIMIT).all())
-        entries = [f'{i}. {_pfx(i)}{user_mention(u)} — {int(c or 0):,} پاسخ درست' for i, (u, c) in enumerate(rows, 1)]
+        entries = [f'{i}. {_pfx(i)}{user_mention(u)}{_pet_leaderboard_badge(u)} — {int(c or 0):,} پاسخ درست' for i, (u, c) in enumerate(rows, 1)]
     else:
         users = session.query(User).filter(_no_admins()).order_by(getattr(User, field).desc(), User.telegram_id.asc()).limit(LEADERBOARD_LIMIT).all()
-        entries = [f'{i}. {_pfx(i)}{user_mention(u)} — {int(getattr(u, field) or 0):,}' for i, u in enumerate(users, 1)]
+        entries = [f'{i}. {_pfx(i)}{user_mention(u)}{_pet_leaderboard_badge(u)} — {int(getattr(u, field) or 0):,}' for i, u in enumerate(users, 1)]
     return _render_leaderboard_page(title, entries, page)
 
 
@@ -16515,6 +16601,7 @@ def main():
     app.add_handler(CommandHandler("fox",fox_command))
     app.add_handler(CommandHandler(["pet","pets"],pet_command))
     app.add_handler(CommandHandler("petname",petname_command))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, pet_rename_text_handler), group=1)
     app.add_handler(MessageHandler(filters.Regex(r"^/?(?:پت|پتم|پت\s+من|پت‌ها|حیوان|حیوون)(?:@\w+)?$"), pet_command), group=1)
     app.add_handler(CommandHandler("account_recovery", recovery_command))
     app.add_handler(CommandHandler("giveaway", giveaway_command))
@@ -16635,6 +16722,7 @@ def main():
         # قاچاق دیگه خودکار تسویه نمی‌شه؛ کاربر باید خودش «قاچاق روبی» رو بنویسه تا نتیجه رو ببینه
         schedule_all_injured_fox_jobs(app)  # هر گپ جاب روباه زخمی مخصوص خودش را با فاصلهٔ متناسب با سطح شهرش می‌گیرد
         schedule_all_owl_jobs(app)  # تایمر جغد هر گپ از روی آخرین جغدش ادامه پیدا می‌کنه (دیپلوی ریستش نمی‌کنه)
+        app.job_queue.run_repeating(pet_hunger_reminder_job, interval=300, first=30, name="pet-hunger-reminders")
         app.job_queue.run_repeating(update_market_prices_job, interval=FACTORY_MARKET_UPDATE_SECONDS, first=15, name="factory-market")
         app.job_queue.run_repeating(marriage_expire_job, interval=60, first=20, name="marriage-expire")
         app.job_queue.run_repeating(expire_attacks_job, interval=30, first=25, name="attack-owl-expire")

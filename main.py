@@ -905,6 +905,11 @@ def pet_play_api(tg_user: dict = Depends(current_telegram_user)):
     return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_play(u, n))
 
 
+@app.post("/api/pet/tap")
+def pet_tap_api(tg_user: dict = Depends(current_telegram_user)):
+    return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_tap(u))
+
+
 @app.post("/api/pet/rename")
 def pet_rename_api(body: PetNameBody, tg_user: dict = Depends(current_telegram_user)):
     return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_rename(u, body.name))
