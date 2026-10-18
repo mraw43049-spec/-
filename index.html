@@ -624,6 +624,11 @@ body{background:var(--cn-bg)!important}
 .tab:active{transform:scale(.93)}
 #cName{max-width:100%}
 body{padding-bottom:calc(120px + env(safe-area-inset-bottom,0px))!important}
+/* فاصله از بالای گوشی (ناچ/نوار وضعیت/هدر تلگرام در حالت تمام‌صفحه) */
+:root{--ruby-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-top,0px)) + var(--tg-content-safe-area-inset-top,0px))}
+body{padding-top:calc(14px + var(--ruby-top))!important}
+.toast{top:calc(10px + var(--ruby-top))!important}
+.lb-close{top:calc(12px + var(--ruby-top))!important}
 
 /* ===== نسخه‌ی ۴ منوی پایین: آیکون‌های گرادیانی اختصاصی ===== */
 .tab .ti{display:flex;align-items:center;justify-content:center;width:42px;height:42px;font-size:0;filter:none!important}
