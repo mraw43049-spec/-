@@ -682,6 +682,9 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
 .pp-mis .go{width:100%;background:#2f9e57}
 .pp-mis .row button{white-space:pre-line;line-height:1.6}
 .pp-empty{text-align:center;color:#9aa0c8;font-size:13px;padding:10px}
+.pp-next{margin-top:12px;border-top:1px dashed #2f3566;padding-top:12px}
+.pp-next .t{font-size:12px;color:#9aa0c8;line-height:1.7;margin-bottom:8px;text-align:center}
+.pp-next button{width:100%;border:0;border-radius:12px;padding:11px 6px;font-size:13px;font-weight:800;font-family:inherit;color:#fff;background:#2f9e57}
 
 /* ===== نسخه‌ی ۴ منوی پایین: آیکون‌های گرادیانی اختصاصی ===== */
 .tab .ti{display:flex;align-items:center;justify-content:center;width:42px;height:42px;font-size:0;filter:none!important}
@@ -887,10 +890,9 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
   </div>
 
   <div class="card" id="petsCard">
-    <div class="section-title">🐾 پت‌های روبی</div>
-    <div class="pet-hint muted">همستر رایگانه؛ بعدش گربه، خرگوش و سگ پامرانین رو به‌ترتیب می‌تونی بخری.</div>
+    <div class="section-title">🐾 پت من</div>
+    <div class="pet-hint muted">هر نفر فقط یه پت داره؛ با گرفتن پت بعدی، جای پت فعلیت میاد.</div>
     <div id="petPanel"></div>
-    <div class="pet-grid" id="petGrid"></div>
   </div>
 
   <div class="card">
@@ -1467,16 +1469,9 @@ function __rubyMain(){
     var off = d.locked || d.sick;
     $("btnCollect").disabled = off; $("btnUpgrade").disabled = off || d.upgrade_cost == null;
     $("btnRename").disabled = off; $("btnGender").disabled = off;
-    renderPetPanel(d.pet);
-    renderPets(d);
+    renderPetPanel(d.pet, d.pet_next);
   }
 
-  var petTick = null;
-  function fmtLeft(sec){
-    sec = Math.max(0, Math.floor(sec));
-    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), x = sec % 60;
-    return (h ? fa(h) + " ساعت و " : "") + fa(m) + " دقیقه" + (h ? "" : " و " + fa(x) + " ثانیه");
-  }
   function ppBar(cls, label, val, pct){
     var w = document.createElement("div"); w.className = "pp-bar";
     var l = document.createElement("div"); l.className = "lbl";
@@ -1495,102 +1490,56 @@ function __rubyMain(){
     if (disabled) b.disabled = true; else b.onclick = fn;
     return b;
   }
-  function renderPetPanel(pt){
+  function renderPetPanel(pt, nxt){
     var box = $("petPanel"); if (!box) return;
-    if (petTick) { clearInterval(petTick); petTick = null; }
     box.innerHTML = "";
-    if (!pt) {
-      var e = document.createElement("div"); e.className = "pp-empty";
-      e.textContent = "یه پت فعال کن تا بتونی بهش غذا بدی، نازش کنی و بفرستیش ماموریت 👇";
-      box.appendChild(e); return;
-    }
     var pp = document.createElement("div"); pp.className = "pp";
-    var head = document.createElement("div"); head.className = "pp-head";
-    var em = document.createElement("div"); em.className = "pp-em"; em.textContent = pt.emoji;
-    var meta = document.createElement("div"); meta.className = "pp-meta";
-    var nm = document.createElement("div"); nm.className = "pp-name";
-    var nt = document.createElement("span"); nt.textContent = pt.name;
-    var rn = document.createElement("button"); rn.type = "button"; rn.textContent = "✏️";
-    rn.onclick = function(){ var v = prompt("اسم جدید پتت (حداکثر ۱۲ حرف):", pt.name); if (v != null && v.trim()) act("/api/pet/rename", { name: v }); };
-    nm.appendChild(nt); nm.appendChild(rn);
-    var sub = document.createElement("div"); sub.className = "pp-sub"; sub.textContent = pt.type_name + " · " + pt.title;
-    meta.appendChild(nm); meta.appendChild(sub);
-    var lv = document.createElement("div"); lv.className = "pp-lvl"; lv.textContent = "لول " + fa(pt.level);
-    head.appendChild(em); head.appendChild(meta); head.appendChild(lv);
-    pp.appendChild(head);
+    if (pt) {
+      var head = document.createElement("div"); head.className = "pp-head";
+      var em = document.createElement("div"); em.className = "pp-em"; em.textContent = pt.emoji;
+      var meta = document.createElement("div"); meta.className = "pp-meta";
+      var nm = document.createElement("div"); nm.className = "pp-name";
+      var nt = document.createElement("span"); nt.textContent = pt.name;
+      var rn = document.createElement("button"); rn.type = "button"; rn.textContent = "✏️";
+      rn.onclick = function(){ var v = prompt("اسم جدید پتت (حداکثر ۱۲ حرف):", pt.name); if (v != null && v.trim()) act("/api/pet/rename", { name: v }); };
+      nm.appendChild(nt); nm.appendChild(rn);
+      var sub = document.createElement("div"); sub.className = "pp-sub"; sub.textContent = pt.type_name + " · " + pt.title;
+      meta.appendChild(nm); meta.appendChild(sub);
+      head.appendChild(em); head.appendChild(meta);
+      pp.appendChild(head);
 
-    pp.appendChild(ppBar("xp", "⭐ تجربه", pt.level >= pt.max_level ? "حداکثر" : fa(pt.xp_cur) + " / " + fa(pt.xp_need), pt.xp_frac * 100));
-    pp.appendChild(ppBar("sat", "🍖 سیری", fa(pt.satiety) + "٪", pt.satiety));
-    pp.appendChild(ppBar("mood", "💖 حال و هوا", fa(pt.mood) + "٪", pt.mood));
+      var maxed = pt.level >= pt.max_level;
+      pp.appendChild(ppBar("xp", "⭐ لول " + fa(pt.level), maxed ? "حداکثر" : fa(Math.round(pt.xp_frac * 100)) + "٪", maxed ? 100 : pt.xp_frac * 100));
+      pp.appendChild(ppBar("sat", "🍖 سیری", fa(pt.satiety) + "٪", pt.satiety));
+      pp.appendChild(ppBar("mood", "💖 حال و هوا", fa(pt.mood) + "٪", pt.mood));
 
-    var say = document.createElement("div"); say.className = "pp-say"; say.textContent = "💬 " + pt.say;
-    pp.appendChild(say);
+      var say = document.createElement("div"); say.className = "pp-say"; say.textContent = "💬 " + pt.say;
+      pp.appendChild(say);
 
-    var st = document.createElement("div"); st.className = "pp-stats";
-    [ "⚔️ قدرت " + fa(pt.power), "🏆 " + fa(pt.wins) + " برد", "💔 " + fa(pt.losses) + " باخت" ].forEach(function(x){
-      var sp = document.createElement("span"); sp.textContent = x; st.appendChild(sp);
-    });
-    pp.appendChild(st);
-
-    var ac = document.createElement("div"); ac.className = "pp-actions";
-    (pt.foods || []).forEach(function(f){
-      ac.appendChild(ppBtn(f.emoji + " " + f.name + " (" + fa(f.price) + ")", "food", function(){ act("/api/pet/feed", { food: f.key }); }));
-    });
-    ac.appendChild(ppBtn(pt.play_wait > 0 ? "😴 " + fa(Math.ceil(pt.play_wait / 60)) + " دقیقه‌ی دیگه" : "🤗 نوازش", "play", function(){ act("/api/pet/play"); }, pt.play_wait > 0));
-    ac.appendChild(ppBtn("⚔️ نبرد (" + fa(pt.battles_left) + " باقی)", "fight", function(){ act("/api/pet/battle"); }, pt.battles_left <= 0 || !!pt.mission));
-    pp.appendChild(ac);
-
-    var ms = document.createElement("div"); ms.className = "pp-mis";
-    var mt = document.createElement("div"); mt.className = "t";
-    if (pt.mission) {
-      var endAt = Date.now() + pt.mission.left * 1000;
-      if (pt.mission.done) {
-        mt.textContent = "🎒 " + pt.mission.name + " تموم شد!";
-        ms.appendChild(mt);
-        var go = ppBtn("🎁 گرفتن جایزه", "go", function(){ act("/api/pet/mission/collect"); });
-        ms.appendChild(go);
-      } else {
-        mt.textContent = "🎒 " + pt.mission.name + " — ⏳ " + fmtLeft(pt.mission.left);
-        ms.appendChild(mt);
-        petTick = setInterval(function(){
-          var left = (endAt - Date.now()) / 1000;
-          if (left <= 0) { clearInterval(petTick); petTick = null; loadProfile(true); return; }
-          mt.textContent = "🎒 " + pt.mission.name + " — ⏳ " + fmtLeft(left);
-        }, 1000);
-      }
-    } else {
-      mt.textContent = "🎒 پتت رو بفرست ماموریت (۲۰٪ سیری مصرف می‌کنه)";
-      ms.appendChild(mt);
-      var row = document.createElement("div"); row.className = "row";
-      (pt.missions || []).forEach(function(m){
-        row.appendChild(ppBtn(m.name + "\n" + fa(m.hours) + " ساعت · ~" + fa(m.pts), "", function(){ act("/api/pet/mission", { hours: m.hours }); }));
+      var ac = document.createElement("div"); ac.className = "pp-actions";
+      (pt.foods || []).forEach(function(f){
+        ac.appendChild(ppBtn(f.emoji + " " + f.name + " (" + fa(f.price) + ")", "food", function(){ act("/api/pet/feed", { food: f.key }); }));
       });
-      ms.appendChild(row);
+      ac.appendChild(ppBtn(pt.play_wait > 0 ? "😴 " + fa(Math.ceil(pt.play_wait / 60)) + " دقیقه‌ی دیگه" : "🤗 نوازش", "play", function(){ act("/api/pet/play"); }, pt.play_wait > 0));
+      ac.appendChild(ppBtn("⚔️ نبرد", "fight", function(){ toast("⚔️ نبرد به‌زودی میاد! 🔜", true); }));
+      pp.appendChild(ac);
+    } else if (nxt) {
+      var e = document.createElement("div"); e.className = "pp-empty";
+      e.textContent = "هنوز پت نداری! " + nxt.emoji + " " + nxt.name + " رایگانه 👇";
+      pp.appendChild(e);
     }
-    pp.appendChild(ms);
+    if (nxt) {
+      var nx = document.createElement("div"); nx.className = "pp-next";
+      if (pt) { var t = document.createElement("div"); t.className = "t"; t.textContent = nxt.about; nx.appendChild(t); }
+      var label = pt ? "🛒 پت بعدی: " + nxt.emoji + " " + nxt.name + " — " + fa(nxt.price) + " روب‌پوینت"
+                     : nxt.emoji + " " + nxt.name + " رو بگیر (رایگان)";
+      nx.appendChild(ppBtn(label, "", function(){
+        if (pt && !confirm("⚠️ هر نفر فقط یه پت داره؛ " + nxt.name + " جای پت فعلیت میاد و پت قبلی (با لولش) از بین می‌ره. مطمئنی؟")) return;
+        act("/api/pet/buy", { key: nxt.key });
+      }));
+      pp.appendChild(nx);
+    }
     box.appendChild(pp);
-  }
-
-  function renderPets(d){
-    var g = $("petGrid"); if (!g) return;
-    var pets = d.pets || [];
-    g.innerHTML = "";
-    pets.forEach(function(p){
-      var t = document.createElement("div");
-      t.className = "pet-tile" + (p.active ? " active" : "") + (p.locked ? " locked" : "");
-      var em = document.createElement("div"); em.className = "pet-em"; em.textContent = p.emoji;
-      var nm = document.createElement("div"); nm.className = "pet-name"; nm.textContent = p.name;
-      var ab = document.createElement("div"); ab.className = "pet-about"; ab.textContent = p.about;
-      var b = document.createElement("button"); b.type = "button"; b.className = "pet-btn";
-      if (p.active) { b.textContent = "🔴 غیرفعال کن"; b.className += " off"; b.onclick = function(){ act("/api/pet/select", { key: "" }); }; }
-      else if (p.owned) { b.textContent = "🟢 فعال کن"; b.className += " on"; b.onclick = function(){ act("/api/pet/select", { key: p.key }); }; }
-      else if (p.can_buy) {
-        b.textContent = "🛒 خرید " + fa(p.price) + " روب‌پوینت"; b.className += " buy";
-        b.onclick = function(){ if (confirm("خرید " + p.name + " به قیمت " + fa(p.price) + " روب‌پوینت؟")) act("/api/pet/buy", { key: p.key }); };
-      } else { b.textContent = "🔒 قفل"; b.disabled = true; }
-      t.appendChild(em); t.appendChild(nm); t.appendChild(ab); t.appendChild(b);
-      g.appendChild(t);
-    });
   }
 
   // فاصله‌ی بالای صفحه: safe-area گوشی + هدر تلگرام (در حالت تمام‌صفحه)؛ با هر تغییر دوباره حساب می‌شه

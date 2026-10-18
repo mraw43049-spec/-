@@ -326,119 +326,79 @@ def _pet_bar(v):
     return "▰" * n + "▱" * (10 - n)
 
 
-def _pet_fmt_left(sec):
-    sec = int(sec)
-    return f"{sec // 3600} ساعت و {(sec % 3600) // 60} دقیقه" if sec >= 3600 else f"{max(1, sec // 60)} دقیقه"
-
-
-def pet_home_text(user, user_name=''):
-    owned = pets_mod.pets_owned(user)
-    active = pets_mod.pet_active(user)
-    lines = ["🐾 پت‌های روبی", "", f"💰 روب‌پوینت تو: {int(user.fox_points or 0):,}"]
+def pet_panel_text(user, user_name=''):
     st = pets_mod.pet_status(user, user_name)
-    if st:
-        lines += ["",
-                  f"{st['emoji']} {st['name']} — {st['title']}",
-                  f"⭐ لول {st['level']}/{st['max_level']}   ⚔️ قدرت {st['power']}   🏆 {st['wins']} برد / {st['losses']} باخت",
-                  f"🍖 سیری  {_pet_bar(st['satiety'])} {st['satiety']}٪",
-                  f"💖 حال    {_pet_bar(st['mood'])} {st['mood']}٪",
-                  f"💬 «{st['say']}»"]
-        if st['mission']:
-            m = st['mission']
-            lines.append("🎒 ماموریت: " + ("✅ برگشته! جایزه‌ش رو بگیر" if m['done'] else f"⏳ {_pet_fmt_left(m['left'])} مونده"))
-    lines.append("")
-    for k in pets_mod.PET_ORDER:
-        p = pets_mod.PETS[k]
-        if k == active:
-            stt = "🟢 فعال"
-        elif k in owned:
-            stt = "✅ داری"
-        elif k == pets_mod.pet_next_to_buy(user):
-            stt = f"🛒 {p['price']:,} روب‌پوینت"
-        else:
-            stt = "🔒 قفل"
-        lines.append(f"{p['emoji']} {p['name']} — {stt}")
-    lines += ["", "ترتیب پت‌ها: همستر ← گربه ← خرگوش ← سگ پامرانین"]
-    if st:
-        lines.append("اسم‌گذاری: /petname اسم")
-    return "\n".join(lines)
-
-
-def pet_home_keyboard(user):
-    owned = pets_mod.pets_owned(user)
-    active = pets_mod.pet_active(user)
-    rows = []
-    st = pets_mod.pet_status(user)
-    if st:
-        rows.append([InlineKeyboardButton("🍪 بیسکوییت (10هزار)", callback_data="pet:feed:snack"),
-                     InlineKeyboardButton("🍖 غذای کامل (40هزار)", callback_data="pet:feed:meal")])
-        rows.append([InlineKeyboardButton("🤗 نوازش", callback_data="pet:play"),
-                     InlineKeyboardButton("⚔️ نبرد", callback_data="pet:bt")])
-        if st['mission'] and st['mission']['done']:
-            rows.append([InlineKeyboardButton("🎁 گرفتن جایزه‌ی ماموریت", callback_data="pet:mc")])
-        elif not st['mission']:
-            rows.append([InlineKeyboardButton("🎒 فرستادن به ماموریت", callback_data="pet:mis")])
-    for k in pets_mod.PET_ORDER:
-        p = pets_mod.PETS[k]
-        mark = "🟢" if k == active else ("✅" if k in owned else ("🛒" if k == pets_mod.pet_next_to_buy(user) else "🔒"))
-        rows.append([InlineKeyboardButton(f"{p['emoji']} {p['name']} {mark}", callback_data=f"pet:view:{k}")])
-    rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="vip:back")])
-    return InlineKeyboardMarkup(rows)
-
-
-def pet_mission_keyboard():
-    rows = [[InlineKeyboardButton(f"{m['name']} — {h} ساعت (~{m['pts']:,})", callback_data=f"pet:ms:{h}")]
-            for h, m in pets_mod.MISSIONS.items()]
-    rows.append([InlineKeyboardButton("🔙 پت‌ها", callback_data="pet:home")])
-    return InlineKeyboardMarkup(rows)
-
-
-def pet_view_text(user, key):
-    p = pets_mod.PETS[key]
-    owned = pets_mod.pets_owned(user)
-    active = pets_mod.pet_active(user)
-    if key == active:
-        st = "🟢 فعال"
-    elif key in owned:
-        st = "✅ این پت مال توئه"
-    elif key == pets_mod.pet_next_to_buy(user):
-        st = f"💰 قیمت: {p['price']:,} روب‌پوینت"
+    if not st:
+        first = pets_mod.PETS[pets_mod.PET_ORDER[0]]
+        return (f"🐾 پت روبی\n\nهنوز پت نداری!\n{first['emoji']} {first['name']} رایگانه؛ "
+                f"دکمه‌ی پایین رو بزن و برش دار ⬇️")
+    if st['level'] >= st['max_level']:
+        lvl_line = f"⭐ لول {st['level']}  {_pet_bar(100)} حداکثر"
     else:
-        prev = pets_mod.PET_ORDER[pets_mod.PET_ORDER.index(key) - 1]
-        st = f"🔒 اول باید {pets_mod.PETS[prev]['emoji']} {pets_mod.PETS[prev]['name']} رو بخری"
-    return f"{p['emoji']} {p['name']}\n\n{p['about']}\n\n{st}\n💰 روب‌پوینت تو: {int(user.fox_points or 0):,}"
-
-
-def pet_view_keyboard(user, key):
-    owned = pets_mod.pets_owned(user)
-    active = pets_mod.pet_active(user)
-    rows = []
-    if key == active:
-        rows.append([InlineKeyboardButton("🔴 غیرفعال کردن", callback_data="pet:off")])
-    elif key in owned:
-        rows.append([InlineKeyboardButton("🟢 فعال کردن", callback_data=f"pet:on:{key}")])
-    elif key == pets_mod.pet_next_to_buy(user):
-        rows.append([InlineKeyboardButton("🛒 بخرش", callback_data=f"pet:ask:{key}")])
-    rows.append([InlineKeyboardButton("🔙 پت‌ها", callback_data="pet:home")])
-    return InlineKeyboardMarkup(rows)
-
-
-def pet_confirm_keyboard(key):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ آره بخرش", callback_data=f"pet:yes:{key}")],
-        [InlineKeyboardButton("❌ نه منصرف شدم", callback_data=f"pet:view:{key}")],
+        pct = int(round(st['xp_frac'] * 100))
+        lvl_line = f"⭐ لول {st['level']}  {_pet_bar(pct)} {pct}٪"
+    return "\n".join([
+        f"{st['emoji']} {st['name']} — {st['title']}", "",
+        lvl_line,
+        f"🍖 سیری  {_pet_bar(st['satiety'])} {st['satiety']}٪",
+        f"💖 حال    {_pet_bar(st['mood'])} {st['mood']}٪",
+        "",
+        f"💬 «{st['say']}»", "",
+        f"💰 روب‌پوینت تو: {int(user.fox_points or 0):,}",
+        "✏️ اسم‌گذاری: /petname اسم",
     ])
 
 
+def pet_panel_keyboard(user):
+    uid = user.telegram_id
+    rows = []
+    if pets_mod.pet_active(user):
+        rows.append([InlineKeyboardButton("🍪 بیسکوییت (۱۰ هزار)", callback_data=f"pet:feed:snack:{uid}"),
+                     InlineKeyboardButton("🍖 غذای کامل (۴۰ هزار)", callback_data=f"pet:feed:meal:{uid}")])
+        rows.append([InlineKeyboardButton("🤗 نوازش", callback_data=f"pet:play:x:{uid}"),
+                     InlineKeyboardButton("⚔️ نبرد", callback_data=f"pet:bt:x:{uid}")])
+    nxt = pets_mod.pet_next_to_buy(user)
+    if nxt:
+        p = pets_mod.PETS[nxt]
+        if not pets_mod.pet_active(user):
+            rows.append([InlineKeyboardButton(f"{p['emoji']} {p['name']} رو بگیر (رایگان)", callback_data=f"pet:yes:{nxt}:{uid}")])
+        else:
+            rows.append([InlineKeyboardButton(f"🛒 پت بعدی: {p['emoji']} {p['name']} ({p['price']:,})", callback_data=f"pet:ask:{nxt}:{uid}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def pet_confirm_text(user, key):
+    p = pets_mod.PETS[key]
+    old = pets_mod.pet_active(user)
+    lines = [f"{p['emoji']} {p['name']}", "", p['about'], "", f"💰 قیمت: {p['price']:,} روب‌پوینت"]
+    if old:
+        lines += ["", f"⚠️ هر کاربر فقط یه پت داره؛ این پت جای {pets_mod.PETS[old]['emoji']} {pets_mod.PETS[old]['name']} "
+                      f"میاد و پت فعلیت (با لولش) از بین می‌ره.", "مطمئنی؟"]
+    return "\n".join(lines)
+
+
+def pet_confirm_keyboard(key, uid):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ آره بخرش", callback_data=f"pet:yes:{key}:{uid}")],
+        [InlineKeyboardButton("❌ نه منصرف شدم", callback_data=f"pet:home:x:{uid}")],
+    ])
+
+
+def _pet_panel_photo(user):
+    key = pets_mod.pet_active(user) or pets_mod.PET_ORDER[0]
+    return pets_mod.pet_image_path(key)
+
+
 async def pet_command(update, context):
+    """«پت» / /pet → فقط پنل پتِ خود کاربر."""
     if not await require_membership(update, context):
         return
     session = get_session()
     try:
         user = get_or_create_user(session, update.effective_user)
-        text, kb = pet_home_text(user, update.effective_user.first_name or ''), pet_home_keyboard(user)
-        active = pets_mod.pet_active(user)
-        photo = pets_mod.pet_image_path(active) if active else None
+        text = pet_panel_text(user, update.effective_user.first_name or '')
+        kb = pet_panel_keyboard(user)
+        photo = _pet_panel_photo(user)
     finally:
         session.close()
     msg = update.effective_message
@@ -473,93 +433,60 @@ async def pet_button(update, context):
     if not await require_membership(update, context):
         return
     action = parts[1] if len(parts) > 1 else ''
-    key = parts[2] if len(parts) > 2 else ''
+    arg = parts[2] if len(parts) > 2 else 'x'
+    if len(parts) > 3 and parts[3].isdigit() and int(parts[3]) != q.from_user.id:
+        await q.answer("این پنل مال یه نفر دیگه‌ست؛ خودت بنویس «پت» 🐾", show_alert=True)
+        return
     session = get_session()
     try:
         user = get_or_create_user(session, q.from_user)
         uname = q.from_user.first_name or ''
+        uid = user.telegram_id
 
-        async def _home(note=None, same_photo=False):
-            act_key = pets_mod.pet_active(user)
-            text = pet_home_text(user, uname)
-            if note:
-                text = note + "\n\n━━━━━━━━━━\n\n" + text
-            await vip_show(q, text[:1020] if getattr(q.message, 'photo', None) else text, pet_home_keyboard(user),
-                           photo_path=pets_mod.pet_image_path(act_key) if act_key else None, same_photo=same_photo)
+        async def _refresh(same_photo=True):
+            await vip_show(q, pet_panel_text(user, uname), pet_panel_keyboard(user),
+                           photo_path=_pet_panel_photo(user), same_photo=same_photo)
 
         if action == 'home':
             await q.answer()
-            await _home()
+            await _refresh(same_photo=False)
             return
-        if action in ('feed', 'play', 'bt', 'mc', 'ms'):
-            if action == 'feed':
-                ok, msg = pets_mod.pet_feed(user, key, uname)
-            elif action == 'play':
-                ok, msg = pets_mod.pet_play(user, uname)
-            elif action == 'bt':
-                ok, msg = pets_mod.pet_battle(session, user, uname)
-            elif action == 'mc':
-                ok, msg = pets_mod.pet_mission_collect(user, uname)
-            else:
-                try:
-                    hours = int(key)
-                except ValueError:
-                    await q.answer(); return
-                ok, msg = pets_mod.pet_mission_start(user, hours, uname)
-            if ok:
-                session.commit()
-            else:
-                await q.answer("⛔ " + msg, show_alert=True)
-                return
-            if action in ('bt', 'mc', 'ms'):
-                await q.answer()
-                await _home(note=msg, same_photo=True)
-            else:
-                await q.answer(msg[:190], show_alert=False)
-                await _home(same_photo=True)
+        if action == 'bt':
+            await q.answer("⚔️ نبرد به‌زودی میاد! 🔜", show_alert=True)
             return
-        if action == 'mis':
-            await q.answer()
-            await vip_show(q, "🎒 پتت رو به کدوم ماموریت بفرستی؟\n\n• هر ماموریت ۲۰٪ از سیری پت رو مصرف می‌کنه\n• پت خوشحال جایزه‌ی بیشتری میاره\n• تا برنگرده نمی‌تونه بجنگه",
-                           pet_mission_keyboard(), photo_path=pets_mod.pet_image_path(pets_mod.pet_active(user)) if pets_mod.pet_active(user) else None, same_photo=True)
-            return
-        if action == 'off':
-            pets_mod.pet_select(user, '')
-            session.commit()
-            await q.answer("🔴 پت غیرفعال شد.")
-            await vip_show(q, pet_home_text(user), pet_home_keyboard(user))
-            return
-        if key not in pets_mod.PETS:
-            await q.answer(); return
-        photo = pets_mod.pet_image_path(key)
-        if action == 'view':
-            await q.answer()
-            await vip_show(q, pet_view_text(user, key), pet_view_keyboard(user, key), photo_path=photo)
-            return
-        if action == 'on':
-            ok, msg = pets_mod.pet_select(user, key)
-            if ok:
-                session.commit()
-            await q.answer(("🟢 " if ok else "⛔ ") + msg, show_alert=not ok)
-            await vip_show(q, pet_view_text(user, key), pet_view_keyboard(user, key), photo_path=photo, same_photo=True)
-            return
-        if action == 'ask':
-            ok, msg = pets_mod.pet_can_buy(user, key)
+        if action in ('feed', 'play'):
+            ok, msg = pets_mod.pet_feed(user, arg, uname) if action == 'feed' else pets_mod.pet_play(user, uname)
             if not ok:
                 await q.answer("⛔ " + msg, show_alert=True)
                 return
-            p = pets_mod.PETS[key]
+            session.commit()
             await q.answer()
-            await vip_show(q, f"{p['emoji']} {p['name']}\n\n💰 قیمت: {p['price']:,} روب‌پوینت\n\nآیا از خرید این پت مطمئن هستی؟",
-                           pet_confirm_keyboard(key), photo_path=photo, same_photo=True)
+            # جواب روی همون پیام پنل (ریپلای) + به‌روز شدن نوارها
+            try:
+                await q.message.reply_text(msg, reply_to_message_id=q.message.message_id)
+            except Exception as exc:
+                logger.warning("pet reply failed: %s", exc)
+            await _refresh(same_photo=True)
+            return
+        if arg not in pets_mod.PETS:
+            await q.answer(); return
+        if action == 'ask':
+            ok, msg = pets_mod.pet_can_buy(user, arg)
+            if not ok:
+                await q.answer("⛔ " + msg, show_alert=True)
+                return
+            await q.answer()
+            await vip_show(q, pet_confirm_text(user, arg), pet_confirm_keyboard(arg, uid),
+                           photo_path=pets_mod.pet_image_path(arg), same_photo=False)
             return
         if action == 'yes':
-            vip_settle_production(user)
-            ok, msg = pets_mod.pet_buy(user, key)
-            if ok:
-                session.commit()
-            await q.answer(("🎉 " if ok else "⛔ ") + msg, show_alert=True)
-            await vip_show(q, pet_view_text(user, key), pet_view_keyboard(user, key), photo_path=photo, same_photo=True)
+            ok, msg = pets_mod.pet_buy(user, arg)
+            if not ok:
+                await q.answer("⛔ " + msg, show_alert=True)
+                return
+            session.commit()
+            await q.answer("🎉 " + msg, show_alert=True)
+            await _refresh(same_photo=False)
             return
         await q.answer()
     finally:
@@ -8278,7 +8205,6 @@ def gift_shop_keyboard():
     rows = [
         [InlineKeyboardButton("🎁 خرید گیفت استارزی", callback_data="gift:tiers:0:0")],
         [InlineKeyboardButton("کمد VIP 🪄", callback_data="vip:home")],
-        [InlineKeyboardButton("🐾 پت‌ها", callback_data="pet:home")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -16589,7 +16515,7 @@ def main():
     app.add_handler(CommandHandler("fox",fox_command))
     app.add_handler(CommandHandler(["pet","pets"],pet_command))
     app.add_handler(CommandHandler("petname",petname_command))
-    app.add_handler(MessageHandler(filters.Regex(r"^/(?:پت|پت‌ها|حیوان|حیوون)(?:@\w+)?$"), pet_command), group=1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/?(?:پت|پتم|پت\s+من|پت‌ها|حیوان|حیوون)(?:@\w+)?$"), pet_command), group=1)
     app.add_handler(CommandHandler("account_recovery", recovery_command))
     app.add_handler(CommandHandler("giveaway", giveaway_command))
     app.add_handler(CommandHandler("factory",factory_command))
@@ -16658,7 +16584,7 @@ def main():
     app.add_handler(CallbackQueryHandler(gift_button,pattern=r"^gift:(?:pick|opt|qty|qtyok|backshop|backopt|tiers|backtiers|notext|noop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(points_button,pattern=r"^points:(?:shop|pick|backshop):[^:]+:[^:]+$"))
     app.add_handler(CallbackQueryHandler(vip_button,pattern=r"^vip:[a-z]+(?::[a-z]+){0,3}$"))
-    app.add_handler(CallbackQueryHandler(pet_button,pattern=r"^pet:[a-z]+(?::[a-z0-9]+)?$"))
+    app.add_handler(CallbackQueryHandler(pet_button,pattern=r"^pet:[a-z]+(?::[a-z0-9]+){0,2}$"))
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(fake_receipt_ban_button,pattern=r"^fakeban:\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
