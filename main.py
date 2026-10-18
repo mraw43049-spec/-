@@ -616,7 +616,7 @@ def fox_state(session, user, botmod=None):
         "fox_points": int(user.fox_points or 0),
         "fox_storage": int(user.fox_storage or 0),
         "fox_belly": int(user.fox_belly or 0),
-        "fox_belly_capacity": botmod.fox_belly_cap(user),
+        "fox_belly_capacity": (botmod.fox_belly_cap(user) if botmod is not None else 0),
         "skin_key": skin_key,
         "skin_title": SKIN_INFO.get(skin_key, ""),
         "skin_image": image,

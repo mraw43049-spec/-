@@ -310,11 +310,33 @@ def vip_active_skins(user):
 
 
 def vip_set_skins(user, owned, active):
-    owned = [k for k in owned if k not in VIP_FREE_SKINS]   # اسکین رایگان در دیتابیس ذخیره نمی‌شود؛ همیشه در دسترس است
+    all_owned = set(owned) | set(VIP_FREE_SKINS)   # اسکین رایگان همیشه قابل فعال شدن است
+    owned = [k for k in owned if k not in VIP_FREE_SKINS]   # اسکین رایگان در ستون fox_skin ذخیره نمی‌شود؛ همیشه در دسترس است
     user.fox_skin = ','.join(owned)
-    active = list(dict.fromkeys(k for k in active if k in owned))[-1:] if active else []
+    active = list(dict.fromkeys(k for k in active if k in all_owned))[-1:] if active else []
     user.fox_skins_active = ','.join(active)
     user.fox_skin_active = 1 if active else 0
+
+
+def get_or_create_group_chat(session, chat_id, title=None):
+    """گپ را برمی‌گرداند و اگه نبود می‌سازد؛ در برابر درخواست‌های هم‌زمان (race) ایمن است
+    (قبلاً دو پیام هم‌زمان از یک گپ جدید باعث خطای duplicate key روی group_chats می‌شد)."""
+    from sqlalchemy.exc import IntegrityError
+    row = session.get(GroupChat, chat_id)
+    if row is not None:
+        return row, False
+    try:
+        with session.begin_nested():
+            row = GroupChat(chat_id=chat_id, title=title or "گپ", active=1)
+            session.add(row)
+            session.flush()
+        return row, True
+    except IntegrityError:
+        session.expire_all()
+        row = session.get(GroupChat, chat_id)
+        if row is None:
+            raise
+        return row, False
 
 
 def vip_rate_bonus(user):
@@ -711,11 +733,8 @@ async def require_membership(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
         session = get_session()
         try:
-            row = session.get(GroupChat, update.effective_chat.id)
-            if row is None:
-                row = GroupChat(chat_id=update.effective_chat.id, title=update.effective_chat.title or "گپ", active=1)
-                session.add(row)
-            else:
+            row, _created = get_or_create_group_chat(session, update.effective_chat.id, update.effective_chat.title)
+            if not _created:
                 row.active = 1
                 row.title = update.effective_chat.title or row.title
             session.commit()
@@ -6822,14 +6841,11 @@ async def bot_joined_group(update, context):
             return
     session = get_session()
     try:
-        row = session.get(GroupChat, cm.chat.id)
-        if row is None:
-            session.add(GroupChat(chat_id=cm.chat.id, title=cm.chat.title or "گپ", active=1))
-            session.commit()
-        else:
+        row, _created = get_or_create_group_chat(session, cm.chat.id, cm.chat.title)
+        if not _created:
             row.active = 1
             row.title = cm.chat.title or row.title
-            session.commit()
+        session.commit()
     finally:
         session.close()
     schedule_injured_fox_job(context.application, cm.chat.id, 1)
@@ -6846,12 +6862,8 @@ async def register_group_chat(update, context):
     session = get_session()
     trigger_lucky_bag = False
     try:
-        row = session.get(GroupChat, chat.id)
-        is_new = row is None
-        if row is None:
-            row = GroupChat(chat_id=chat.id, title=chat.title or "گپ", active=1)
-            session.add(row)
-        else:
+        row, is_new = get_or_create_group_chat(session, chat.id, chat.title)
+        if not is_new:
             row.title = chat.title or row.title
             row.active = 1
         # ---- کیف روب پوینت: شمارش شلوغی گپ برای انداختن اتفاق رندوم ----
@@ -12306,10 +12318,7 @@ def bump_city_stat(session, chat_id, chat_title=None, **deltas):
     """مقادیر شهرِ همون گپ رو با deltas افزایش می‌ده؛ فقط برای گروه/سوپرگروه (چون آیدی‌شون منفیه)."""
     if not is_group_chat_id(chat_id):
         return None
-    row = session.get(GroupChat, chat_id)
-    if row is None:
-        row = GroupChat(chat_id=chat_id, title=chat_title or "گپ", active=1)
-        session.add(row); session.flush()
+    row, _ = get_or_create_group_chat(session, chat_id, chat_title)
     if row.city_level is None:
         row.city_level = 1
     for field, delta in deltas.items():
@@ -12384,10 +12393,7 @@ async def city_command(update, context):
         return
     session = get_session()
     try:
-        row = session.get(GroupChat, chat.id)
-        if row is None:
-            row = GroupChat(chat_id=chat.id, title=chat.title or "گپ", active=1)
-            session.add(row); session.flush()
+        row, _ = get_or_create_group_chat(session, chat.id, chat.title)
         row.title = chat.title or row.title
         if row.city_level is None:
             row.city_level = 1
@@ -12654,10 +12660,7 @@ async def city_mayor_command(update, context):
         return
     session = get_session()
     try:
-        row = session.get(GroupChat, chat.id)
-        if row is None:
-            row = GroupChat(chat_id=chat.id, title=chat.title or "گپ", active=1)
-            session.add(row); session.flush()
+        row, _ = get_or_create_group_chat(session, chat.id, chat.title)
         row.title = chat.title or row.title
         if row.city_level is None:
             row.city_level = 1
@@ -14109,10 +14112,7 @@ async def track_city_member_presence(update, context):
         return
     session=get_session()
     try:
-        row=session.get(GroupChat,chat.id)
-        if row is None:
-            row=GroupChat(chat_id=chat.id,title=chat.title or "گپ",active=1)
-            session.add(row); session.flush()
+        row, _ = get_or_create_group_chat(session, chat.id, chat.title)
         presence=session.query(CityMemberPresence).filter_by(chat_id=chat.id,user_id=tg_user.id).first()
         now=now_utc()
         if presence:
@@ -14424,10 +14424,7 @@ def is_feature_disabled(chat_id, key):
 def set_feature_disabled(chat_id, key, disabled):
     session = get_session()
     try:
-        row = session.get(GroupChat, chat_id)
-        if row is None:
-            row = GroupChat(chat_id=chat_id, title='گپ', active=1)
-            session.add(row)
+        row, _ = get_or_create_group_chat(session, chat_id, 'گپ')
         current = {p.strip() for p in (row.disabled_features or '').split(',') if p.strip()}
         if disabled:
             current.add(key)
