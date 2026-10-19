@@ -106,13 +106,6 @@ def _evolution_title(key, level):
     return (PETS[key]['name'] + ' ' + titles[tier]) if tier else PETS[key]['name']
 
 
-def pet_daily_gift_available(user):
-    """True when the daily pet gift has not been claimed today (Iran time)."""
-    from datetime import datetime, timezone, timedelta
-    now = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=3, minutes=30)))
-    return (getattr(user, 'pet_daily_date', '') or '') != now.date().isoformat()
-
-
 def pet_daily_gift(user):
     """هدیه‌ی روزانه‌ی idempotent؛ استریک بر اساس روزهای تقویمی ایران."""
     from datetime import datetime, timezone, timedelta
@@ -145,7 +138,6 @@ def pet_toggle_reminders(user):
 def pet_tap(user):
     key = pet_active(user)
     if not key: return False, 'اول یه پت بگیر.'
-    if _is_sleeping(): return False, '😴 پتت خوابه؛ صبح بیا نوازشش کن.'
     from datetime import datetime, timezone, timedelta
     now_dt = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=3, minutes=30)))
     day = now_dt.date().isoformat(); now = _now(); data = _load(user); p = _get(data, key, now)
@@ -169,47 +161,52 @@ def pet_active(user):
     return key if key in PETS else ''
 
 
+def pet_owned_keys(user):
+    raw = getattr(user, 'pets_owned', '') or ''
+    keys = [k.strip() for k in raw.split(',') if k.strip() in PETS]
+    active = pet_active(user)
+    if active and active not in keys: keys.append(active)
+    return keys
+
+
 def pet_next_to_buy(user):
-    """پت بعدی که می‌تونه بگیره: بدون پت → همستر؛ وگرنه بعدیِ پت فعلی؛ سگ آخرینه."""
-    cur = pet_active(user)
-    if not cur:
-        return PET_ORDER[0]
-    i = PET_ORDER.index(cur)
-    return PET_ORDER[i + 1] if i + 1 < len(PET_ORDER) else None
+    """اولین پتِ خریداری‌نشده؛ کاربر می‌تواند چند پت داشته باشد."""
+    owned = set(pet_owned_keys(user))
+    return next((k for k in PET_ORDER if k not in owned), None)
 
 
 def pet_can_buy(user, key):
-    if key not in PETS:
-        return False, "این پت وجود نداره."
-    nxt = pet_next_to_buy(user)
-    if nxt is None:
-        return False, "تو بهترین پت رو داری 🐶"
-    if key != nxt:
-        return False, f"پت بعدیت {PETS[nxt]['emoji']} {PETS[nxt]['name']} هست."
+    if key not in PETS: return False, 'این پت وجود نداره.'
+    if key in pet_owned_keys(user): return False, 'این پت رو قبلاً خریدی؛ از فهرست پت‌هات انتخابش کن.'
     price = PETS[key]['price']
     if int(getattr(user, 'fox_points', 0) or 0) < price:
-        return False, f"روب‌پوینت کافی نیست. {price:,} لازم داری."
-    return True, ""
+        return False, f'روب‌پوینت کافی نیست. {price:,} لازم داری.'
+    return True, ''
 
 
 def pet_buy(user, key):
-    """گرفتن/خرید پت بعدی؛ جایگزین پت فعلی می‌شه. فراخوان باید commit کنه."""
+    """خرید پت جدید بدون حذف پت‌های قبلی."""
     ok, msg = pet_can_buy(user, key)
-    if not ok:
-        return False, msg
-    old = pet_active(user)
+    if not ok: return False, msg
     user.fox_points = int(user.fox_points or 0) - PETS[key]['price']
+    owned = pet_owned_keys(user)
+    if key not in owned: owned.append(key)
+    user.pets_owned = ','.join(owned)
     user.pet_active = key
-    user.pets_owned = key
     data = _load(user)
-    if old:
-        data.pop(old, None)          # پت قبلی رفت؛ فقط یک پت داریم
-    data[key] = _blank(_now())
+    if key not in data: data[key] = _blank(_now())
     _save(user, data)
     p = PETS[key]
-    if old:
-        return True, f"{p['emoji']} {p['name']} جای {PETS[old]['emoji']} {PETS[old]['name']} اومد!"
-    return True, f"{p['emoji']} {p['name']} مال تو شد!"
+    return True, f"{p['emoji']} {p['name']} به مجموعه پت‌هات اضافه شد و فعال شد!"
+
+
+def pet_set_active(user, key):
+    if key not in pet_owned_keys(user): return False, 'این پت رو نداری؛ اول بخرش.'
+    user.pet_active = key
+    data = _load(user)
+    if key not in data: data[key] = _blank(_now())
+    _save(user, data)
+    return True, f"{PETS[key]['emoji']} {PETS[key]['name']} فعال شد!"
 
 
 def pet_next_payload(user):
@@ -309,7 +306,7 @@ def pet_status(user, user_name=''):
     kind = pet_state_kind(p)
     return {
         'key': key, 'emoji': PETS[key]['emoji'], 'image': '/pet-image/' + key, 'type_name': PETS[key]['name'],
-        'name': p.get('n') or PETS[key]['name'], 'title': PERSONALITY[key]['title'], 'evolution_title': _evolution_title(key, pet_level(float(p.get('xp', 0)))), 'reminders': bool(getattr(user, 'pet_hunger_reminders', 1)), 'sleeping': _is_sleeping(), 'favorite_food': FAVORITE_FOODS.get(key, 'meal'),
+        'name': p.get('n') or PETS[key]['name'], 'title': PERSONALITY[key]['title'], 'evolution_title': _evolution_title(key, pet_level(float(p.get('xp', 0)))), 'favorite_food': FAVORITE_FOODS.get(key, 'meal'),
         'level': lvl, 'max_level': MAX_PET_LEVEL, 'xp': float(p.get('xp', 0)), 'xp_frac': round(frac, 3),
         'xp_cur': float(cur), 'xp_need': int(need),
         'satiety': int(round(p['sat'])), 'mood': int(round(p['mood'])),

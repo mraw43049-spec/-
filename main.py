@@ -635,6 +635,9 @@ def fox_state(session, user, botmod=None):
         "pet_next": pets_mod.pet_next_payload(user),
         "pet": pets_mod.pet_status(user, user.first_name or ""),
         "pet_active": pets_mod.pet_active(user),
+        "pets_owned": [{"key": k, "name": pets_mod.PETS[k]["name"], "emoji": pets_mod.PETS[k]["emoji"], "price": pets_mod.PETS[k]["price"]} for k in pets_mod.pet_owned_keys(user)],
+        "pet_catalog": [{"key": k, "name": pets_mod.PETS[k]["name"], "emoji": pets_mod.PETS[k]["emoji"], "price": pets_mod.PETS[k]["price"]} for k in pets_mod.PET_ORDER],
+        "pet_daily_available": (getattr(user, "pet_daily_date", "") or "") != __import__("datetime").datetime.now(__import__("datetime").timezone(__import__("datetime").timedelta(hours=3, minutes=30))).date().isoformat(),
     }
     if botmod is not None:
         state["fox_rank"] = botmod.fox_rank(lvl)
@@ -874,6 +877,28 @@ def pet_buy_api(body: PetBody, tg_user: dict = Depends(current_telegram_user)):
         raise
     finally:
         session.close()
+
+
+class PetSelectBody(BaseModel):
+    key: str = ""
+
+
+@app.post("/api/pet/select")
+def pet_select_api(body: PetSelectBody, tg_user: dict = Depends(current_telegram_user)):
+    return _pet_action(tg_user, lambda s, u, n: pets_mod.pet_set_active(u, body.key))
+
+
+@app.post("/api/pet/daily")
+def pet_daily_api(tg_user: dict = Depends(current_telegram_user)):
+    botmod = load_botmod(); session = get_session()
+    try:
+        user = locked_user(session, tg_user, botmod)
+        ok, msg = pets_mod.pet_daily_gift(user)
+        if not ok: raise HTTPException(status_code=400, detail=msg)
+        session.commit(); return {"message": msg}
+    except HTTPException:
+        session.rollback(); raise
+    finally: session.close()
 
 
 class PetFoodBody(BaseModel):

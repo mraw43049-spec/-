@@ -669,8 +669,8 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
 .pp-say{margin-top:12px;background:#0e1130;border:1px solid #2a2f58;border-radius:14px;padding:10px 12px;font-size:13px;line-height:1.8;position:relative}
 .pp-stats{display:flex;gap:8px;margin-top:10px;font-size:12px;color:#cfd3ff;flex-wrap:wrap}
 .pp-stats span{background:#0e1130;border-radius:10px;padding:5px 9px}
-.pp-actions{display:grid;grid-template-columns:repeat(2,1fr);gap:5px;margin-top:8px}
-.pp-actions button,.pp-mis button{border:0;border-radius:10px;padding:7px 4px;font-size:11px;font-weight:800;font-family:inherit;color:#fff;background:#3b4cca}
+.pp-actions{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}
+.pp-actions button,.pp-mis button{border:0;border-radius:10px;padding:7px 5px;font-size:12px;font-weight:800;font-family:inherit;color:#fff;background:#3b4cca}
 .pp-actions button.food{background:#c98a1b}
 .pp-actions button.play{background:#d6457a}
 .pp-actions button.fight{background:#7a3030}
@@ -901,7 +901,7 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
 
   <div class="card" id="petsCard">
     <div class="section-title">🐾 پت من</div>
-    <div class="pet-hint muted">هر نفر فقط یه پت داره؛ با گرفتن پت بعدی، جای پت فعلیت میاد.</div>
+    <div class="pet-hint muted">پت‌های خریداری‌شده‌ات اینجا نمایش داده می‌شن؛ می‌تونی بینشون جابه‌جا بشی.</div>
     <div id="petPanel"></div>
   </div>
 
@@ -1513,7 +1513,15 @@ function __rubyMain(){
       var nm = document.createElement("div"); nm.className = "pp-name";
       var nt = document.createElement("span"); nt.textContent = pt.name;
       var rn = document.createElement("button"); rn.type = "button"; rn.textContent = "✏️";
-      rn.onclick = function(){ var v = prompt("اسم جدید پتت (حداکثر ۱۲ حرف):", pt.name); if (v != null && v.trim()) act("/api/pet/rename", { name: v }); };
+      rn.setAttribute("aria-label","تغییر نام پت");
+      rn.onclick = function(){
+        if (meta.querySelector(".pet-rename-inline")) return;
+        var edit = document.createElement("div"); edit.className="pet-rename-inline"; edit.style.cssText="display:flex;gap:5px;margin-top:7px";
+        var inp=document.createElement("input"); inp.maxLength=12; inp.value=pt.name; inp.placeholder="اسم پت"; inp.style.cssText="min-width:0;width:100%;padding:7px;border-radius:9px;border:1px solid #5961a8;background:#171a3a;color:#fff;font:inherit";
+        var ok=ppBtn("تأیید","",function(){ if(!inp.value.trim()){toast("اسم پت رو وارد کن.",false);return;} act("/api/pet/rename",{name:inp.value.trim()}); });
+        var no=ppBtn("لغو","",function(){edit.remove();});
+        edit.appendChild(inp);edit.appendChild(ok);edit.appendChild(no);meta.appendChild(edit);inp.focus();
+      };
       nm.appendChild(nt); nm.appendChild(rn);
       var sub = document.createElement("div"); sub.className = "pp-sub"; sub.textContent = pt.type_name + " · " + pt.title;
       meta.appendChild(nm); meta.appendChild(sub);
@@ -1560,13 +1568,24 @@ function __rubyMain(){
       var say = document.createElement("div"); say.className = "pp-say"; say.textContent = "💬 " + pt.say;
       pp.appendChild(say);
 
+      if (current && current.pet_daily_available) pp.appendChild(ppBtn("🎁 جایزه روزانه", "", function(){ act("/api/pet/daily"); }));
+      var owned = (current && current.pets_owned) || [];
+      if (owned.length) {
+        var ownedTitle=document.createElement("div"); ownedTitle.className="pp-name"; ownedTitle.style.marginTop="12px"; ownedTitle.textContent="🐾 پت‌های من"; pp.appendChild(ownedTitle);
+        var ownedRow=document.createElement("div"); ownedRow.className="pp-actions";
+        owned.forEach(function(op){
+          if(op.key===pt.key) { ownedRow.appendChild(ppBtn("✅ "+op.emoji+" "+op.name,"",function(){},true)); }
+          else ownedRow.appendChild(ppBtn(op.emoji+" "+op.name,"",function(){act("/api/pet/select",{key:op.key});}));
+        });
+        pp.appendChild(ownedRow);
+      }
       var ac = document.createElement("div"); ac.className = "pp-actions";
       (pt.foods || []).forEach(function(f){
         var wait = Number(f.wait || 0);
-        ac.appendChild(ppBtn(f.emoji + " " + pt.name, "food", function(){ act("/api/pet/feed", { food: f.key, paid: false }); }, wait > 0));
-        ac.appendChild(ppBtn("⚡ " + pt.name, "food", function(){ act("/api/pet/feed", { food: f.key, paid: true }); }));
+        ac.appendChild(ppBtn(f.emoji + " " + f.name, "food", function(){ act("/api/pet/feed", { food: f.key, paid: false }); }, wait > 0));
+        ac.appendChild(ppBtn("⚡ " + f.name + " فوری", "food", function(){ act("/api/pet/feed", { food: f.key, paid: true }); }));
       });
-      ac.appendChild(ppBtn(pt.play_wait > 0 ? "😴 " + fa(Math.ceil(pt.play_wait / 60)) + " دقیقه‌ی دیگه" : "🤗 نوازش", "play", function(){ act("/api/pet/play"); }, pt.play_wait > 0));
+      ac.appendChild(ppBtn(pt.play_wait > 0 ? fa(Math.ceil(pt.play_wait / 60)) + " دقیقه‌ی دیگه" : "🤗 نوازش", "play", function(){ act("/api/pet/play"); }, pt.play_wait > 0));
       ac.appendChild(ppBtn("⚔️ نبرد", "fight", function(){ toast("⚔️ نبرد به‌زودی میاد! 🔜", true); }));
       pp.appendChild(ac);
     } else if (nxt) {
@@ -1574,17 +1593,14 @@ function __rubyMain(){
       e.textContent = "هنوز پت نداری! " + nxt.emoji + " " + nxt.name + " رایگانه 👇";
       pp.appendChild(e);
     }
-    if (nxt) {
-      var nx = document.createElement("div"); nx.className = "pp-next";
-      if (pt) { var t = document.createElement("div"); t.className = "t"; t.textContent = nxt.about; nx.appendChild(t); }
-      var label = pt ? "🛒 پت بعدی: " + nxt.emoji + " " + nxt.name + " — " + fa(nxt.price) + " روب‌پوینت"
-                     : nxt.emoji + " " + nxt.name + " رو بگیر (رایگان)";
-      nx.appendChild(ppBtn(label, "", function(){
-        if (pt && !confirm("⚠️ هر نفر فقط یه پت داره؛ " + nxt.name + " جای پت فعلیت میاد و پت قبلی (با لولش) از بین می‌ره. مطمئنی؟")) return;
-        act("/api/pet/buy", { key: nxt.key });
-      }));
-      pp.appendChild(nx);
-    }
+    var ownedKeys=((current && current.pets_owned)||[]).map(function(x){return x.key;});
+    var catalog=document.createElement("div"); catalog.className="pp-next";
+    var catalogTitle=document.createElement("div"); catalogTitle.className="t"; catalogTitle.textContent="🛍 پت‌های دیگر"; catalog.appendChild(catalogTitle);
+    (current && current.pet_catalog || []).forEach(function(op){
+      if(ownedKeys.indexOf(op.key)>=0) return;
+      catalog.appendChild(ppBtn(op.emoji+" "+op.name+" · "+fa(op.price)+" روب‌پوینت","",function(){ if(confirm("پت "+op.name+" خریداری و فعال بشه؟")) act("/api/pet/buy",{key:op.key}); }));
+    });
+    if(catalog.children.length>1) pp.appendChild(catalog);
     box.appendChild(pp);
   }
 
