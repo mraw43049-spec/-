@@ -346,8 +346,7 @@ def pet_panel_text(user, user_name=''):
         f"💬 «{st['say']}»", "",
         f"💰 روب‌پوینت تو: {int(user.fox_points or 0):,}",
         f"🏷 لقب: {st.get('evolution_title', st['type_name'])}",
-        ("😴 پتت خوابه؛ صبح بیدار می‌شه." if st.get("sleeping") else "🌙 شب‌ها پت می‌خوابه."),
-        "✏️ برای تغییر اسم، دکمه‌ی پایین رو بزن.",
+        "✏️ برای تغییر اسم، از دکمه‌ی همین پنل استفاده کن.",
     ])
 
 
@@ -442,16 +441,29 @@ async def pet_rename_text_handler(update, context):
             await pet_command(update, context)
         return
     context.user_data.pop('pet_rename_wait', None)
+    name = (update.effective_message.text or '').strip()
+    if not name or len(name) > 12:
+        await update.effective_message.reply_text('⛔ اسم باید بین ۱ تا ۱۲ حرف باشد. دوباره «پت» را باز کن و تغییر اسم را بزن.')
+        return
+    context.user_data['pet_rename_pending'] = name
     session = get_session()
     try:
         user = get_or_create_user(session, update.effective_user)
-        ok, msg = pets_mod.pet_rename(user, update.effective_message.text)
-        if ok: session.commit()
+        text = f"✏️ تأیید تغییر اسم پت\n\nاسم جدید: «{name}»\n\nتغییرش بدم؟"
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton('✅ بله، تغییر بده', callback_data=f'pet:renameyes:x:{user.telegram_id}'), InlineKeyboardButton('❌ لغو', callback_data=f'pet:renameno:x:{user.telegram_id}')]])
+        
+        panel_chat = context.user_data.get('pet_panel_chat_id')
+        panel_mid = context.user_data.get('pet_panel_message_id')
+        if panel_chat and panel_mid:
+            try:
+                await context.bot.edit_message_caption(chat_id=panel_chat, message_id=panel_mid, caption=text, reply_markup=kb)
+            except Exception:
+                try: await context.bot.edit_message_text(chat_id=panel_chat, message_id=panel_mid, text=text, reply_markup=kb)
+                except Exception: await update.effective_message.reply_text(text, reply_markup=kb)
+        else:
+            await update.effective_message.reply_text(text, reply_markup=kb)
     finally:
         session.close()
-    await update.effective_message.reply_text(('✅ ' if ok else '⛔ ') + msg)
-    if ok:
-        await pet_command(update, context)
 
 
 async def pet_hunger_reminder_job(context):
@@ -513,8 +525,28 @@ async def pet_button(update, context):
             return
         if action == 'ren':
             context.user_data['pet_rename_wait'] = True
+            context.user_data['pet_panel_message_id'] = q.message.message_id
+            context.user_data['pet_panel_chat_id'] = q.message.chat_id
+            context.user_data.pop('pet_rename_pending', None)
             await q.answer()
-            await q.message.reply_text('✏️ اسم جدید پتت رو بفرست (حداکثر ۱۲ حرف):')
+            await vip_show(q, '✏️ تغییر اسم پت\n\nاسم جدید رو در پیام بعدی بفرست (حداکثر ۱۲ حرف).\nبعد از ارسال، تأیید داخل همین پنل نمایش داده می‌شه.', InlineKeyboardMarkup([[InlineKeyboardButton('❌ لغو', callback_data=f'pet:renameno:x:{uid}')]]), photo_path=_pet_panel_photo(user), same_photo=False)
+            return
+        if action == 'renameyes':
+            name = context.user_data.pop('pet_rename_pending', None)
+            if not name:
+                await q.answer('درخواست تغییر اسم منقضی شده؛ دوباره تلاش کن.', show_alert=True)
+                await _refresh(same_photo=False)
+                return
+            ok, msg = pets_mod.pet_rename(user, name)
+            if ok: session.commit()
+            await q.answer(('✅ ' if ok else '⛔ ') + msg, show_alert=True)
+            await _refresh(same_photo=False)
+            return
+        if action == 'renameno':
+            context.user_data.pop('pet_rename_wait', None)
+            context.user_data.pop('pet_rename_pending', None)
+            await q.answer('تغییر اسم لغو شد.')
+            await _refresh(same_photo=False)
             return
         if action == 'gift':
             ok, msg = pets_mod.pet_daily_gift(user)
@@ -8304,6 +8336,7 @@ def gift_tiers_keyboard():
         for key, tier in GIFT_TIERS.items()
     ]
     rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="gift:backshop:0:0")])
+    rows.append([InlineKeyboardButton("❌ لغو خرید", callback_data="gift:backshop:0:0")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -8319,6 +8352,7 @@ def gift_options_keyboard(tier):
         for key in t["options"]
     ]
     rows.append([InlineKeyboardButton("🔙 بازگشت به تعرفه‌ها", callback_data="gift:backtiers:0:0")])
+    rows.append([InlineKeyboardButton("❌ لغو خرید", callback_data="gift:backshop:0:0")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -8343,6 +8377,7 @@ def gift_qty_keyboard(tier, option_key, qty):
         ],
         [InlineKeyboardButton("✅ تایید تعداد", callback_data=f"gift:qtyok:{tier}:0")],
         [InlineKeyboardButton("🔙 بازگشت به طرح‌ها", callback_data=f"gift:backopt:{tier}:0")],
+        [InlineKeyboardButton("❌ لغو خرید", callback_data="gift:backshop:0:0")],
     ])
 
 
@@ -8765,8 +8800,8 @@ async def gift_button(update, context):
         await q.message.edit_text(
             f"{GIFT_TIERS[tier]['tier_label']} — {label} × {flow['qty']}\n\n"
             "👤 شناسه کاربری (یوزرنیم) گیرنده گیفت رو بفرست.\n"
-            "مثال: @username"
-        )
+            "مثال: @username\n\nبرای لغو، /cancelgift را بفرست."
+        , reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو خرید", callback_data="gift:backshop:0:0")]]))
         return
     if action == "notext":
         flow = context.user_data.get("gift_flow") or {}
@@ -8804,7 +8839,7 @@ async def handle_gift_text(update, context):
         await update.message.reply_text(
             "📝 حالا متن گیفت رو بفرست؛ یعنی چی روی گیفت نوشته بشه.\n"
             "یا اگه نمی‌خوای متنی روی گیفت باشه، دکمه زیر رو بزن.",
-            reply_markup=GIFT_NO_TEXT_KEYBOARD,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 بدون متن", callback_data="gift:notext:0:0")], [InlineKeyboardButton("❌ لغو خرید", callback_data="gift:backshop:0:0")]]),
             **reply_kwargs(update.message)
         )
         return True
@@ -8944,6 +8979,7 @@ def points_shop_keyboard():
         for key in POINTS_PACKAGES
     ]
     rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="gift:backshop:0:0")])
+    rows.append([InlineKeyboardButton("❌ لغو خرید", callback_data="gift:backshop:0:0")])
     return InlineKeyboardMarkup(rows)
 
 

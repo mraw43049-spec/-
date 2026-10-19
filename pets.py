@@ -46,8 +46,6 @@ PET_TAP_DAILY_LIMIT = 5
 PET_TAP_XP = 0
 PET_BATH_COOLDOWN = 12 * 3600  # پت هر ۱۲ ساعت یک‌بار باید حمام کند
 PET_BATH_MOOD = 3
-PET_SLEEP_START_HOUR = 23
-PET_SLEEP_END_HOUR = 7
 FAVORITE_FOODS = {'hamster': 'sunflower', 'cat': 'milk', 'rabbit': 'carrot', 'dog': 'meat'}
 FOODS = {
     'sunflower': {'emoji': '🌻', 'name': 'تخمه آفتاب‌گردان', 'sat': 15},
@@ -415,8 +413,6 @@ def pet_play(user, user_name=''):
     wait = PLAY_COOLDOWN - (now - int(p.get('pt', 0)))
     if wait > 0:
         return False, f"پتت خسته‌ست؛ {int(math.ceil(wait / 60))} دقیقه‌ی دیگه بازم نازش کن 😴"
-    if _is_sleeping():
-        return False, "😴 پتت خوابه؛ بعد از ساعت ۷ صبح بیدار می‌شه."
     if p['sat'] < 10:
         return False, "پتت خیلی گرسنه‌ست، اول غذا بده 🍪"
     sat0, mood0 = p['sat'], p['mood']
