@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""پت‌های روبی: هر کاربر فقط یک پت داره.
-ترتیب: همستر (رایگان) ← گربه ← خرگوش ← سگ پامرانین. خرید پت بعدی، جایگزین پت فعلی می‌شه.
+"""پت‌های روبی: هر کاربر می‌تونه چند پت داشته باشه و بینشون جابه‌جا بشه.
+ترتیب: همستر (رایگان) ← گربه ← خرگوش ← سگ پامرانین. خرید پت جدید، پت‌های قبلی رو حذف نمی‌کنه.
 غذا و نوازش سیری/حال رو عوض می‌کنن، تجربه لول می‌ده. عکس‌ها (pet_<key>.png) توی ریپو کنار همین فایل‌ان."""
 import json
 import math
@@ -90,14 +90,6 @@ PERSONALITY = {
 }
 
 
-def _is_sleeping():
-    # ساعت ایران، مستقل از timezone سرور
-    import datetime
-    from datetime import timezone, timedelta
-    hour = datetime.datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=3, minutes=30))).hour
-    return hour >= PET_SLEEP_START_HOUR or hour < PET_SLEEP_END_HOUR
-
-
 def _evolution_title(key, level):
     titles = {10: 'قهرمان', 20: 'افسانه‌ای', 30: 'سلطان'}
     tier = max((n for n in titles if level >= n), default=0)
@@ -171,6 +163,12 @@ def pet_next_to_buy(user):
     """اولین پتِ خریداری‌نشده؛ کاربر می‌تواند چند پت داشته باشد."""
     owned = set(pet_owned_keys(user))
     return next((k for k in PET_ORDER if k not in owned), None)
+
+
+def pet_unowned_keys(user):
+    """پت‌هایی که کاربر هنوز نخریده (به ترتیب کاتالوگ)."""
+    owned = set(pet_owned_keys(user))
+    return [k for k in PET_ORDER if k not in owned]
 
 
 def pet_can_buy(user, key):

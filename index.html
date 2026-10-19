@@ -1583,7 +1583,7 @@ function __rubyMain(){
       (pt.foods || []).forEach(function(f){
         var wait = Number(f.wait || 0);
         ac.appendChild(ppBtn(f.emoji + " " + f.name, "food", function(){ act("/api/pet/feed", { food: f.key, paid: false }); }, wait > 0));
-        ac.appendChild(ppBtn("⚡ " + f.name + " فوری", "food", function(){ act("/api/pet/feed", { food: f.key, paid: true }); }));
+        ac.appendChild(ppBtn("⚡ غذای فوری", "food", function(){ act("/api/pet/feed", { food: f.key, paid: true }); }));
       });
       ac.appendChild(ppBtn(pt.play_wait > 0 ? fa(Math.ceil(pt.play_wait / 60)) + " دقیقه‌ی دیگه" : "🤗 نوازش", "play", function(){ act("/api/pet/play"); }, pt.play_wait > 0));
       ac.appendChild(ppBtn("⚔️ نبرد", "fight", function(){ toast("⚔️ نبرد به‌زودی میاد! 🔜", true); }));
