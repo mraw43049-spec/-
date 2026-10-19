@@ -106,6 +106,13 @@ def _evolution_title(key, level):
     return (PETS[key]['name'] + ' ' + titles[tier]) if tier else PETS[key]['name']
 
 
+def pet_daily_gift_available(user):
+    """True when the daily pet gift has not been claimed today (Iran time)."""
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=3, minutes=30)))
+    return (getattr(user, 'pet_daily_date', '') or '') != now.date().isoformat()
+
+
 def pet_daily_gift(user):
     """هدیه‌ی روزانه‌ی idempotent؛ استریک بر اساس روزهای تقویمی ایران."""
     from datetime import datetime, timezone, timedelta

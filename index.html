@@ -669,8 +669,8 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
 .pp-say{margin-top:12px;background:#0e1130;border:1px solid #2a2f58;border-radius:14px;padding:10px 12px;font-size:13px;line-height:1.8;position:relative}
 .pp-stats{display:flex;gap:8px;margin-top:10px;font-size:12px;color:#cfd3ff;flex-wrap:wrap}
 .pp-stats span{background:#0e1130;border-radius:10px;padding:5px 9px}
-.pp-actions{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}
-.pp-actions button,.pp-mis button{border:0;border-radius:12px;padding:10px 6px;font-size:13px;font-weight:800;font-family:inherit;color:#fff;background:#3b4cca}
+.pp-actions{display:grid;grid-template-columns:repeat(2,1fr);gap:5px;margin-top:8px}
+.pp-actions button,.pp-mis button{border:0;border-radius:10px;padding:7px 4px;font-size:11px;font-weight:800;font-family:inherit;color:#fff;background:#3b4cca}
 .pp-actions button.food{background:#c98a1b}
 .pp-actions button.play{background:#d6457a}
 .pp-actions button.fight{background:#7a3030}
@@ -1181,7 +1181,7 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
   <textarea id="storeText" rows="2" maxlength="500" placeholder="متن دلخواه (اختیاری؛ خالی بگذاری بدون متن ارسال می‌شود)"></textarea>
   <label class="muted">📸 تصویر رسید پرداخت (اجباری)<input id="storeReceipt" type="file" accept="image/*" style="display:block;margin-top:6px"></label>
   <div id="storeFormHint" class="muted" style="line-height:1.7"></div>
-  <div class="row"><button id="storeSubmit" class="action">✅ ثبت سفارش</button><button id="storeCancel" class="action secondary">بستن</button></div>
+  <div class="row"><button id="storeSubmit" class="action">✅ ثبت سفارش</button><button id="storeCancel" class="action secondary">❌ لغو خرید</button></div>
  </div>
 </div></div>
 
@@ -1563,8 +1563,8 @@ function __rubyMain(){
       var ac = document.createElement("div"); ac.className = "pp-actions";
       (pt.foods || []).forEach(function(f){
         var wait = Number(f.wait || 0);
-        ac.appendChild(ppBtn(f.emoji + " " + f.name + (wait > 0 ? " (رایگان پس از " + fa(Math.ceil(wait/60)) + " دقیقه)" : " (رایگان)"), "food", function(){ act("/api/pet/feed", { food: f.key, paid: false }); }, wait > 0));
-        ac.appendChild(ppBtn("⚡ غذای فوری · " + fa(f.price) + " روب‌پوینت", "food", function(){ act("/api/pet/feed", { food: f.key, paid: true }); }));
+        ac.appendChild(ppBtn(f.emoji + " " + pt.name, "food", function(){ act("/api/pet/feed", { food: f.key, paid: false }); }, wait > 0));
+        ac.appendChild(ppBtn("⚡ " + pt.name, "food", function(){ act("/api/pet/feed", { food: f.key, paid: true }); }));
       });
       ac.appendChild(ppBtn(pt.play_wait > 0 ? "😴 " + fa(Math.ceil(pt.play_wait / 60)) + " دقیقه‌ی دیگه" : "🤗 نوازش", "play", function(){ act("/api/pet/play"); }, pt.play_wait > 0));
       ac.appendChild(ppBtn("⚔️ نبرد", "fight", function(){ toast("⚔️ نبرد به‌زودی میاد! 🔜", true); }));

@@ -359,13 +359,13 @@ def pet_panel_keyboard(user):
         food = pets_mod.FOODS[food_key]
         price = pets_mod.PET_FEED_PRICE[pets_mod.pet_active(user)]
         wait = pets_mod.PET_FEED_COOLDOWN[pets_mod.pet_active(user)]
-        rows.append([InlineKeyboardButton(f"{food['emoji']} {food['name']} (هر {wait//60} دقیقه رایگان)", callback_data=f"pet:feed:{food_key}:{uid}")])
-        rows.append([InlineKeyboardButton(f"⚡ غذای فوری ({price:,} روب‌پوینت)", callback_data=f"pet:feedpaid:{food_key}:{uid}")])
+        rows.append([InlineKeyboardButton(f"{food['emoji']} {pets_mod.PETS[pets_mod.pet_active(user)]['name']}", callback_data=f"pet:feed:{food_key}:{uid}")])
+        rows.append([InlineKeyboardButton(f"⚡ {pets_mod.PETS[pets_mod.pet_active(user)]['name']}", callback_data=f"pet:feedpaid:{food_key}:{uid}")])
         rows.append([InlineKeyboardButton("🤗 نوازش", callback_data=f"pet:play:x:{uid}"),
                      InlineKeyboardButton("⚔️ نبرد", callback_data=f"pet:bt:x:{uid}")])
         rows.append([InlineKeyboardButton("✏️ تغییر اسم پت", callback_data=f"pet:ren:x:{uid}")])
-        rows.append([InlineKeyboardButton("🎁 هدیه‌ی روزانه", callback_data=f"pet:gift:x:{uid}"),
-                     InlineKeyboardButton("🔔 یادآوری گرسنگی: "+("روشن" if int(getattr(user,'pet_hunger_reminders',1) or 0) else "خاموش"), callback_data=f"pet:rem:x:{uid}")])
+        if pets_mod.pet_daily_gift_available(user):
+            rows.append([InlineKeyboardButton("🎁 هدیه‌ی روزانه", callback_data=f"pet:gift:x:{uid}")])
     nxt = pets_mod.pet_next_to_buy(user)
     if nxt:
         p = pets_mod.PETS[nxt]
