@@ -1209,6 +1209,18 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
   <div class="row"><button id="genderNo" class="action secondary">لغو</button></div>
 </div></div>
 
+<!-- دیالوگ تأیید موشک؛ وجود این عناصر برای ادامه‌ی مقداردهی همه‌ی دکمه‌ها ضروری است. -->
+<div id="rkConfirm" class="modal" role="dialog" aria-modal="true" aria-labelledby="rkCfTitle">
+  <div class="sheet">
+    <h3 id="rkCfTitle">تأیید عملیات</h3>
+    <div id="rkCfBody" style="line-height:1.9;margin:8px 0 14px"></div>
+    <div class="row">
+      <button id="rkCfYes" class="action" type="button">✅ تأیید</button>
+      <button id="rkCfNo" class="action secondary" type="button">لغو</button>
+    </div>
+  </div>
+</div>
+
 <script>
 function __rubyMain(){
   var tg = window.Telegram && window.Telegram.WebApp;
