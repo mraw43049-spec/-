@@ -109,23 +109,30 @@ def ensure_table(engine) -> None:
                 UNIQUE (round_id, user_id)
             )
         """))
-        # مهاجرت ستونه اگر جدول قدیمی باشد
+    # مهاجرت: اگر جدول‌ها از نسخه‌ی قدیمی مانده باشند ستون‌های جاافتاده اضافه می‌شن
+    # (هر دستور تراکنش جدا دارد تا خطای یکی بقیه را خراب نکند)
+    stmts = [
+        "ALTER TABLE rocket_rounds ADD COLUMN IF NOT EXISTS crash_point DOUBLE PRECISION NOT NULL DEFAULT 1",
+        "ALTER TABLE rocket_rounds ADD COLUMN IF NOT EXISTS created_at DOUBLE PRECISION NOT NULL DEFAULT 0",
+        "ALTER TABLE rocket_rounds ADD COLUMN IF NOT EXISTS liftoff_at DOUBLE PRECISION NOT NULL DEFAULT 0",
+        "ALTER TABLE rocket_rounds ADD COLUMN IF NOT EXISTS crash_at DOUBLE PRECISION NOT NULL DEFAULT 0",
+        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS round_id INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS bet INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS target DOUBLE PRECISION NOT NULL DEFAULT 2",
+        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS crash_point DOUBLE PRECISION NOT NULL DEFAULT 1",
+        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'",
+        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS final_mult DOUBLE PRECISION",
+        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS payout INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS stars_awarded INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS created_at DOUBLE PRECISION NOT NULL DEFAULT 0",
+        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS ended_at DOUBLE PRECISION",
+        "CREATE INDEX IF NOT EXISTS ix_rocket_bets_user ON rocket_bets (user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_rocket_bets_status ON rocket_bets (status)",
+    ]
+    for st in stmts:
         try:
-            conn.execute(text(
-                "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS stars_awarded INTEGER NOT NULL DEFAULT 0"
-            ))
-        except Exception:
-            pass
-        try:
-            conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_rocket_bets_user ON rocket_bets (user_id)"
-            ))
-        except Exception:
-            pass
-        try:
-            conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_rocket_bets_status ON rocket_bets (status)"
-            ))
+            with engine.begin() as conn:
+                conn.execute(text(st))
         except Exception:
             pass
 

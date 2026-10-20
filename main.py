@@ -1550,6 +1550,12 @@ def rocket_state(tg_user: dict = Depends(current_telegram_user)):
                            "ended_ago": now - float(lastr["crash_at"]),
                            "mine": _rocket_mine(lp, uid), "players": _rocket_public_players(lp, uid)}
         return out
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        session.rollback()
+        import logging as _lg; _lg.getLogger("rocket").exception("rocket_state failed")
+        raise HTTPException(status_code=500, detail=f"خطای موشک: {type(e).__name__}: {str(e)[:300]}")
     finally:
         session.close()
 
@@ -1601,6 +1607,10 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
     except HTTPException:
         session.rollback()
         raise
+    except Exception as e:  # noqa: BLE001
+        session.rollback()
+        import logging as _lg; _lg.getLogger("rocket").exception("rocket_bet failed")
+        raise HTTPException(status_code=500, detail=f"خطای موشک: {type(e).__name__}: {str(e)[:300]}")
     finally:
         session.close()
 

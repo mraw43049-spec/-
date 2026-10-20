@@ -2406,6 +2406,7 @@ function __rubyMain(){
     if (rkPollBusy) return;
     rkPollBusy = true; var t0 = Date.now();
     api("/api/rocket").then(function(d){ var rb = $("segRocket"); if (rb) rb.style.display = ""; rkApply(d, t0, Date.now()); }).catch(function(err){
+      if (err && !err.gate && !rkRid) { var rr = $("rkRes"); if (rr) { rr.textContent = "⚠️ " + (err.message || "خطا"); rr.className = "rk-res lose"; } }
       if (err && (err.status === 403 || String(err.message || "").includes("403") || String(err.message || "").includes("این حساب فعال نیست"))) {
         var rb = $("segRocket"); if (rb) rb.style.display = "none";
         var rc = $("rocketCard"); if (rc) rc.style.display = "none";
@@ -2489,7 +2490,7 @@ function __rubyMain(){
       rkSetAmt(d.entry_fixed || d.min_entry || 50000);
       if (!$("rkTgt").value) rkSetTgt(2);
       rkSyncBal(); rkStartPoll(); rkKick(); stamp();
-    }).catch(function(e){ if (!e.gate) toast(e.message, false); });
+    }).catch(function(e){ if (!e.gate) { toast(e.message, false); var rr = $("rkRes"); if (rr) { rr.textContent = "⚠️ " + e.message; rr.className = "rk-res lose"; } } });
   }
   function rkLoadLeaderboard(){ api("/api/rocket/leaderboard").then(function(d){ var box=$("rkLeaderboard"); box.innerHTML=""; (d.items||[]).forEach(function(x,i){ var row=document.createElement("div"); row.className="rk-chip "+rkChipCls(x.best); row.style.cssText="display:flex;justify-content:space-between;width:100%;margin:4px 0"; row.textContent=(i+1)+". "+x.player+" — "+rkFm(x.best)+" · "+fa(x.games)+" بازی"; box.appendChild(row); }); if(!box.children.length) box.textContent="هنوز رکوردی در ۲۴ ساعت گذشته ثبت نشده."; }).catch(function(){ $("rkLeaderboard").textContent="لیدربورد فعلاً در دسترس نیست."; }); }
   $("rkLeaderboardBtn").onclick=function(){var box=$("rkLeaderboard"),show=box.style.display==="none";box.style.display=show?"flex":"none";if(show)rkLoadLeaderboard();};
