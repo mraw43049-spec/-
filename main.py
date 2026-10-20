@@ -1492,7 +1492,6 @@ def _rocket_access_guard(tg_user):
 def _rocket_cfg():
     return {"min_entry": _rk.MIN_ENTRY, "max_entry": _rk.MAX_ENTRY, "max_mult": _rk.MAX_MULT, "min_target": _rk.MIN_TARGET,
             "growth": _rk.GROWTH, "rise": _rk.RISE, "start": _rk.START, "wait": _rk.WAIT, "edge": _rk.EDGE,
-            "buy_rate": _rk.BUY_RATE, "sell_rate": _rk.SELL_RATE,
             "entry_fixed": _rk.MIN_ENTRY,  # ورود ثابت ۵۰هزار
             "stars_redeem_min": _rk.STARS_REDEEM_MIN,
             "stars_redeem_reward": _rk.STARS_REDEEM_REWARD}
@@ -1533,7 +1532,7 @@ def rocket_state(tg_user: dict = Depends(current_telegram_user)):
             "unlocked": int(user.level or 1) >= botmod.CASINO_UNLOCK_LEVEL,
             "unlock_level": botmod.CASINO_UNLOCK_LEVEL, "level": int(user.level or 1),
             "disabled": bool(getattr(botmod, "CASINO_DISABLED", False)),
-            "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0),
+            "rob_points": int(user.fox_points or 0),
             "rocket_stars": int(getattr(user, "rocket_stars", 0) or 0),
             "round": {"id": int(rnd["id"]), "phase": "flying" if flying else "waiting",
                       "liftoff_in": liftoff - now, "elapsed": max(0.0, now - liftoff)},
@@ -1597,7 +1596,7 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
             raise HTTPException(status_code=409, detail="✅ برای همین پرواز قبلاً شرط بستی.")
         session.commit()
         return {"ok": True, "bet": amount, "target": target, "round_id": int(rnd["id"]),
-                "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0),
+                "rob_points": int(user.fox_points or 0),
                 "rocket_stars": int(getattr(user, "rocket_stars", 0) or 0)}
     except HTTPException:
         session.rollback()
@@ -1623,7 +1622,7 @@ def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
             raise HTTPException(status_code=409, detail="شرط همین الان تموم شد.")
         user.fox_points = int(user.fox_points or 0) + int(g["bet"])
         session.commit()
-        return {"ok": True, "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0)}
+        return {"ok": True, "rob_points": int(user.fox_points or 0)}
     except HTTPException:
         session.rollback()
         raise
@@ -1683,7 +1682,6 @@ def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current
             "done": True,
             "rocket_stars": int(user.rocket_stars),
             "rob_points": int(user.fox_points or 0),
-            "balance": int(user.rub_toon or 0),
         }
     except HTTPException:
         session.rollback()

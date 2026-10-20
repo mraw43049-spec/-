@@ -1025,7 +1025,7 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
       <div id="rkPlayers"></div>
     </div>
     <div id="rkExtra">
-      <div class="rk-balances" id="rkBalancesRow"><span><svg class="ton"><use href="#tonSym"/></svg> روب‌تون <b id="rkBalInline">—</b></span><span>🟡 روب‌پوینت <b id="rkPoints">—</b></span><span>⭐ <b id="rkStarsInline">—</b></span></div>
+      <div class="rk-balances" id="rkBalancesRow"><span>🟡 روب‌پوینت <b id="rkPoints">—</b></span><span>⭐ <b id="rkStarsInline">—</b></span></div>
       <button id="rkLeaderboardBtn" class="rk-small rk-flights-btn" type="button">🏆 لیدربورد ۲۴ ساعته</button>
       <div id="rkLeaderboard" class="rk-hist" style="display:none">درحال بارگذاری…</div>
       <button id="rkMyFlightsBtn" class="rk-small rk-flights-btn" type="button">✈️ پروازهای من</button>
@@ -1033,13 +1033,6 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
     </div>
     <div class="muted" id="rkRule" style="margin-top:10px;line-height:1.9"></div>
     <div class="muted" style="margin-top:6px;line-height:1.9">ورود به هر پرواز ۵۰٬۰۰۰ روب‌پوینت است. موشک بالا می‌ره و در لحظه‌ای تصادفی سقوط می‌کند. اگر به ضریب هدفت برسد، همان ضریب را به‌صورت روب‌پوینت می‌گیری و به‌اندازهٔ عدد صحیح ضریب ⭐ ستاره جمع می‌کنی. با حداقل ۵۰ ستاره می‌توانی ۱٬۰۰۰٬۰۰۰ روب‌پوینت بگیری.</div>
-  </div>
-  <div id="rkConfirm" class="modal">
-    <div class="sheet">
-      <h3 id="rkCfTitle">تایید تبدیل</h3>
-      <div id="rkCfBody" style="line-height:2;font-size:14px"></div>
-      <div class="row"><button id="rkCfNo" class="action secondary" type="button">انصراف</button><button id="rkCfYes" class="action" type="button">✅ تایید</button></div>
-    </div>
   </div>
   <div id="plinkoCard" class="card" style="display:none">
     <div class="p-head">
@@ -2380,7 +2373,7 @@ function __rubyMain(){
   function rkSyncBal(){
     if (!rocket) return;
     $("rkBal").textContent = fa(rocket.rob_points || 0);
-    if ($("rkBalInline")) $("rkBalInline").textContent = fa(rocket.balance || 0);
+
     if ($("rkPoints")) $("rkPoints").textContent = fa(rocket.rob_points || 0);
     var st = rocket.rocket_stars || 0;
     if ($("rkStars")) $("rkStars").textContent = fa(st);

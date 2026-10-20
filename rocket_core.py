@@ -24,8 +24,10 @@ EDGE = float(os.environ.get("ROCKET_EDGE", "0.04"))  # حاشیه خانه
 GROWTH = float(os.environ.get("ROCKET_GROWTH", "0.06"))  # شیب رشد ضریب
 RISE = float(os.environ.get("ROCKET_RISE", "12"))  # ثانیه تقریبی تا سقف
 START = float(os.environ.get("ROCKET_START", "-1.5"))
-WAIT = 10.0  # شمارش معکوس ثابت ۱۰ ثانیه تا پرواز خودکار
-COOLDOWN = 0.0  # پس از سقوط، شمارش معکوس ۱۰ ثانیه‌ای پرواز بعدی بلافاصله آغاز می‌شود
+WAIT = float(os.environ.get("ROCKET_WAIT", "10"))  # ثانیه شرط‌بندی
+COOLDOWN = float(os.environ.get("ROCKET_COOLDOWN", "10"))  # بین پروازها
+BUY_RATE = int(os.environ.get("ROCKET_BUY_RATE", "1000"))  # روب‌پوینت برای ۱ روب‌تون
+SELL_RATE = int(os.environ.get("ROCKET_SELL_RATE", "800"))
 
 # سیستم ستاره
 STARS_PER_MULT = 1  # هر ۱ ضریب = ۱ ستاره
@@ -131,23 +133,8 @@ def _row(m) -> dict:
     return dict(m) if m is not None else None
 
 
-def _lock_rounds(session) -> None:
-    """جلوی ساخته‌شدن هم‌زمان دو دور (چند کاربر هم‌زمان polling می‌کنن) رو روی Postgres می‌گیره."""
-    try:
-        if session.get_bind().dialect.name == "postgresql":
-            session.execute(text("SELECT pg_advisory_xact_lock(7287310001)"))
-    except Exception:
-        pass
-
-
 def ensure_round(session, now: float) -> dict:
-    """دور فعال یا جدید بساز.
-
-    دور جدید همیشه یک ردیف واقعی توی دیتابیسه (هیچ دور ساختگی/موقت وجود نداره)؛
-    اگه دور قبلی تازه تموم شده باشه، پرتاب دور بعدی = پایان دور قبلی + COOLDOWN + WAIT.
-    این‌طوری هیچ‌کس نمی‌تونه روی دوری که تموم شده (و نتیجه‌ش معلومه) شرط ببنده.
-    """
-    _lock_rounds(session)
+    """دور فعال یا جدید بساز. بعد از crash_at + cooldown دور بعدی."""
     row = session.execute(text("""
         SELECT id, crash_point, created_at, liftoff_at, crash_at
         FROM rocket_rounds
@@ -157,29 +144,42 @@ def ensure_round(session, now: float) -> dict:
     if row:
         return _row(row)
 
-    # آخرین دور همگانی (بازی‌های تک‌نفره‌ی بات liftoff_at == created_at دارن و حساب نمی‌شن)
+    # آخرین دور تمام‌شده
     last = session.execute(text("""
-        SELECT id, crash_at FROM rocket_rounds
-        WHERE liftoff_at > created_at
-        ORDER BY id DESC LIMIT 1
+        SELECT id, crash_point, created_at, liftoff_at, crash_at
+        FROM rocket_rounds ORDER BY id DESC LIMIT 1
     """)).mappings().first()
+    if last and now < float(last["crash_at"]) + COOLDOWN:
+        # هنوز در cooldown — همان را برگردان ولی به‌عنوان waiting برای بعدی حساب می‌شود
+        # برای سادگی دور جدید بعد از cooldown
+        wait_until = float(last["crash_at"]) + COOLDOWN
+        if now < wait_until:
+            # دور موقت با liftoff در آینده
+            return {
+                "id": int(last["id"]),
+                "crash_point": float(last["crash_point"]),
+                "created_at": float(last["created_at"]),
+                "liftoff_at": wait_until + WAIT,
+                "crash_at": float(last["crash_at"]),
+                "_cooldown": True,
+            }
 
     cp = roll_crash()
     created = now
     liftoff = now + WAIT
-    if last and now < float(last["crash_at"]) + COOLDOWN:
-        liftoff = float(last["crash_at"]) + COOLDOWN + WAIT
     # زمان سقوط از روی ضریب
     t_crash = elapsed_for_mult(min(cp, MAX_MULT))
     crash_at = liftoff + t_crash
-    new_id = session.execute(text("""
+    session.execute(text("""
         INSERT INTO rocket_rounds (crash_point, created_at, liftoff_at, crash_at)
         VALUES (:cp, :c, :l, :ca)
-        RETURNING id
-    """), {"cp": cp, "c": created, "l": liftoff, "ca": crash_at}).scalar()
+    """), {"cp": cp, "c": created, "l": liftoff, "ca": crash_at})
     session.flush()
-    return {"id": int(new_id), "crash_point": cp, "created_at": created,
-            "liftoff_at": liftoff, "crash_at": crash_at}
+    row = session.execute(text("""
+        SELECT id, crash_point, created_at, liftoff_at, crash_at
+        FROM rocket_rounds ORDER BY id DESC LIMIT 1
+    """)).mappings().first()
+    return _row(row)
 
 
 def players(session, round_id: int) -> list:
