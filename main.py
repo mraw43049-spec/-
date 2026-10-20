@@ -1464,7 +1464,7 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
 
 # ---------------------------------------------------------------------------
 # کازینو: موشک 🚀 (ضریب‌دار؛ بازی Crash)
-# شرط روی ضریب با روب‌پوینت: پروازهای همگانیِ خودکار؛ هر پرواز ۳۰ ثانیه شرط‌بندی دارد، بعد برای همه پرتاب می‌شود.
+# شرط روی ضریب با روب‌پوینت: پروازهای همگانیِ خودکار؛ هر پرواز ۱۰ ثانیه شرط‌بندی دارد، بعد برای همه پرتاب می‌شود (حتی اگه کسی داخل نباشه).
 # اگر موشک قبل از سقوط به ضریبِ هدفِ بازیکن برسد، «ورودی × ضریب هدف» می‌گیرد؛ وگرنه ورودی می‌سوزد. شمارنده از −۱٫۵ شروع می‌شود تا ×۱۰؛ حداقل ضریب هدف ×۱٫۲.
 # نقطه‌ی سقوط سمت سرور ذخیره می‌شه و تا پایان بازی فرستاده نمی‌شه؛ ضریب فقط با ساعت سرور حساب می‌شه.
 # تنظیمات (Railway): ROCKET_MIN_ENTRY / ROCKET_MAX_ENTRY / ROCKET_WAIT / ROCKET_RISE / ROCKET_EDGE / ROCKET_MAX_MULT / ROCKET_MIN_TARGET / ROCKET_GROWTH
@@ -1719,6 +1719,59 @@ def rocket_leaderboard(tg_user: dict = Depends(current_telegram_user)):
                            "games": int(x["games"] or 0)} for x in rows]}
     finally:
         session.close()
+
+
+# ---------------------------------------------------------------------------
+# پرواز خودکارِ موشک 🚀 — بدون وابستگی به حضور کاربر
+# قبلاً دورِ جدید فقط وقتی ساخته می‌شد که یکی مینی‌اپ رو باز می‌کرد و /api/rocket صدا زده می‌شد.
+# حالا یه حلقهٔ پس‌زمینه هر ~۰٫۳ ثانیه دورِ تمام‌شده رو تسویه می‌کنه (برد/باخت و واریز) و اگه دورِ فعالی نباشه
+# دورِ بعدی رو می‌سازه؛ یعنی ۱۰ ثانیه بعد از سقوط هر موشک، موشک بعدی خودکار پرتاب می‌شه (چه کسی داخل باشه چه نه).
+# فاصله‌ی ۱۰ ثانیه از ROCKET_WAIT / ROCKET_COOLDOWN (پیش‌فرض ۱۰) میاد؛ اگه روی Railway این دو متغیر رو ست کردی، ۱۰ بذارشون یا پاکشون کن.
+# چند ورکر هم‌زمان مشکلی ایجاد نمی‌کنن: ساخت دور با قفل دیتابیس و تسویه با شرطِ status='active' انجام می‌شه.
+# ---------------------------------------------------------------------------
+_rocket_auto_started = False
+_rocket_auto_lock = threading.Lock()
+
+
+def _rocket_auto_loop():
+    import logging as _lg
+    _log = _lg.getLogger("rocket")
+    fails = 0
+    while True:
+        session = None
+        try:
+            session = get_session()
+            now = _time.time()
+            _rk.settle_all(session, now)
+            _rk.ensure_round(session, now)
+            session.commit()
+            fails = 0
+        except Exception:  # noqa: BLE001
+            fails += 1
+            try:
+                if session is not None:
+                    session.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            if fails <= 3 or fails % 50 == 0:
+                _log.exception("rocket auto loop failed (%s)", fails)
+        finally:
+            try:
+                if session is not None:
+                    session.close()
+            except Exception:  # noqa: BLE001
+                pass
+        _time.sleep(0.3 if fails == 0 else min(5.0, 0.3 * (fails + 1)))
+
+
+@app.on_event("startup")
+def _rocket_auto_start():
+    global _rocket_auto_started
+    with _rocket_auto_lock:
+        if _rocket_auto_started:
+            return
+        _rocket_auto_started = True
+    threading.Thread(target=_rocket_auto_loop, name="rocket-auto", daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
