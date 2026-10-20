@@ -707,6 +707,84 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
 .pp-bath-btn{width:100%;border:0;border-radius:12px;padding:10px 8px;font-size:13px;font-weight:800;font-family:inherit;color:#fff;background:#2b9cbb;margin-top:6px}
 .pp-bath-btn:disabled{background:#2a2f58;color:#8a90b8}
 .pp-bath-wrap.cleaning{box-shadow:0 0 0 2px #55d6c2,0 0 20px #55d6c244}
+
+/* ===== Rocket screen: dark crash-game layout inspired by the supplied reference ===== */
+#rocketCard{
+  position:relative; overflow:hidden; padding:14px 12px 18px;
+  border:0!important; border-radius:26px!important;
+  background:linear-gradient(180deg,#07101f 0%,#0a1428 58%,#111d38 100%)!important;
+  box-shadow:0 12px 32px #0008!important;
+}
+#rocketCard:before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.55;
+  background-image:radial-gradient(circle at 12% 18%,#fff 0 1px,transparent 2px),
+  radial-gradient(circle at 78% 22%,#fff 0 1px,transparent 2px),
+  radial-gradient(circle at 66% 41%,#fff 0 1px,transparent 2px),
+  radial-gradient(circle at 24% 56%,#fff 0 1px,transparent 2px),
+  radial-gradient(circle at 89% 61%,#fff 0 1px,transparent 2px),
+  radial-gradient(circle at 43% 34%,#fff 0 1px,transparent 2px);
+}
+#rocketCard>*{position:relative;z-index:1}
+#rocketCard>.section-title{font-size:19px;font-weight:900;color:#f4f7ff;margin:2px 4px 12px;text-align:center}
+#rocketCard .rk-top{
+  background:#192238;border-radius:18px;padding:12px 14px;gap:8px;
+  font-size:12px;color:#dce5ff;flex-wrap:wrap;margin-bottom:10px;
+}
+#rocketCard .rk-top b{color:#fff;font-size:15px}
+#rocketCard .rk-canvas{
+  width:100%;aspect-ratio:1/1.02;height:auto;max-height:440px;
+  border-radius:20px;background:radial-gradient(ellipse at 50% 55%,#121e39 0%,#080f20 66%,#050b16 100%);
+  border:1px solid #182744;box-shadow:inset 0 0 35px #101d3a66;
+}
+#rocketCard .rk-res{font-size:14px;min-height:28px;margin:8px 0;color:#eaf0ff}
+#rocketCard .rk-hist{justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;padding:4px 1px 8px;min-height:34px}
+#rocketCard .rk-chip{padding:7px 13px;font-size:13px;border:0;border-radius:999px;white-space:nowrap;background:#202a40;color:#aeb8ce}
+#rocketCard .rk-chip.lo{background:#20283a;color:#9da8bd}
+#rocketCard .rk-chip.mid{background:#244fa9;color:#fff}
+#rocketCard .rk-chip.hi{background:#4922a4;color:#fff}
+#rocketCard .rk-chip.big{background:#28213e;color:#e4caff}
+#rkSetup{
+  margin-top:10px;padding:14px;border-radius:22px;
+  background:linear-gradient(145deg,#182440,#111b32);
+  border:1px solid #253452;box-shadow:0 8px 22px #0003;
+}
+#rocketCard .rk-lbl{color:#b6c4e2;font-size:12px;margin:10px 2px 6px}
+#rocketCard .rk-fixed-entry{background:#27334d!important;border:1px solid #344361!important;border-radius:15px!important;color:#fff;padding:13px!important}
+#rocketCard .rk-chips{display:flex;gap:7px;flex-wrap:wrap}
+#rocketCard .rk-chips button{
+  border-radius:999px!important;background:#202a40!important;border:1px solid #303d59!important;
+  color:#e6edff!important;font-weight:900;min-height:38px;padding:8px 13px;
+}
+#rocketCard .rk-chips button.on,#rocketCard .rk-chips button.mx.on{
+  background:#2f6df6!important;border-color:#3c7aff!important;color:#fff!important;
+}
+#rocketCard .rk-row input,#rocketCard input#rkTgt{
+  width:100%;min-width:0;border-radius:14px;background:#0d172b;border:1px solid #344361;color:#fff;padding:13px;font-size:16px;
+}
+#rocketCard .rk-prev{color:#cbd7f4;margin:8px 0;min-height:18px}
+#rocketCard #rkStart{
+  width:100%;border:0;border-radius:18px!important;padding:17px 12px!important;
+  background:#2f6df6!important;color:#fff!important;font-size:17px;font-weight:900;
+  box-shadow:0 5px 0 #1e4db8,0 8px 18px #1c55d844;
+}
+#rocketCard #rkStart:disabled{opacity:.55;box-shadow:none}
+#rocketCard .rk-joined{border-radius:16px;background:#102c25;border-color:#247a58}
+#rocketCard .rk-stars-box{border-radius:18px!important;background:linear-gradient(145deg,#20233b,#15192c)!important;border:1px solid #3a4264!important}
+#rocketCard .rk-players{border:1px solid #253452;background:#0c1528;border-radius:18px;padding:10px}
+#rocketCard .rk-ph{color:#c9d5f2;font-size:13px}
+#rocketCard .rk-pl{background:#18243a;border-radius:13px;padding:10px}
+#rocketCard .rk-pl.me{background:#1c3158;border-color:#386ce5}
+#rocketCard .rk-pl-b{color:#ffd05b}
+#rocketCard .rk-balances{background:#111c31;border-color:#293957;border-radius:14px}
+#rocketCard .rk-small{border-radius:12px}
+#rocketCard .rk-conv{border-radius:16px}
+@media(max-width:380px){
+ #rocketCard{padding:10px 8px 14px}
+ #rocketCard .rk-top{font-size:11px;padding:10px}
+ #rocketCard .rk-canvas{aspect-ratio:1/1.12}
+ #rocketCard #rkStart{font-size:15px}
+}
+
 </style>
 </head>
 <body>
