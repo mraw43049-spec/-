@@ -136,6 +136,31 @@ def ensure_table(engine) -> None:
         except Exception:
             pass
 
+    # ستون‌های قدیمی که کد فعلی پرشون نمی‌کنه ولی NOT NULL و بدون پیش‌فرضن، INSERT رو با خطای ۵۰۰ می‌شکنن.
+    # فقط NOT NULL اون ستون‌ها برداشته می‌شه (چیزی حذف نمی‌شه).
+    try:
+        if engine.dialect.name == "postgresql":
+            expected = {
+                "rocket_rounds": {"id", "crash_point", "created_at", "liftoff_at", "crash_at"},
+                "rocket_bets": {"id", "round_id", "user_id", "bet", "target", "crash_point", "status", "final_mult",
+                                "payout", "stars_awarded", "created_at", "ended_at"},
+            }
+            with engine.begin() as conn:
+                legacy = conn.execute(text(
+                    "SELECT table_name, column_name FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() AND table_name IN ('rocket_rounds','rocket_bets') "
+                    "AND is_nullable = 'NO' AND column_default IS NULL")).all()
+            for t, col in legacy:
+                if col in expected.get(t, set()):
+                    continue
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE "%s" ALTER COLUMN "%s" DROP NOT NULL' % (t, col)))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 
 def _row(m) -> dict:
     return dict(m) if m is not None else None
@@ -243,6 +268,7 @@ def settle_all(session, now: float) -> None:
         FROM rocket_bets b
         JOIN rocket_rounds r ON r.id = b.round_id
         WHERE b.status = 'active'
+        ORDER BY b.id
     """)).mappings().all()
     for b in rows:
         liftoff = float(b["liftoff_at"])

@@ -1489,6 +1489,17 @@ def _rocket_access_guard(tg_user):
     return True
 
 
+def _rocket_fail(session, e, where=""):
+    """هر خطای پیش‌بینی‌نشده‌ی موشک به‌جای ۵۰۰ خالی، با متن خطا برمی‌گرده (و توی لاگ Railway هم چاپ می‌شه)."""
+    import logging as _lg
+    try:
+        session.rollback()
+    except Exception:  # noqa: BLE001
+        pass
+    _lg.getLogger("rocket").exception("rocket %s failed", where)
+    raise HTTPException(status_code=500, detail=f"خطای موشک ({where}): {type(e).__name__}: {str(e)[:300]}")
+
+
 def _rocket_cfg():
     return {"min_entry": _rk.MIN_ENTRY, "max_entry": _rk.MAX_ENTRY, "max_mult": _rk.MAX_MULT, "min_target": _rk.MIN_TARGET,
             "growth": _rk.GROWTH, "rise": _rk.RISE, "start": _rk.START, "wait": _rk.WAIT, "edge": _rk.EDGE,
@@ -1636,6 +1647,8 @@ def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
     except HTTPException:
         session.rollback()
         raise
+    except Exception as e:  # noqa: BLE001
+        _rocket_fail(session, e, "cancel")
     finally:
         session.close()
 
@@ -1646,6 +1659,8 @@ def rocket_mine(tg_user: dict = Depends(current_telegram_user)):
     session = get_session()
     try:
         return {"items": _rk.history(session, int(tg_user["id"]), _time.time(), 15)}
+    except Exception as e:  # noqa: BLE001
+        _rocket_fail(session, e, "mine")
     finally:
         session.close()
 
@@ -1696,6 +1711,8 @@ def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current
     except HTTPException:
         session.rollback()
         raise
+    except Exception as e:  # noqa: BLE001
+        _rocket_fail(session, e, "redeem")
     finally:
         session.close()
 
@@ -1717,6 +1734,8 @@ def rocket_leaderboard(tg_user: dict = Depends(current_telegram_user)):
         """), {"cutoff": _time.time() - 86400}).mappings().all()
         return {"items": [{"player": str(x["player"]), "best": float(x["best"] or 0),
                            "games": int(x["games"] or 0)} for x in rows]}
+    except Exception as e:  # noqa: BLE001
+        _rocket_fail(session, e, "leaderboard")
     finally:
         session.close()
 
