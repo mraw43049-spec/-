@@ -1492,7 +1492,6 @@ def _rocket_access_guard(tg_user):
 def _rocket_cfg():
     return {"min_entry": _rk.MIN_ENTRY, "max_entry": _rk.MAX_ENTRY, "max_mult": _rk.MAX_MULT, "min_target": _rk.MIN_TARGET,
             "growth": _rk.GROWTH, "rise": _rk.RISE, "start": _rk.START, "wait": _rk.WAIT, "edge": _rk.EDGE,
-            "buy_rate": _rk.BUY_RATE, "sell_rate": _rk.SELL_RATE,
             "entry_fixed": _rk.MIN_ENTRY,  # ورود ثابت ۵۰هزار
             "stars_redeem_min": _rk.STARS_REDEEM_MIN,
             "stars_redeem_reward": _rk.STARS_REDEEM_REWARD}
@@ -1533,7 +1532,7 @@ def rocket_state(tg_user: dict = Depends(current_telegram_user)):
             "unlocked": int(user.level or 1) >= botmod.CASINO_UNLOCK_LEVEL,
             "unlock_level": botmod.CASINO_UNLOCK_LEVEL, "level": int(user.level or 1),
             "disabled": bool(getattr(botmod, "CASINO_DISABLED", False)),
-            "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0),
+            "rob_points": int(user.fox_points or 0),
             "rocket_stars": int(getattr(user, "rocket_stars", 0) or 0),
             "round": {"id": int(rnd["id"]), "phase": "flying" if flying else "waiting",
                       "liftoff_in": liftoff - now, "elapsed": max(0.0, now - liftoff)},
@@ -1597,7 +1596,7 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
             raise HTTPException(status_code=409, detail="✅ برای همین پرواز قبلاً شرط بستی.")
         session.commit()
         return {"ok": True, "bet": amount, "target": target, "round_id": int(rnd["id"]),
-                "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0),
+                "rob_points": int(user.fox_points or 0),
                 "rocket_stars": int(getattr(user, "rocket_stars", 0) or 0)}
     except HTTPException:
         session.rollback()
@@ -1623,7 +1622,7 @@ def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
             raise HTTPException(status_code=409, detail="شرط همین الان تموم شد.")
         user.fox_points = int(user.fox_points or 0) + int(g["bet"])
         session.commit()
-        return {"ok": True, "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0)}
+        return {"ok": True, "rob_points": int(user.fox_points or 0)}
     except HTTPException:
         session.rollback()
         raise
@@ -1637,55 +1636,6 @@ def rocket_mine(tg_user: dict = Depends(current_telegram_user)):
     session = get_session()
     try:
         return {"items": _rk.history(session, int(tg_user["id"]), _time.time(), 15)}
-    finally:
-        session.close()
-
-
-class RocketConvert(BaseModel):
-    direction: str          # points_to_toon (خرید روب‌تون) | toon_to_points (فروش روب‌تون)
-    toons: int              # «چند روب‌تون؟» (دیگه روب‌پوینت وارد نمی‌شه؛ سرور هزینه رو حساب می‌کنه)
-    confirm: bool = False   # False = فقط پیش‌نمایش (چیزی کم/زیاد نمی‌شه) ، True = تایید نهایی و اعمال
-
-
-@app.post("/api/rocket/convert")
-def rocket_convert(body: RocketConvert, tg_user: dict = Depends(current_telegram_user)):
-    _rocket_access_guard(tg_user)
-    session = get_session()
-    try:
-        user = _rocket_user_locked(session, tg_user)
-        n = int(body.toons or 0)
-        if n < 1:
-            raise HTTPException(status_code=400, detail="❌ حداقل ۱ روب‌تون.")
-        if n > 100000:
-            raise HTTPException(status_code=400, detail="❌ هر بار حداکثر ۱۰۰٬۰۰۰ روب‌تون.")
-        pts = int(user.fox_points or 0)
-        toon = int(user.rub_toon or 0)
-        if body.direction == "points_to_toon":
-            cost = n * _rk.BUY_RATE
-            if pts < cost:
-                raise HTTPException(status_code=400, detail=f"❌ روب‌پوینت کافی نداری. برای {n:,} روب‌تون، {cost:,} روب‌پوینت لازمه.")
-            new_pts, new_toon, points = pts - cost, toon + n, cost
-        elif body.direction == "toon_to_points":
-            if toon < n:
-                raise HTTPException(status_code=400, detail="❌ روب‌تون کافی نداری.")
-            gain = n * _rk.SELL_RATE
-            new_pts, new_toon, points = pts + gain, toon - n, gain
-        else:
-            raise HTTPException(status_code=400, detail="نوع تبدیل نامعتبر است.")
-        quote = {"direction": body.direction, "toons": n, "points": int(points),
-                 "balance_after": int(new_toon), "rob_points_after": int(new_pts)}
-        if not body.confirm:
-            session.rollback()
-            return {"quote": quote, "done": False,
-                    "balance": toon, "rob_points": pts}
-        user.fox_points = new_pts
-        user.rub_toon = new_toon
-        session.commit()
-        return {"quote": quote, "done": True,
-                "balance": int(new_toon), "rob_points": int(new_pts)}
-    except HTTPException:
-        session.rollback()
-        raise
     finally:
         session.close()
 
@@ -1732,7 +1682,6 @@ def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current
             "done": True,
             "rocket_stars": int(user.rocket_stars),
             "rob_points": int(user.fox_points or 0),
-            "balance": int(user.rub_toon or 0),
         }
     except HTTPException:
         session.rollback()

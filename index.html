@@ -1025,22 +1025,7 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
       <div id="rkPlayers"></div>
     </div>
     <div id="rkExtra">
-      <div class="rk-conv" id="rkConv">
-        <div class="rk-seg">
-          <button id="rkTabBuy" class="on" type="button">🟡 ⟶ <svg class="ton"><use href="#tonSym"/></svg> خرید</button>
-          <button id="rkTabSell" type="button"><svg class="ton"><use href="#tonSym"/></svg> ⟶ 🟡 فروش</button>
-        </div>
-        <div class="rk-conv-q" id="rkConvQ">چند روب‌تون می‌خوای؟</div>
-        <div class="rk-step">
-          <button id="rkMinus" class="rk-sb" type="button" aria-label="کم کن">➖</button>
-          <input id="rkConvN" type="number" inputmode="numeric" min="1" autocomplete="off">
-          <button id="rkPlus" class="rk-sb" type="button" aria-label="زیاد کن">➕</button>
-          <button id="rkMax" class="rk-sb" type="button" aria-label="حداکثر">➿</button>
-        </div>
-        <div class="rk-conv-info" id="rkConvInfo"></div>
-        <button id="rkConvGo" class="rk-go" type="button">🔁 تبدیل</button>
-      </div>
-      <div class="rk-balances" id="rkBalancesRow"><span><svg class="ton"><use href="#tonSym"/></svg> روب‌تون <b id="rkBalInline">—</b></span><span>🟡 روب‌پوینت <b id="rkPoints">—</b></span><span>⭐ <b id="rkStarsInline">—</b></span></div>
+      <div class="rk-balances" id="rkBalancesRow"><span>🟡 روب‌پوینت <b id="rkPoints">—</b></span><span>⭐ <b id="rkStarsInline">—</b></span></div>
       <button id="rkLeaderboardBtn" class="rk-small rk-flights-btn" type="button">🏆 لیدربورد ۲۴ ساعته</button>
       <div id="rkLeaderboard" class="rk-hist" style="display:none">درحال بارگذاری…</div>
       <button id="rkMyFlightsBtn" class="rk-small rk-flights-btn" type="button">✈️ پروازهای من</button>
@@ -1048,13 +1033,6 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
     </div>
     <div class="muted" id="rkRule" style="margin-top:10px;line-height:1.9"></div>
     <div class="muted" style="margin-top:6px;line-height:1.9">ورود به هر پرواز ۵۰٬۰۰۰ روب‌پوینت است. موشک بالا می‌ره و در لحظه‌ای تصادفی سقوط می‌کند. اگر به ضریب هدفت برسد، همان ضریب را به‌صورت روب‌پوینت می‌گیری و به‌اندازهٔ عدد صحیح ضریب ⭐ ستاره جمع می‌کنی. با حداقل ۵۰ ستاره می‌توانی ۱٬۰۰۰٬۰۰۰ روب‌پوینت بگیری.</div>
-  </div>
-  <div id="rkConfirm" class="modal">
-    <div class="sheet">
-      <h3 id="rkCfTitle">تایید تبدیل</h3>
-      <div id="rkCfBody" style="line-height:2;font-size:14px"></div>
-      <div class="row"><button id="rkCfNo" class="action secondary" type="button">انصراف</button><button id="rkCfYes" class="action" type="button">✅ تایید</button></div>
-    </div>
   </div>
   <div id="plinkoCard" class="card" style="display:none">
     <div class="p-head">
@@ -2019,7 +1997,7 @@ function __rubyMain(){
   var rocket = null, rkBusy = false, rkPoll = null, rkPollBusy = false, rkPollSoon = false, rkRAF = 0, rkAmt = 0, rkLastFrame = 0;
   var rkRid = 0, rkLift = 0, rkMe = null, rkPlayers = [], rkRecent = [], rkFrozen = null, rkLastRound = 0;
   var rkCrashAt = 0, rkCrashShow = false, rkFinal = 1, rkAltEnd = 0, rkEndPose = null, rkActKey = "", rkPlSig = "", rkHistSig = "";
-  var rkParts = [], rkStars = [], rkClouds = [], rkConvDir = "buy", rkConvN = 1;
+  var rkParts = [], rkStars = [], rkClouds = [];
   (function(){
     var i;
     for (i = 0; i < 70; i++) rkStars.push({ x: Math.random(), y: Math.random(), r: Math.random() * 1.3 + 0.3, s: Math.random() * 0.8 + 0.2, ph: Math.random() * 6.28 });
@@ -2395,7 +2373,7 @@ function __rubyMain(){
   function rkSyncBal(){
     if (!rocket) return;
     $("rkBal").textContent = fa(rocket.rob_points || 0);
-    if ($("rkBalInline")) $("rkBalInline").textContent = fa(rocket.balance || 0);
+
     if ($("rkPoints")) $("rkPoints").textContent = fa(rocket.rob_points || 0);
     var st = rocket.rocket_stars || 0;
     if ($("rkStars")) $("rkStars").textContent = fa(st);
@@ -2407,63 +2385,7 @@ function __rubyMain(){
       btn.disabled = st < need || rkBusy;
       btn.textContent = st >= need ? ("⭐ تبدیل " + fa(need) + " ستاره → " + fa(rocket.stars_redeem_reward || 1000000)) : ("⭐ حداقل " + fa(need) + " ستاره لازم است");
     }
-    rkPreview(); rkConvRender();
-  }
-  // ---- تبدیل روب‌تون ↔ روب‌پوینت (تعداد روب‌تون را می‌گویی؛ هزینه را سرور حساب می‌کند) ----
-  function rkConvMax(){
-    if (!rocket) return 0;
-    return rkConvDir === "buy" ? Math.floor((rocket.rob_points || 0) / (rocket.buy_rate || 1500000)) : (rocket.balance || 0);
-  }
-  function rkConvRender(){
-    if (!rocket) return;
-    var buy = rkConvDir === "buy", max = rkConvMax(), n = rkConvN, rate = buy ? rocket.buy_rate : rocket.sell_rate;
-    $("rkTabBuy").className = buy ? "on" : ""; $("rkTabSell").className = buy ? "" : "on";
-    $("rkConvQ").innerHTML = buy ? ("چند " + TON + " روب‌تون می‌خوای؟") : ("چند " + TON + " روب‌تون به 🟡 روب‌پوینت تبدیل بشه؟");
-    if (document.activeElement !== $("rkConvN")) $("rkConvN").value = n > 0 ? n : "";
-    var info = $("rkConvInfo"), go = $("rkConvGo"), warn = false, html;
-    if (n < 1) { html = "یه عدد وارد کن."; warn = true; go.disabled = true; }
-    else if (n > max) {
-      warn = true; go.disabled = true;
-      html = buy ? ("🟡 روب‌پوینت کافی نیست؛ برای <b>" + fa(n) + "</b> " + TON + " به <b>" + fa(n * rate) + "</b> نیاز داری." + (max > 0 ? " (حداکثر " + fa(max) + ")" : ""))
-                 : ("روب‌تون کافی نیست؛ حداکثر " + fa(max) + " " + TON + " داری.");
-    } else {
-      go.disabled = rkBusy;
-      html = buy ? ("هزینه: <b>" + fa(n * rate) + "</b> 🟡 ← می‌گیری: <b>" + fa(n) + "</b> " + TON)
-                 : ("می‌گیری: <b>" + fa(n * rate) + "</b> 🟡 ← کم می‌شه: <b>" + fa(n) + "</b> " + TON);
-    }
-    html += "<br><span class=\"rk-rate\">هر ۱ " + TON + " = " + fa(rate) + " 🟡 (" + (buy ? "خرید" : "فروش") + ")</span>";
-    info.innerHTML = html; info.className = "rk-conv-info" + (warn ? " warn" : "");
-  }
-  function rkConvSet(n){ n = Math.floor(Number(n) || 0); var max = rkConvMax(); rkConvN = Math.max(1, Math.min(n, Math.max(1, max))); rkConvRender(); }
-  function rkConvTab(dir){ rkConvDir = dir; rkConvN = 1; rkConvRender(); }
-  function rkOpenConfirm(q){
-    var buy = q.direction === "points_to_toon";
-    $("rkCfTitle").innerHTML = buy ? (TON + " تایید خرید روب‌تون") : ("🟡 تایید فروش روب‌تون");
-    $("rkCfBody").innerHTML = buy
-      ? ("<b>" + fa(q.points) + "</b> 🟡 روب‌پوینت از حسابت کم می‌شه و <b>" + fa(q.toons) + "</b> " + TON + " روب‌تون به حسابت میاد.")
-      : ("<b>" + fa(q.toons) + "</b> " + TON + " روب‌تون از حسابت کم می‌شه و <b>" + fa(q.points) + "</b> 🟡 روب‌پوینت به حسابت میاد.");
-    $("rkCfBody").innerHTML += "<div class=\"muted\" style=\"margin-top:6px\">بعد از تبدیل: " + TON + " " + fa(q.balance_after) + " · 🟡 " + fa(q.rob_points_after) + "</div>";
-    $("rkConfirm").classList.add("open");
-    var yes = $("rkCfYes"); yes.disabled = false;
-    yes.onclick = function(){
-      if (rkBusy) return; rkBusy = true; yes.disabled = true;
-      api("/api/rocket/convert", "POST", { direction: q.direction, toons: q.toons, confirm: true }).then(function(d){
-        $("rkConfirm").classList.remove("open");
-        if (rocket) { rocket.balance = d.balance; rocket.rob_points = d.rob_points; }
-        toast(buy ? ("✅ " + fa(q.toons) + " روب‌تون به حسابت اضافه شد.") : ("✅ " + fa(q.points) + " روب‌پوینت به حسابت اضافه شد."), true);
-        try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred("success"); } catch(e){}
-        rkConvN = 1; rkSyncBal();
-      }).catch(function(e){ $("rkConfirm").classList.remove("open"); toast(e.message, false); rkPollOnce(); }).then(function(){ rkBusy = false; rkActKey = ""; rkConvRender(); });
-    };
-  }
-  function rkConvGo(){
-    if (rkBusy || !rocket) return;
-    var n = rkConvN; if (n < 1 || n > rkConvMax()) { rkConvRender(); return; }
-    rkBusy = true; $("rkConvGo").disabled = true;
-    api("/api/rocket/convert", "POST", { direction: rkConvDir === "buy" ? "points_to_toon" : "toon_to_points", toons: n, confirm: false })
-      .then(function(d){ rkBusy = false; rkOpenConfirm(d.quote); })
-      .catch(function(e){ rkBusy = false; toast(e.message, false); rkPollOnce(); })
-      .then(function(){ rkBusy = false; rkConvRender(); });
+    rkPreview();
   }
   function loadRocket(){
     var t0 = Date.now();
@@ -2493,14 +2415,6 @@ function __rubyMain(){
     }).catch(function(e){ box.textContent=e.message; });
   };
   // تبدیل
-  $("rkTabBuy").onclick = function(){ rkConvTab("buy"); };
-  $("rkTabSell").onclick = function(){ rkConvTab("sell"); };
-  $("rkMinus").onclick = function(){ rkConvSet(rkConvN - 1); };
-  $("rkPlus").onclick = function(){ rkConvSet(rkConvN + 1); };
-  $("rkMax").onclick = function(){ rkConvSet(rkConvMax()); };
-  $("rkConvN").addEventListener("input", function(){ rkConvN = Math.floor(Number($("rkConvN").value) || 0); rkConvRender(); });
-  $("rkConvN").addEventListener("blur", function(){ if (rkConvN < 1) rkConvN = 1; rkConvRender(); });
-  $("rkConvGo").onclick = rkConvGo;
   $("rkCfNo").onclick = function(){ $("rkConfirm").classList.remove("open"); };
   $("rkConfirm").addEventListener("click", function(e){ if (e.target === $("rkConfirm")) $("rkConfirm").classList.remove("open"); });
   // مبلغ ثابت و ضریب هدف
