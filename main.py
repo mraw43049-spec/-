@@ -1484,28 +1484,25 @@ def _rocket_user_locked(session, tg_user):
     return user
 
 
-ROCKET_ALLOWED_USER_ID = 7287316708
 def _rocket_access_guard(tg_user):
-    """موشک فقط برای حساب مجاز در ربات و مینی‌اپ قابل استفاده است."""
-    try:
-        allowed = int(tg_user.get("id", 0)) == ROCKET_ALLOWED_USER_ID
-    except (TypeError, ValueError):
-        allowed = False
-    if not allowed:
-        raise HTTPException(status_code=403, detail="🚀 بازی موشک برای این حساب فعال نیست.")
+    """همه کاربران ثبت‌نام‌شده می‌توانند موشک بازی کنند."""
     return True
 
 
 def _rocket_cfg():
     return {"min_entry": _rk.MIN_ENTRY, "max_entry": _rk.MAX_ENTRY, "max_mult": _rk.MAX_MULT, "min_target": _rk.MIN_TARGET,
             "growth": _rk.GROWTH, "rise": _rk.RISE, "start": _rk.START, "wait": _rk.WAIT, "edge": _rk.EDGE,
-            "buy_rate": _rk.BUY_RATE, "sell_rate": _rk.SELL_RATE}
+            "buy_rate": _rk.BUY_RATE, "sell_rate": _rk.SELL_RATE,
+            "entry_fixed": _rk.MIN_ENTRY,  # ورود ثابت ۵۰هزار
+            "stars_redeem_min": _rk.STARS_REDEEM_MIN,
+            "stars_redeem_reward": _rk.STARS_REDEEM_REWARD}
 
 
 def _rocket_mine(players, uid):
     for p in players:
         if p["uid"] == uid:
-            return {"bet": p["bet"], "target": p["target"], "status": p["status"], "mult": p["mult"], "payout": p["payout"]}
+            return {"bet": p["bet"], "target": p["target"], "status": p["status"], "mult": p["mult"],
+                    "payout": p["payout"], "stars": int(p.get("stars_awarded") or 0)}
     return None
 
 
@@ -1537,6 +1534,7 @@ def rocket_state(tg_user: dict = Depends(current_telegram_user)):
             "unlock_level": botmod.CASINO_UNLOCK_LEVEL, "level": int(user.level or 1),
             "disabled": bool(getattr(botmod, "CASINO_DISABLED", False)),
             "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0),
+            "rocket_stars": int(getattr(user, "rocket_stars", 0) or 0),
             "round": {"id": int(rnd["id"]), "phase": "flying" if flying else "waiting",
                       "liftoff_in": liftoff - now, "elapsed": max(0.0, now - liftoff)},
             "me": _rocket_mine(pl, uid),
@@ -1578,18 +1576,18 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
         _bomb_guard(botmod, session, user)
         if now >= float(rnd["liftoff_at"]) - 0.25:
             raise HTTPException(status_code=409, detail="⏳ این پرواز شروع شد؛ برای پرواز بعدی صبر کن.")
-        amount = int(body.amount or 0)
-        if amount < _rk.MIN_ENTRY:
-            raise HTTPException(status_code=400, detail=f"❌ حداقل شرط موشک {_rk.MIN_ENTRY:,} روب‌پوینته.")
-        if amount > _rk.MAX_ENTRY:
-            raise HTTPException(status_code=400, detail=f"❌ سقف شرط موشک {_rk.MAX_ENTRY:,} روب‌پوینته.")
+        # ورود ثابت: هر پرواز دقیقاً ۵۰٬۰۰۰ روب‌پوینت
+        amount = int(_rk.MIN_ENTRY)
+        if int(body.amount or 0) not in (0, amount):
+            # اگر کلاینت مبلغ دیگری فرستاد، فقط مبلغ ثابت پذیرفته می‌شود
+            amount = int(_rk.MIN_ENTRY)
         target = round(float(body.target), 2)
         if not _rk.valid_target(target):
             raise HTTPException(status_code=400, detail=f"ضریب هدف باید بین ×{_rk.MIN_TARGET:g} و ×{_rk.MAX_MULT:g} باشه (حداکثر دو رقم اعشار).")
         if _rk.get_active(session, user.telegram_id):
             raise HTTPException(status_code=409, detail="✅ برای همین پرواز قبلاً شرط بستی.")
         if int(user.fox_points or 0) < amount:
-            raise HTTPException(status_code=400, detail=f"❌ روب‌پوینت کافی نداری. موجودی: {int(user.fox_points or 0):,}")
+            raise HTTPException(status_code=400, detail=f"❌ روب‌پوینت کافی نداری. برای ورود به موشک {amount:,} روب‌پوینت لازم است. موجودی: {int(user.fox_points or 0):,}")
         user.fox_points = int(user.fox_points or 0) - amount
         try:
             _rk.create_bet(session, user.telegram_id, amount, target, float(rnd["crash_point"]), now, int(rnd["id"]))
@@ -1599,7 +1597,8 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
             raise HTTPException(status_code=409, detail="✅ برای همین پرواز قبلاً شرط بستی.")
         session.commit()
         return {"ok": True, "bet": amount, "target": target, "round_id": int(rnd["id"]),
-                "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0)}
+                "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0),
+                "rocket_stars": int(getattr(user, "rocket_stars", 0) or 0)}
     except HTTPException:
         session.rollback()
         raise
@@ -1684,6 +1683,57 @@ def rocket_convert(body: RocketConvert, tg_user: dict = Depends(current_telegram
         session.commit()
         return {"quote": quote, "done": True,
                 "balance": int(new_toon), "rob_points": int(new_pts)}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+class RocketStarsRedeem(BaseModel):
+    confirm: bool = False  # False = پیش‌نمایش · True = تبدیل قطعی
+
+
+@app.post("/api/rocket/stars/redeem")
+def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current_telegram_user)):
+    """تبدیل حداقل ۵۰ ستاره به ۱٬۰۰۰٬۰۰۰ روب‌پوینت."""
+    _rocket_access_guard(tg_user)
+    session = get_session()
+    try:
+        user = _rocket_user_locked(session, tg_user)
+        stars = int(getattr(user, "rocket_stars", 0) or 0)
+        need = int(_rk.STARS_REDEEM_MIN)
+        reward = int(_rk.STARS_REDEEM_REWARD)
+        if stars < need:
+            raise HTTPException(
+                status_code=400,
+                detail=f"❌ حداقل {need} ستاره لازم است. الان {stars} ستاره داری.",
+            )
+        quote = {
+            "stars_before": stars,
+            "stars_after": stars - need,
+            "stars_spent": need,
+            "reward": reward,
+            "rob_points_after": int(user.fox_points or 0) + reward,
+        }
+        if not body.confirm:
+            session.rollback()
+            return {
+                "quote": quote,
+                "done": False,
+                "rocket_stars": stars,
+                "rob_points": int(user.fox_points or 0),
+            }
+        user.rocket_stars = stars - need
+        user.fox_points = int(user.fox_points or 0) + reward
+        session.commit()
+        return {
+            "quote": quote,
+            "done": True,
+            "rocket_stars": int(user.rocket_stars),
+            "rob_points": int(user.fox_points or 0),
+            "balance": int(user.rub_toon or 0),
+        }
     except HTTPException:
         session.rollback()
         raise

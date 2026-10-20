@@ -984,7 +984,11 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
   </div>
   <div id="rocketCard" class="card" style="display:none">
     <div class="section-title">🚀 موشک <span class="rk-live">● زنده</span></div>
-    <div class="rk-top"><span>🟡 موجودی: <b id="rkBal">—</b> روب‌پوینت</span><span id="rkRound" class="muted"></span></div>
+    <div class="rk-top">
+      <span>🟡 موجودی: <b id="rkBal">—</b> روب‌پوینت</span>
+      <span>⭐ ستاره: <b id="rkStars">—</b></span>
+      <span id="rkRound" class="muted"></span>
+    </div>
     <canvas id="rkCanvas" class="rk-canvas" width="360" height="295" aria-label="موشک در حال پرواز"></canvas>
     <div id="rkRes" class="rk-res"></div>
     <div class="rk-hist" id="rkHist"></div>
@@ -993,20 +997,28 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
       <button id="rkCancel" class="rk-small" type="button">↩️ لغو شرط</button>
     </div>
     <div id="rkSetup">
-      <div class="rk-lbl">🟡 مبلغ شرط (روب‌پوینت)</div>
-      <div class="rk-chips" id="rkChips"></div>
-      <div class="rk-row">
-        <button id="rkHalf" class="rk-small" type="button">½</button>
-        <input id="rkAmt" type="number" inputmode="numeric" placeholder="چند روب‌پوینت؟" autocomplete="off">
-        <button id="rkDouble" class="rk-small" type="button">2×</button>
+      <div class="rk-lbl">🟡 هزینه ورود (ثابت)</div>
+      <div class="rk-fixed-entry" id="rkFixedEntry" style="text-align:center;padding:10px 12px;border-radius:12px;background:#1a1f3a;border:1px solid #3d4a8a;margin-bottom:10px;font-weight:700">
+        ۵۰٬۰۰۰ روب‌پوینت برای هر پرواز
       </div>
-      <div class="rk-lbl">🎯 ضریب هدف (روی چه ضریبی شرط می‌بندی؟)</div>
+      <input id="rkAmt" type="hidden" value="50000">
+      <div class="rk-chips" id="rkChips" style="display:none"></div>
+      <div class="rk-lbl">🎯 ضریب هدف — هر ۱ ضریب = ۱ ⭐ ستاره</div>
       <div class="rk-chips" id="rkTgtChips"></div>
       <div class="rk-row">
         <input id="rkTgt" type="number" inputmode="decimal" step="0.1" placeholder="مثلاً ۲ یا ۲٫۵" autocomplete="off">
       </div>
       <div class="rk-prev" id="rkPrev"></div>
-      <button id="rkStart" class="action" style="width:100%" type="button">🚀 ثبت شرط</button>
+      <button id="rkStart" class="action" style="width:100%" type="button">🚀 ورود به موشک (۵۰٬۰۰۰)</button>
+    </div>
+    <div class="rk-stars-box" id="rkStarsBox" style="margin:12px 0;padding:12px;border-radius:14px;background:linear-gradient(145deg,#2a1f0a,#1a1520);border:1px solid #6b5420">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:800;font-size:15px">⭐ ستاره‌های تو: <b id="rkStarsBig">—</b></div>
+          <div class="muted" style="font-size:12px;margin-top:4px;line-height:1.7">با رسیدن موشک به ضریب هدف، به‌اندازهٔ عدد صحیح ضریب ستاره می‌گیری.<br>با ۵۰ ستاره می‌تونی ۱٬۰۰۰٬۰۰۰ روب‌پوینت بگیری.</div>
+        </div>
+        <button id="rkStarsRedeem" class="action" type="button" style="white-space:nowrap;padding:10px 14px">⭐ تبدیل ۵۰ ستاره</button>
+      </div>
     </div>
     <div class="rk-players" id="rkPlayersBox">
       <div class="rk-ph"><span id="rkPlTitle">👥 بازیکنان این پرواز</span><span id="rkPlTotal" class="muted"></span></div>
@@ -1028,14 +1040,14 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
         <div class="rk-conv-info" id="rkConvInfo"></div>
         <button id="rkConvGo" class="rk-go" type="button">🔁 تبدیل</button>
       </div>
-      <div class="rk-balances" id="rkBalancesRow"><span><svg class="ton"><use href="#tonSym"/></svg> روب‌تون <b id="rkBalInline">—</b></span><span>🟡 روب‌پوینت <b id="rkPoints">—</b></span></div>
+      <div class="rk-balances" id="rkBalancesRow"><span><svg class="ton"><use href="#tonSym"/></svg> روب‌تون <b id="rkBalInline">—</b></span><span>🟡 روب‌پوینت <b id="rkPoints">—</b></span><span>⭐ <b id="rkStarsInline">—</b></span></div>
       <button id="rkLeaderboardBtn" class="rk-small rk-flights-btn" type="button">🏆 لیدربورد ۲۴ ساعته</button>
       <div id="rkLeaderboard" class="rk-hist" style="display:none">درحال بارگذاری…</div>
       <button id="rkMyFlightsBtn" class="rk-small rk-flights-btn" type="button">✈️ پروازهای من</button>
       <div id="rkMyFlights" class="rk-hist" style="display:none"></div>
     </div>
     <div class="muted" id="rkRule" style="margin-top:10px;line-height:1.9"></div>
-    <div class="muted" style="margin-top:6px;line-height:1.9">موشک از −۱ شروع می‌کنه و بالا می‌ره ولی تو یه لحظه‌ی تصادفی سقوط می‌کنه. اگه به ضریب هدفت برسه برنده‌ای، وگرنه شرطت می‌سوزه. نقطه‌ی سقوط از اول مشخصه و کسی (حتی ما) نمی‌تونه عوضش کنه.</div>
+    <div class="muted" style="margin-top:6px;line-height:1.9">ورود به هر پرواز ۵۰٬۰۰۰ روب‌پوینت است. موشک بالا می‌ره و در لحظه‌ای تصادفی سقوط می‌کند. اگر به ضریب هدفت برسد، همان ضریب را به‌صورت روب‌پوینت می‌گیری و به‌اندازهٔ عدد صحیح ضریب ⭐ ستاره جمع می‌کنی. با حداقل ۵۰ ستاره می‌توانی ۱٬۰۰۰٬۰۰۰ روب‌پوینت بگیری.</div>
   </div>
   <div id="rkConfirm" class="modal">
     <div class="sheet">
@@ -2287,7 +2299,7 @@ function __rubyMain(){
   // ---- دریافت وضعیت پرواز از سرور ----
   function rkResText(last){
     var mine = last.mine, cp = last.crash_point;
-    if (mine && mine.status === "cashed") { var pr = mine.payout - mine.bet; return ["🎉 موشک به " + rkFm(mine.target) + " رسید! " + fa(mine.payout) + " روب‌پوینت گرفتی (+" + fa(pr) + ")." + (last.capped ? "" : " موشک تو " + rkFm(cp) + " سقوط کرد."), "win"]; }
+    if (mine && mine.status === "cashed") { var pr = mine.payout - mine.bet; var stG = Math.floor((mine.target||0)+1e-9); return ["🎉 موشک به " + rkFm(mine.target) + " رسید! " + fa(mine.payout) + " روب‌پوینت (+" + fa(pr) + ") و " + fa(stG) + " ⭐." + (last.capped ? "" : " موشک تو " + rkFm(cp) + " سقوط کرد."), "win"]; }
     if (mine && mine.status === "crashed") return ["💥 موشک تو " + rkFm(cp) + " سقوط کرد؛ به " + rkFm(mine.target) + " نرسید و " + fa(mine.bet) + " روب‌پوینت سوخت.", "lose"];
     return ["💥 پرواز " + fa(last.id) + " تو " + rkFm(cp) + " سقوط کرد.", ""];
   }
@@ -2314,7 +2326,7 @@ function __rubyMain(){
     if (prevMe && prevMe.status === "active" && rkMe && rkMe.status === "cashed" && d.round.phase === "flying" && !rkCrashShow) {
       var pose = rkPose(rkAltT(rkElapsed())); rkBurst(false, pose.x, pose.y);
       var pr2 = rkMe.payout - rkMe.bet, el = $("rkRes");
-      el.textContent = "🎉 موشک به " + rkFm(rkMe.target) + " رسید! " + fa(rkMe.payout) + " روب‌پوینت گرفتی (+" + fa(pr2) + ")."; el.className = "rk-res win";
+      var stGain = Math.floor((rkMe.target||0)+1e-9); el.textContent = "🎉 موشک به " + rkFm(rkMe.target) + " رسید! " + fa(rkMe.payout) + " روب‌پوینت (+" + fa(pr2) + ") و " + fa(stGain) + " ⭐ ستاره گرفتی."; el.className = "rk-res win";
       try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred("success"); } catch(e){}
     }
     rkActKey = ""; rkSyncBal();
@@ -2347,43 +2359,37 @@ function __rubyMain(){
   function rkPreview(){
     var el = $("rkPrev"); if (!el || !rocket) return;
     var a = rkTgtVal(), pts = rocket.rob_points || 0, txt, warn = false;
-    if (rkAmt > pts) { txt = "⚠️ روب‌پوینتت کافی نیست (موجودی " + fa(pts) + ")."; warn = true; }
-    else if (!rkTgtOk(a)) { txt = "🎯 ضریب هدف رو انتخاب کن (از " + rkFm(rocket.min_target) + " تا " + rkFm(rocket.max_mult) + ")."; warn = (a !== null); }
-    else if (rkAmt > 0) {
-      var pay = rkPay(rkAmt, a), ch = Math.min(99, (1 - rocket.edge) / a * 100);
-      txt = "🏆 اگه موشک به <b>" + rkFm(a) + "</b> برسه: <b>" + fa(pay) + "</b> 🟡 (+" + fa(pay - rkAmt) + ") · شانس ≈ <b>" + fa(Math.round(ch)) + "٪</b>";
-    } else txt = "مبلغ شرط رو انتخاب کن.";
+    var entry = rocket.entry_fixed || rocket.min_entry || 50000;
+    rkAmt = entry;
+    if (entry > pts) { txt = "⚠️ برای ورود به موشک <b>" + fa(entry) + "</b> روب‌پوینت لازم است (موجودی " + fa(pts) + ")."; warn = true; }
+    else if (!rkTgtOk(a)) { txt = "🎯 ضریب هدف رو انتخاب کن (از " + rkFm(rocket.min_target) + " تا " + rkFm(rocket.max_mult) + "). هر ۱ ضریب = ۱ ⭐"; warn = (a !== null); }
+    else {
+      var pay = rkPay(entry, a), ch = Math.min(99, (1 - rocket.edge) / a * 100);
+      var stars = Math.floor(a + 1e-9);
+      txt = "🏆 اگه موشک به <b>" + rkFm(a) + "</b> برسه: <b>" + fa(pay) + "</b> 🟡 (+" + fa(pay - entry) + ") و <b>" + fa(stars) + "</b> ⭐ · شانس ≈ <b>" + fa(Math.round(ch)) + "٪</b>";
+    }
     el.innerHTML = txt; el.className = "rk-prev" + (warn ? " warn" : "");
   }
   function rkMarkChips(){
-    var bs = $("rkChips").children, i;
-    for (i = 0; i < bs.length; i++) { var d = bs[i].getAttribute("data-v"), on = d !== null && Number(d) === rkAmt; bs[i].className = (bs[i].getAttribute("data-mx") ? "mx " : "") + (on ? "on" : ""); }
-    var a = rkTgtVal(), as = $("rkTgtChips").children;
+    var a = rkTgtVal(), as = $("rkTgtChips").children, i;
     for (i = 0; i < as.length; i++) { var av = as[i].getAttribute("data-a"); as[i].className = (a !== null && Number(av) === a) ? "on" : ""; }
   }
   function rkSetAmt(v){
-    v = Math.floor(Number(v) || 0);
-    if (rocket) v = Math.min(v, rocket.max_entry);
-    rkAmt = v; $("rkAmt").value = v ? v : "";
+    // ورود ثابت؛ همیشه min_entry
+    v = rocket ? (rocket.entry_fixed || rocket.min_entry || 50000) : 50000;
+    rkAmt = v; if ($("rkAmt")) $("rkAmt").value = v;
     rkMarkChips(); rkPreview();
   }
   function rkSetTgt(a){ $("rkTgt").value = a === null ? "" : String(a); rkMarkChips(); rkPreview(); }
   var rkChipsBuilt = false;
   function rkDrawChips(){
     if (rkChipsBuilt || !rocket) return; rkChipsBuilt = true;
-    var chips = $("rkChips"); chips.innerHTML = "";
-    [100000, 500000, 1000000, 2000000, 5000000].forEach(function(v){
-      if (v < rocket.min_entry || v > rocket.max_entry) return;
-      var b = document.createElement("button"); b.type = "button"; b.textContent = fa(v); b.setAttribute("data-v", v);
-      b.onclick = function(){ if (!rkBusy) rkSetAmt(v); }; chips.appendChild(b);
-    });
-    var mx = document.createElement("button"); mx.type = "button"; mx.textContent = "🔥 همه"; mx.setAttribute("data-mx", "1");
-    mx.className = "mx"; mx.onclick = function(){ if (rkBusy) return; var v = Math.min(rocket.rob_points || 0, rocket.max_entry); if (v >= rocket.min_entry) rkSetAmt(v); else toast("روب‌پوینت کافی نداری.", false); };
-    chips.appendChild(mx);
     var ac = $("rkTgtChips"); ac.innerHTML = ""; ac.className = "rk-chips auto";
-    [1.2, 1.5, 2, 5, 10].forEach(function(a){
+    [1.2, 1.5, 2, 3, 5, 10].forEach(function(a){
       if (a < rocket.min_target || a > rocket.max_mult) return;
-      var b = document.createElement("button"); b.type = "button"; b.textContent = rkFm(a); b.setAttribute("data-a", a); b.onclick = function(){ rkSetTgt(a); }; ac.appendChild(b);
+      var b = document.createElement("button"); b.type = "button";
+      b.textContent = rkFm(a) + " · " + Math.floor(a) + "⭐";
+      b.setAttribute("data-a", a); b.onclick = function(){ rkSetTgt(a); }; ac.appendChild(b);
     });
   }
   function rkSyncBal(){
@@ -2391,6 +2397,16 @@ function __rubyMain(){
     $("rkBal").textContent = fa(rocket.rob_points || 0);
     if ($("rkBalInline")) $("rkBalInline").textContent = fa(rocket.balance || 0);
     if ($("rkPoints")) $("rkPoints").textContent = fa(rocket.rob_points || 0);
+    var st = rocket.rocket_stars || 0;
+    if ($("rkStars")) $("rkStars").textContent = fa(st);
+    if ($("rkStarsBig")) $("rkStarsBig").textContent = fa(st);
+    if ($("rkStarsInline")) $("rkStarsInline").textContent = fa(st);
+    var btn = $("rkStarsRedeem");
+    if (btn) {
+      var need = rocket.stars_redeem_min || 50;
+      btn.disabled = st < need || rkBusy;
+      btn.textContent = st >= need ? ("⭐ تبدیل " + fa(need) + " ستاره → " + fa(rocket.stars_redeem_reward || 1000000)) : ("⭐ حداقل " + fa(need) + " ستاره لازم است");
+    }
     rkPreview(); rkConvRender();
   }
   // ---- تبدیل روب‌تون ↔ روب‌پوینت (تعداد روب‌تون را می‌گویی؛ هزینه را سرور حساب می‌کند) ----
@@ -2455,11 +2471,10 @@ function __rubyMain(){
       rkRid = 0; rkCrashShow = false; rkFrozen = null; rkParts = []; rkActKey = ""; rkPlSig = ""; rkHistSig = ""; rkMe = null;
       rkApply(d, t0, Date.now());
       $("rkRule").textContent = d.disabled ? "🛠 کازینو فعلاً غیرفعاله." :
-        d.unlocked ? ("هر پرواز " + fa(d.wait) + " ثانیه فرصت شرط‌بندی داره و بعدش برای همه پرتاب می‌شه. با روب‌پوینت روی یه ضریب هدف شرط می‌بندی؛ اگه موشک قبل از سقوط به هدفت برسه «شرط × ضریب هدف» می‌گیری (مثلاً ۱٬۰۰۰٬۰۰۰ روی ×۲ ← ۲٬۰۰۰٬۰۰۰). شمارنده از −۱٫۵ شروع می‌شه و تا ×۱۰ بالا می‌ره؛ بعد از پایان هر پرواز ۳۰ ثانیه بعد پرواز بعدی شروع می‌شه. حداقل شرط " +
-          fa(d.min_entry) + " و سقف " + fa(d.max_entry) + " روب‌پوینت؛ ضریب هدف از " + rkFm(d.min_target) + " تا " + rkFm(d.max_mult) + ".") :
+        d.unlocked ? ("هر پرواز " + fa(d.wait) + " ثانیه فرصت ورود داره. هزینه ورود ثابت " + fa(d.entry_fixed || d.min_entry || 50000) + " روب‌پوینت است. ضریب هدف را انتخاب کن؛ اگر موشک به آن برسد، «ورود × ضریب» روب‌پوینت می‌گیری و به‌اندازه عدد صحیح ضریب ⭐ ستاره جمع می‌کنی. با " + fa(d.stars_redeem_min || 50) + " ستاره می‌تونی " + fa(d.stars_redeem_reward || 1000000) + " روب‌پوینت بگیری. ضریب از " + rkFm(d.min_target) + " تا " + rkFm(d.max_mult) + ".") :
         ("🔒 کازینو از سطح " + fa(d.unlock_level) + " باز می‌شه. (سطح تو: " + fa(d.level) + ")");
       rkDrawChips();
-      if (!rkAmt) rkSetAmt(Math.min(1000000, d.max_entry)); else rkSetAmt(rkAmt);
+      rkSetAmt(d.entry_fixed || d.min_entry || 50000);
       if (!$("rkTgt").value) rkSetTgt(2);
       rkSyncBal(); rkStartPoll(); rkKick(); stamp();
     }).catch(function(e){ if (!e.gate) toast(e.message, false); });
@@ -2488,22 +2503,49 @@ function __rubyMain(){
   $("rkConvGo").onclick = rkConvGo;
   $("rkCfNo").onclick = function(){ $("rkConfirm").classList.remove("open"); };
   $("rkConfirm").addEventListener("click", function(e){ if (e.target === $("rkConfirm")) $("rkConfirm").classList.remove("open"); });
-  // مبلغ و ضریب هدف
-  $("rkAmt").addEventListener("input", function(){ rkAmt = Math.floor(Number($("rkAmt").value) || 0); rkMarkChips(); rkPreview(); });
+  // مبلغ ثابت و ضریب هدف
   $("rkTgt").addEventListener("input", function(){ rkMarkChips(); rkPreview(); });
-  $("rkHalf").onclick = function(){ if (!rkBusy) rkSetAmt(Math.max(rocket ? rocket.min_entry : 1, Math.floor(rkAmt / 2))); };
-  $("rkDouble").onclick = function(){ if (!rkBusy) rkSetAmt(rkAmt * 2); };
+  if ($("rkStarsRedeem")) {
+    $("rkStarsRedeem").onclick = function(){
+      if (rkBusy || !rocket) return;
+      var need = rocket.stars_redeem_min || 50;
+      var st = rocket.rocket_stars || 0;
+      if (st < need) { toast("حداقل " + fa(need) + " ستاره لازم است. الان " + fa(st) + " داری.", false); return; }
+      rkBusy = true;
+      api("/api/rocket/stars/redeem", "POST", { confirm: false }).then(function(d){
+        rkBusy = false;
+        var q = d.quote || {};
+        $("rkCfTitle").textContent = "تبدیل ستاره به روب‌پوینت";
+        $("rkCfBody").innerHTML = "با <b>" + fa(q.stars_spent || need) + "</b> ⭐ ستاره، <b>" + fa(q.reward || 1000000) + "</b> 🟡 روب‌پوینت می‌گیری.<br>ستاره‌ها بعد از تبدیل: <b>" + fa(q.stars_after || 0) + "</b>";
+        $("rkConfirm").classList.add("open");
+        $("rkCfYes").onclick = function(){
+          if (rkBusy) return;
+          rkBusy = true;
+          api("/api/rocket/stars/redeem", "POST", { confirm: true }).then(function(r){
+            $("rkConfirm").classList.remove("open");
+            rocket.rocket_stars = r.rocket_stars;
+            rocket.rob_points = r.rob_points;
+            if (typeof r.balance === "number") rocket.balance = r.balance;
+            rkSyncBal();
+            toast("🎉 " + fa(r.quote && r.quote.reward || 1000000) + " روب‌پوینت به حسابت اضافه شد!", true);
+            rkPollOnce();
+          }).catch(function(e){ $("rkConfirm").classList.remove("open"); toast(e.message, false); rkPollOnce(); })
+            .then(function(){ rkBusy = false; });
+        };
+      }).catch(function(e){ rkBusy = false; toast(e.message, false); });
+    };
+  }
   $("rkStart").onclick = function(){
     if (rkBusy || !rocket) return;
     if (!rkBetOpen()) { toast("⏳ پرواز جاریه؛ بعد از سقوط می‌تونی شرط ببندی.", false); return; }
-    var amt = rkAmt, t = rkTgtVal();
-    if (!amt || amt < rocket.min_entry) { toast("حداقل شرط " + fa(rocket.min_entry) + " روب‌پوینته.", false); return; }
-    if (amt > rocket.max_entry) { toast("سقف شرط " + fa(rocket.max_entry) + " روب‌پوینته.", false); return; }
-    if (amt > (rocket.rob_points || 0)) { toast("روب‌پوینت کافی نداری.", false); return; }
+    var amt = rocket.entry_fixed || rocket.min_entry || 50000, t = rkTgtVal();
+    rkAmt = amt;
+    if (amt > (rocket.rob_points || 0)) { toast("برای ورود به موشک " + fa(amt) + " روب‌پوینت لازم است.", false); return; }
     if (!rkTgtOk(t)) { toast("ضریب هدف باید بین " + rkFm(rocket.min_target) + " و " + rkFm(rocket.max_mult) + " باشه.", false); return; }
     rkBusy = true; rkActKey = "";
     api("/api/rocket/bet", "POST", { amount: amt, target: t }).then(function(r){
       rocket.balance = r.balance; rocket.rob_points = r.rob_points;
+      if (typeof r.rocket_stars === "number") rocket.rocket_stars = r.rocket_stars;
       rkMe = { bet: r.bet, target: r.target, status: "active", mult: 0, payout: 0 };
       rkSyncBal(); try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred("medium"); } catch(e){}
     }).catch(function(e){ toast(e.message, false); }).then(function(){ rkBusy = false; rkActKey = ""; rkPollOnce(); });

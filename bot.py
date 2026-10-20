@@ -338,7 +338,7 @@ def pet_panel_text(user, user_name=''):
         pct = int(round(st['xp_frac'] * 100))
         lvl_line = f"⭐ لول {st['level']}  {_pet_bar(pct)} {pct}٪"
     return "\n".join([
-        f"{st['emoji']} {st['name']} — {st['title']}", "",
+        f"{st['emoji']} {st['name']}" + (f" ({st['type_name']})" if st['name'] != st['type_name'] else "") + f" — {st['title']}", "",
         lvl_line,
         f"🍖 سیری  {_pet_bar(st['satiety'])} {st['satiety']}٪",
         f"💖 حال    {_pet_bar(st['mood'])} {st['mood']}٪",
@@ -347,17 +347,19 @@ def pet_panel_text(user, user_name=''):
         f"💰 روب‌پوینت تو: {int(user.fox_points or 0):,}",
         f"🏷 لقب: {st.get('evolution_title', st['type_name'])}",
         "✏️ برای تغییر اسم، از دکمه‌ی همین پنل استفاده کن.",
+        "🐾 پت‌های دیگه‌ات رو از دکمه‌های پایین انتخاب کن یا پت جدید بخر.",
     ])
 
 
 def pet_panel_keyboard(user):
     uid = user.telegram_id
     rows = []
-    if pets_mod.pet_active(user):
-        food_key = pets_mod.FAVORITE_FOODS[pets_mod.pet_active(user)]
+    active = pets_mod.pet_active(user)
+    if active:
+        food_key = pets_mod.FAVORITE_FOODS[active]
         food = pets_mod.FOODS[food_key]
-        price = pets_mod.PET_FEED_PRICE[pets_mod.pet_active(user)]
-        wait = pets_mod.PET_FEED_COOLDOWN[pets_mod.pet_active(user)]
+        price = pets_mod.PET_FEED_PRICE[active]
+        wait = pets_mod.PET_FEED_COOLDOWN[active]
         rows.append([InlineKeyboardButton(f"{food['emoji']} {food['name']} (هر {wait//60} دقیقه رایگان)", callback_data=f"pet:feed:{food_key}:{uid}")])
         rows.append([InlineKeyboardButton(f"⚡ غذای فوری ({price:,} روب‌پوینت)", callback_data=f"pet:feedpaid:{food_key}:{uid}")])
         rows.append([InlineKeyboardButton("🤗 نوازش", callback_data=f"pet:play:x:{uid}"),
@@ -365,23 +367,24 @@ def pet_panel_keyboard(user):
         rows.append([InlineKeyboardButton("✏️ تغییر اسم پت", callback_data=f"pet:ren:x:{uid}")])
         rows.append([InlineKeyboardButton("🎁 هدیه‌ی روزانه", callback_data=f"pet:gift:x:{uid}"),
                      InlineKeyboardButton("🔔 یادآوری گرسنگی: "+("روشن" if int(getattr(user,'pet_hunger_reminders',1) or 0) else "خاموش"), callback_data=f"pet:rem:x:{uid}")])
-    nxt = pets_mod.pet_next_to_buy(user)
-    if nxt:
-        p = pets_mod.PETS[nxt]
-        if not pets_mod.pet_active(user):
-            rows.append([InlineKeyboardButton(f"{p['emoji']} {p['name']} رو بگیر (رایگان)", callback_data=f"pet:yes:{nxt}:{uid}")])
-        else:
-            rows.append([InlineKeyboardButton(f"🛒 پت بعدی: {p['emoji']} {p['name']} ({p['price']:,})", callback_data=f"pet:ask:{nxt}:{uid}")])
+        # پت‌های من: بقیه‌ی پت‌های خریداری‌شده برای جابه‌جایی
+        others = [k for k in pets_mod.pet_owned_keys(user) if k != active]
+        for i in range(0, len(others), 2):
+            rows.append([InlineKeyboardButton(f"🐾 {pets_mod.PETS[k]['emoji']} {pets_mod.PETS[k]['name']}", callback_data=f"pet:sel:{k}:{uid}") for k in others[i:i+2]])
+    # خرید پت‌های دیگه (همه‌ی پت‌های نخریده، نه فقط پت بعدی)
+    for k in pets_mod.pet_unowned_keys(user):
+        p = pets_mod.PETS[k]
+        if not active and p['price'] == 0:
+            rows.append([InlineKeyboardButton(f"{p['emoji']} {p['name']} رو بگیر (رایگان)", callback_data=f"pet:yes:{k}:{uid}")])
+        elif active:
+            rows.append([InlineKeyboardButton(f"🛒 {p['emoji']} {p['name']} ({p['price']:,})", callback_data=f"pet:ask:{k}:{uid}")])
     return InlineKeyboardMarkup(rows)
 
 
 def pet_confirm_text(user, key):
     p = pets_mod.PETS[key]
-    old = pets_mod.pet_active(user)
-    lines = [f"{p['emoji']} {p['name']}", "", p['about'], "", f"💰 قیمت: {p['price']:,} روب‌پوینت"]
-    if old:
-        lines += ["", f"⚠️ هر کاربر فقط یه پت داره؛ این پت جای {pets_mod.PETS[old]['emoji']} {pets_mod.PETS[old]['name']} "
-                      f"میاد و پت فعلیت (با لولش) از بین می‌ره.", "مطمئنی؟"]
+    lines = [f"{p['emoji']} {p['name']}", "", p['about'], "", f"💰 قیمت: {p['price']:,} روب‌پوینت",
+             "", "✅ پت‌های قبلی‌ات حذف نمی‌شن؛ هر وقت خواستی می‌تونی بینشون جابه‌جا بشی.", "مطمئنی؟"]
     return "\n".join(lines)
 
 
@@ -446,6 +449,8 @@ async def pet_rename_text_handler(update, context):
         await update.effective_message.reply_text('⛔ اسم باید بین ۱ تا ۱۲ حرف باشد. دوباره «پت» را باز کن و تغییر اسم را بزن.')
         return
     context.user_data['pet_rename_pending'] = name
+    try: await update.effective_message.delete()   # پیام اسم پاک می‌شه تا همه‌چیز داخل پنل بمونه
+    except Exception: pass
     session = get_session()
     try:
         user = get_or_create_user(session, update.effective_user)
@@ -472,19 +477,9 @@ async def pet_hunger_reminder_job(context):
     now = int(time.time())
     try:
         users = session.query(User).filter(User.pet_active != '').all()
-        from datetime import datetime, timezone, timedelta
-        tehran = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=3, minutes=30)))
         for user in users:
             st = pets_mod.pet_status(user, user.first_name or '')
             if not st: continue
-            data = pets_mod._load(user); pet_data = data.get(st['key'], {})
-            wake_day = tehran.date().isoformat()
-            if 7 <= tehran.hour < 8 and pet_data.get('wake_day') != wake_day:
-                try:
-                    await context.bot.send_message(chat_id=user.telegram_id, text=f"☀️ صبح بخیر! {pets_mod.PETS[st['key']]['emoji']} {st['name']} بیدار شد و منتظرته!")
-                    pet_data['wake_day'] = wake_day; data[st['key']] = pet_data; pets_mod._save(user, data); session.commit()
-                except Exception:
-                    session.rollback()
             if not int(getattr(user, 'pet_hunger_reminders', 1) or 0): continue
             if st['satiety'] >= pets_mod.PET_REMINDER_THRESHOLD: continue
             if now - int(getattr(user, 'pet_last_hunger_reminder_at', 0) or 0) < pets_mod.PET_REMINDER_COOLDOWN: continue
@@ -524,6 +519,9 @@ async def pet_button(update, context):
             await _refresh(same_photo=False)
             return
         if action == 'ren':
+            if q.message.chat.type != 'private':
+                await q.answer('برای تغییر اسم، توی پیوی ربات بنویس «پت» 🐾', show_alert=True)
+                return
             context.user_data['pet_rename_wait'] = True
             context.user_data['pet_panel_message_id'] = q.message.message_id
             context.user_data['pet_panel_chat_id'] = q.message.chat_id
@@ -539,8 +537,8 @@ async def pet_button(update, context):
                 return
             ok, msg = pets_mod.pet_rename(user, name)
             if ok: session.commit()
-            await q.answer(('✅ ' if ok else '⛔ ') + msg, show_alert=True)
-            await _refresh(same_photo=False)
+            await q.answer(('✅ ' if ok else '⛔ ') + msg)
+            await _refresh(same_photo=False)   # تأیید و اسم جدید داخل همین پنل
             return
         if action == 'renameno':
             context.user_data.pop('pet_rename_wait', None)
@@ -582,6 +580,15 @@ async def pet_button(update, context):
             return
         if arg not in pets_mod.PETS:
             await q.answer(); return
+        if action == 'sel':
+            ok, msg = pets_mod.pet_set_active(user, arg)
+            if not ok:
+                await q.answer("⛔ " + msg, show_alert=True)
+                return
+            session.commit()
+            await q.answer("✅ " + msg)
+            await _refresh(same_photo=False)
+            return
         if action == 'ask':
             ok, msg = pets_mod.pet_can_buy(user, arg)
             if not ok:
