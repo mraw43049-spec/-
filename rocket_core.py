@@ -66,18 +66,19 @@ def is_win(crash_point: float, target: float) -> bool:
 
 
 def mult_at_elapsed(elapsed: float) -> float:
-    """ضریب نمایشی بر اساس زمان از liftoff (نمایی)."""
+    """ضریب نمایشی بر اساس زمان از liftoff؛ دقیقاً هم‌ساعت با مینی‌اپ:
+    RISE ثانیه اول از START تا ×۱ بالا می‌رود، بعدش نمایی رشد می‌کند."""
     if elapsed <= 0:
         return START
-    # از ۰ به بالا: e^(growth*t) تقریباً
-    m = math.exp(GROWTH * elapsed)
-    return min(MAX_MULT, max(0.0, m))
+    if elapsed < RISE:
+        u = elapsed / RISE
+        return START + (1.0 - START) * (u * u * (3 - 2 * u))
+    return min(MAX_MULT, math.exp(GROWTH * (elapsed - RISE)))
 
 
 def elapsed_for_mult(mult: float) -> float:
-    if mult <= 1.0:
-        return 0.0
-    return math.log(max(1.0, mult)) / max(1e-9, GROWTH)
+    """چند ثانیه بعد از liftoff ضریب به mult می‌رسد (با احتساب RISE ثانیه‌ی اول)."""
+    return RISE + math.log(max(1.0, mult)) / max(1e-9, GROWTH)
 
 
 def ensure_table(engine) -> None:
@@ -133,52 +134,49 @@ def _row(m) -> dict:
     return dict(m) if m is not None else None
 
 
+_ROUND_COLS = "id, crash_point, created_at, liftoff_at, crash_at"
+
+
+def _current_round(session, now: float):
+    # فقط دورهای همگانی (دور تک‌نفره‌ی بات: crash_at == liftoff_at)
+    return session.execute(text(
+        "SELECT " + _ROUND_COLS + " FROM rocket_rounds "
+        "WHERE crash_at > :n AND crash_at > liftoff_at ORDER BY id DESC LIMIT 1"), {"n": now}).mappings().first()
+
+
 def ensure_round(session, now: float) -> dict:
-    """دور فعال یا جدید بساز. بعد از crash_at + cooldown دور بعدی."""
-    row = session.execute(text("""
-        SELECT id, crash_point, created_at, liftoff_at, crash_at
-        FROM rocket_rounds
-        WHERE crash_at > :n
-        ORDER BY id DESC LIMIT 1
-    """), {"n": now}).mappings().first()
+    """دور فعال (شرط‌بندی یا پرواز) را برگردان؛ اگر نبود دور جدید بساز.
+    دور جدید همیشه یک ردیف واقعی است تا شرط‌ها به همان دور بخورند، نه دور قبلی."""
+    row = _current_round(session, now)
     if row:
         return _row(row)
 
-    # آخرین دور تمام‌شده
-    last = session.execute(text("""
-        SELECT id, crash_point, created_at, liftoff_at, crash_at
-        FROM rocket_rounds ORDER BY id DESC LIMIT 1
-    """)).mappings().first()
-    if last and now < float(last["crash_at"]) + COOLDOWN:
-        # هنوز در cooldown — همان را برگردان ولی به‌عنوان waiting برای بعدی حساب می‌شود
-        # برای سادگی دور جدید بعد از cooldown
-        wait_until = float(last["crash_at"]) + COOLDOWN
-        if now < wait_until:
-            # دور موقت با liftoff در آینده
-            return {
-                "id": int(last["id"]),
-                "crash_point": float(last["crash_point"]),
-                "created_at": float(last["created_at"]),
-                "liftoff_at": wait_until + WAIT,
-                "crash_at": float(last["crash_at"]),
-                "_cooldown": True,
-            }
+    # جلوگیری از ساخت دو دور هم‌زمان (چند کاربر هم‌زمان poll می‌کنند)
+    try:
+        if session.get_bind().dialect.name == "postgresql":
+            session.execute(text("SELECT pg_advisory_xact_lock(884201)"))
+            row = _current_round(session, now)
+            if row:
+                return _row(row)
+    except Exception:
+        pass
+
+    last = session.execute(text(
+        "SELECT crash_at FROM rocket_rounds WHERE crash_at > liftoff_at ORDER BY id DESC LIMIT 1")).mappings().first()
+    liftoff = now + WAIT
+    if last:
+        # بین سقوط قبلی و پرتاب بعدی حداقل COOLDOWN ثانیه فاصله
+        liftoff = max(liftoff, float(last["crash_at"]) + COOLDOWN)
 
     cp = roll_crash()
-    created = now
-    liftoff = now + WAIT
-    # زمان سقوط از روی ضریب
-    t_crash = elapsed_for_mult(min(cp, MAX_MULT))
-    crash_at = liftoff + t_crash
+    crash_at = liftoff + elapsed_for_mult(min(cp, MAX_MULT))
     session.execute(text("""
         INSERT INTO rocket_rounds (crash_point, created_at, liftoff_at, crash_at)
         VALUES (:cp, :c, :l, :ca)
-    """), {"cp": cp, "c": created, "l": liftoff, "ca": crash_at})
+    """), {"cp": cp, "c": now, "l": liftoff, "ca": crash_at})
     session.flush()
-    row = session.execute(text("""
-        SELECT id, crash_point, created_at, liftoff_at, crash_at
-        FROM rocket_rounds ORDER BY id DESC LIMIT 1
-    """)).mappings().first()
+    row = session.execute(text(
+        "SELECT " + _ROUND_COLS + " FROM rocket_rounds ORDER BY id DESC LIMIT 1")).mappings().first()
     return _row(row)
 
 
@@ -282,7 +280,7 @@ def settle_all(session, now: float) -> None:
 def recent_crashes(session, now: float, limit: int = 12) -> list:
     rows = session.execute(text("""
         SELECT crash_point FROM rocket_rounds
-        WHERE crash_at <= :n
+        WHERE crash_at <= :n AND crash_at > liftoff_at
         ORDER BY id DESC LIMIT :lim
     """), {"n": now, "lim": limit}).mappings().all()
     return [float(min(float(r["crash_point"]), MAX_MULT)) for r in rows]
@@ -303,6 +301,8 @@ def history(session, user_id: int, now: float, limit: int = 15) -> list:
             "crash_point": float(min(float(r["crash_point"] or 0), MAX_MULT)),
             "status": r["status"],
             "final_mult": float(r["final_mult"] or 0),
+            "mult": float(r["final_mult"] or 0),
+            "crash": float(min(float(r["crash_point"] or 0), MAX_MULT)),
             "payout": int(r["payout"] or 0),
             "stars": int(r["stars_awarded"] or 0),
             "ended_at": float(r["ended_at"] or r["created_at"] or 0),

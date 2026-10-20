@@ -1538,11 +1538,11 @@ def rocket_state(tg_user: dict = Depends(current_telegram_user)):
                       "liftoff_in": liftoff - now, "elapsed": max(0.0, now - liftoff)},
             "me": _rocket_mine(pl, uid),
             "players": _rocket_public_players(pl, uid),
-            "recent": _rk.recent_crashes(session, now),
+            "recent": [{"crash": c} for c in _rk.recent_crashes(session, now)],
             "last": None,
         })
         lastr = session.execute(_sql_text(
-            "SELECT id, crash_point, crash_at FROM rocket_rounds WHERE crash_at <= :n ORDER BY id DESC LIMIT 1"), {"n": now}).mappings().first()
+            "SELECT id, crash_point, crash_at FROM rocket_rounds WHERE crash_at <= :n AND crash_at > liftoff_at ORDER BY id DESC LIMIT 1"), {"n": now}).mappings().first()
         if lastr:
             lp = _rk.players(session, int(lastr["id"])) if now - float(lastr["crash_at"]) < 12 else []
             out["last"] = {"id": int(lastr["id"]), "crash_point": float(min(float(lastr["crash_point"]), _rk.MAX_MULT)),
