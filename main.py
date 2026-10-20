@@ -1489,6 +1489,22 @@ def _rocket_access_guard(tg_user):
     return True
 
 
+def _rk_safe(fn):
+    """هر خطای غیرمنتظره‌ی موشک توی لاگ Railway ثبت می‌شه و به‌جای پیام خالیِ «خطای سرور»، علت واقعی به مینی‌اپ می‌رسه."""
+    import functools, logging, traceback
+
+    @functools.wraps(fn)
+    def _wrapped(*a, **kw):
+        try:
+            return fn(*a, **kw)
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger("rocket").error("rocket endpoint %s failed:\n%s", fn.__name__, traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"خطای داخلی موشک ({type(e).__name__}): {str(e)[:160]}")
+    return _wrapped
+
+
 def _rocket_cfg():
     return {"min_entry": _rk.MIN_ENTRY, "max_entry": _rk.MAX_ENTRY, "max_mult": _rk.MAX_MULT, "min_target": _rk.MIN_TARGET,
             "growth": _rk.GROWTH, "rise": _rk.RISE, "start": _rk.START, "wait": _rk.WAIT, "edge": _rk.EDGE,
@@ -1511,6 +1527,7 @@ def _rocket_public_players(players, uid=None):
 
 
 @app.get("/api/rocket")
+@_rk_safe
 def rocket_state(tg_user: dict = Depends(current_telegram_user)):
     _rocket_access_guard(tg_user)
     botmod = load_botmod()
@@ -1560,6 +1577,7 @@ class RocketStart(BaseModel):
 
 
 @app.post("/api/rocket/bet")
+@_rk_safe
 def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)):
     _rocket_access_guard(tg_user)
     botmod = load_botmod()
@@ -1606,6 +1624,7 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
 
 
 @app.post("/api/rocket/cancel")
+@_rk_safe
 def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
     """تا قبل از پرتاب، شرط لغو و ورودی کامل برگردونده می‌شه."""
     _rocket_access_guard(tg_user)
@@ -1631,6 +1650,7 @@ def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
 
 
 @app.get("/api/rocket/mine")
+@_rk_safe
 def rocket_mine(tg_user: dict = Depends(current_telegram_user)):
     _rocket_access_guard(tg_user)
     session = get_session()
@@ -1645,6 +1665,7 @@ class RocketStarsRedeem(BaseModel):
 
 
 @app.post("/api/rocket/stars/redeem")
+@_rk_safe
 def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current_telegram_user)):
     """تبدیل حداقل ۵۰ ستاره به ۱٬۰۰۰٬۰۰۰ روب‌پوینت."""
     _rocket_access_guard(tg_user)
@@ -1691,6 +1712,7 @@ def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current
 
 
 @app.get("/api/rocket/leaderboard")
+@_rk_safe
 def rocket_leaderboard(tg_user: dict = Depends(current_telegram_user)):
     _rocket_access_guard(tg_user)
     session = get_session()

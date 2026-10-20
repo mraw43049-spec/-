@@ -450,9 +450,6 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 .rk-chip.hi{color:#8dffbd;border-color:#2f8a5a;background:#0f2a1c}
 .rk-chip.big{color:#e9b8ff;border-color:#8a3aa8;background:#26102e}
 .rk-row{display:flex;gap:8px;margin:8px 0;align-items:center}
-.rk-convert-row{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:10px 0}
-.rk-convert-row .rk-small{min-width:0;padding:10px 5px;font-size:12px;line-height:1.7}
-.rk-convert-row b{color:#ffd16a;white-space:nowrap}
 .rk-balances{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12px;padding:9px 11px;border:1px solid #29366c;border-radius:12px;background:#0b1129}
 .rk-balances b{color:#ffd16a}
 .rk-flights-btn{display:block;width:100%;margin:8px 0;background:#202b57}
@@ -479,22 +476,7 @@ li{content-visibility:auto;contain-intrinsic-size:auto 58px}
 .rk-bd{white-space:nowrap;font-size:11px;padding:3px 7px;border-radius:999px;background:#1b2552;color:#cfd6ff}
 .rk-bd.ok{background:#0e3b26;color:#7dffb3}.rk-bd.bad{background:#3a1218;color:#ff9a9a}
 .rk-pl-empty{text-align:center;font-size:12px;color:#8e98cf;padding:10px}
-.rk-conv{position:relative;border-radius:16px;padding:9px;margin:12px 0 8px;background:linear-gradient(160deg,#0d1738,#090e24);border:1px solid #1f3a78;box-shadow:0 0 0 1px #0098ea1f inset,0 6px 18px #0098ea1a}
-.rk-seg{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:#060a1c;border:1px solid #1d2a5c;border-radius:11px;padding:2px}
-.rk-seg button{border:0;background:transparent;color:#9fb0e8;border-radius:9px;height:28px;font-weight:900;font-size:11.5px;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:4px}
-.rk-seg button.on{background:linear-gradient(180deg,#2bb8ff,#0098EA);color:#fff;box-shadow:0 0 10px #0098ea88}
-.rk-conv-q{text-align:center;font-weight:800;font-size:12px;margin:8px 0 6px;color:#cfdcff}
-.rk-step{display:grid;grid-template-columns:34px 1fr 34px 34px;gap:5px;align-items:center;direction:ltr}
-.rk-sb{height:34px;padding:0;border-radius:10px;border:1px solid #27407f;background:linear-gradient(180deg,#14214f,#0e1738);font-size:14px;line-height:1;color:#fff}
-.rk-sb:active{transform:scale(.94)}
-.rk-step input{height:34px;border-radius:10px;border:1px solid #27407f;background:#050919;color:#fff;font-size:17px;font-weight:900;font-family:inherit;text-align:center;min-width:0}
-.rk-conv-info{font-size:11.5px;text-align:center;color:#a9b8f0;margin:8px 0;line-height:1.8;min-height:34px}
-.rk-conv-info b{color:#ffd16a}.rk-conv-info.warn{color:#ffb4b4}
-.rk-rate{opacity:.7;font-size:10.5px}
-.rk-go{width:100%;height:36px;border:0;border-radius:11px;font-weight:900;font-size:13px;font-family:inherit;color:#fff;background:linear-gradient(90deg,#0098EA,#35c9ff);box-shadow:0 4px 14px #0098ea66}
-.rk-go:disabled{opacity:.45;box-shadow:none}
-@media(max-width:360px){.rk-convert-row{grid-template-columns:1fr}.rk-balances{justify-content:center}}
-.rk-row input{flex:1;min-width:0;border-radius:12px;border:1px solid #3b4a9a;background:#0a0f26;color:#fff;padding:12px;font-size:16px;font-family:inherit;text-align:center}
+@media(max-width:360px){.rk-row input{flex:1;min-width:0;border-radius:12px;border:1px solid #3b4a9a;background:#0a0f26;color:#fff;padding:12px;font-size:16px;font-family:inherit;text-align:center}
 .rk-row label{font-size:12px;color:#aab4ff;white-space:nowrap}
 .rk-small{border:1px solid #3b4a9a;background:#141b40;color:#eaf0ff;border-radius:12px;padding:11px 14px;font-weight:900;font-family:inherit;font-size:14px}
 .rk-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 4px}
@@ -1033,6 +1015,13 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
     </div>
     <div class="muted" id="rkRule" style="margin-top:10px;line-height:1.9"></div>
     <div class="muted" style="margin-top:6px;line-height:1.9">ورود به هر پرواز ۵۰٬۰۰۰ روب‌پوینت است. موشک بالا می‌ره و در لحظه‌ای تصادفی سقوط می‌کند. اگر به ضریب هدفت برسد، همان ضریب را به‌صورت روب‌پوینت می‌گیری و به‌اندازهٔ عدد صحیح ضریب ⭐ ستاره جمع می‌کنی. با حداقل ۵۰ ستاره می‌توانی ۱٬۰۰۰٬۰۰۰ روب‌پوینت بگیری.</div>
+  </div>
+  <div id="rkConfirm" class="modal">
+    <div class="sheet">
+      <h3 id="rkCfTitle">تایید</h3>
+      <div id="rkCfBody" style="line-height:2;font-size:14px"></div>
+      <div class="row"><button id="rkCfNo" class="action secondary" type="button">انصراف</button><button id="rkCfYes" class="action" type="button">✅ تایید</button></div>
+    </div>
   </div>
   <div id="plinkoCard" class="card" style="display:none">
     <div class="p-head">
@@ -2373,7 +2362,6 @@ function __rubyMain(){
   function rkSyncBal(){
     if (!rocket) return;
     $("rkBal").textContent = fa(rocket.rob_points || 0);
-
     if ($("rkPoints")) $("rkPoints").textContent = fa(rocket.rob_points || 0);
     var st = rocket.rocket_stars || 0;
     if ($("rkStars")) $("rkStars").textContent = fa(st);
@@ -2414,7 +2402,6 @@ function __rubyMain(){
         row.textContent=(h.status==="cashed"?("برد · "+rkFm(h.target)):("نرسید · هدف "+rkFm(h.target)+(h.crash?" · سقوط "+rkFm(h.crash):"")))+" · شرط "+fa(h.bet)+" 🟡"+(h.status==="cashed"&&h.payout?" ← "+fa(h.payout)+" 🟡":""); box.appendChild(row); });
     }).catch(function(e){ box.textContent=e.message; });
   };
-  // تبدیل
   $("rkCfNo").onclick = function(){ $("rkConfirm").classList.remove("open"); };
   $("rkConfirm").addEventListener("click", function(e){ if (e.target === $("rkConfirm")) $("rkConfirm").classList.remove("open"); });
   // مبلغ ثابت و ضریب هدف
@@ -2439,7 +2426,6 @@ function __rubyMain(){
             $("rkConfirm").classList.remove("open");
             rocket.rocket_stars = r.rocket_stars;
             rocket.rob_points = r.rob_points;
-            if (typeof r.balance === "number") rocket.balance = r.balance;
             rkSyncBal();
             toast("🎉 " + fa(r.quote && r.quote.reward || 1000000) + " روب‌پوینت به حسابت اضافه شد!", true);
             rkPollOnce();
@@ -2458,7 +2444,7 @@ function __rubyMain(){
     if (!rkTgtOk(t)) { toast("ضریب هدف باید بین " + rkFm(rocket.min_target) + " و " + rkFm(rocket.max_mult) + " باشه.", false); return; }
     rkBusy = true; rkActKey = "";
     api("/api/rocket/bet", "POST", { amount: amt, target: t }).then(function(r){
-      rocket.balance = r.balance; rocket.rob_points = r.rob_points;
+      rocket.rob_points = r.rob_points;
       if (typeof r.rocket_stars === "number") rocket.rocket_stars = r.rocket_stars;
       rkMe = { bet: r.bet, target: r.target, status: "active", mult: 0, payout: 0 };
       rkSyncBal(); try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred("medium"); } catch(e){}
@@ -2468,7 +2454,7 @@ function __rubyMain(){
     if (rkBusy || !rkMe || rkMe.status !== "active") return;
     rkBusy = true; rkActKey = "";
     api("/api/rocket/cancel", "POST").then(function(r){
-      rocket.balance = r.balance; rocket.rob_points = r.rob_points; rkMe = null; rkSyncBal(); toast("↩️ شرط لغو شد و ورودی برگشت.", true);
+      rocket.rob_points = r.rob_points; rkMe = null; rkSyncBal(); toast("↩️ شرط لغو شد و ورودی برگشت.", true);
     }).catch(function(e){ toast(e.message, false); }).then(function(){ rkBusy = false; rkActKey = ""; rkPollOnce(); });
   };
 
