@@ -1489,25 +1489,10 @@ def _rocket_access_guard(tg_user):
     return True
 
 
-def _rk_safe(fn):
-    """هر خطای غیرمنتظره‌ی موشک توی لاگ Railway ثبت می‌شه و به‌جای پیام خالیِ «خطای سرور»، علت واقعی به مینی‌اپ می‌رسه."""
-    import functools, logging, traceback
-
-    @functools.wraps(fn)
-    def _wrapped(*a, **kw):
-        try:
-            return fn(*a, **kw)
-        except HTTPException:
-            raise
-        except Exception as e:  # noqa: BLE001
-            logging.getLogger("rocket").error("rocket endpoint %s failed:\n%s", fn.__name__, traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"خطای داخلی موشک ({type(e).__name__}): {str(e)[:160]}")
-    return _wrapped
-
-
 def _rocket_cfg():
     return {"min_entry": _rk.MIN_ENTRY, "max_entry": _rk.MAX_ENTRY, "max_mult": _rk.MAX_MULT, "min_target": _rk.MIN_TARGET,
             "growth": _rk.GROWTH, "rise": _rk.RISE, "start": _rk.START, "wait": _rk.WAIT, "edge": _rk.EDGE,
+            "buy_rate": _rk.BUY_RATE, "sell_rate": _rk.SELL_RATE,
             "entry_fixed": _rk.MIN_ENTRY,  # ورود ثابت ۵۰هزار
             "stars_redeem_min": _rk.STARS_REDEEM_MIN,
             "stars_redeem_reward": _rk.STARS_REDEEM_REWARD}
@@ -1527,7 +1512,6 @@ def _rocket_public_players(players, uid=None):
 
 
 @app.get("/api/rocket")
-@_rk_safe
 def rocket_state(tg_user: dict = Depends(current_telegram_user)):
     _rocket_access_guard(tg_user)
     botmod = load_botmod()
@@ -1549,7 +1533,7 @@ def rocket_state(tg_user: dict = Depends(current_telegram_user)):
             "unlocked": int(user.level or 1) >= botmod.CASINO_UNLOCK_LEVEL,
             "unlock_level": botmod.CASINO_UNLOCK_LEVEL, "level": int(user.level or 1),
             "disabled": bool(getattr(botmod, "CASINO_DISABLED", False)),
-            "rob_points": int(user.fox_points or 0),
+            "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0),
             "rocket_stars": int(getattr(user, "rocket_stars", 0) or 0),
             "round": {"id": int(rnd["id"]), "phase": "flying" if flying else "waiting",
                       "liftoff_in": liftoff - now, "elapsed": max(0.0, now - liftoff)},
@@ -1577,7 +1561,6 @@ class RocketStart(BaseModel):
 
 
 @app.post("/api/rocket/bet")
-@_rk_safe
 def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)):
     _rocket_access_guard(tg_user)
     botmod = load_botmod()
@@ -1614,7 +1597,7 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
             raise HTTPException(status_code=409, detail="✅ برای همین پرواز قبلاً شرط بستی.")
         session.commit()
         return {"ok": True, "bet": amount, "target": target, "round_id": int(rnd["id"]),
-                "rob_points": int(user.fox_points or 0),
+                "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0),
                 "rocket_stars": int(getattr(user, "rocket_stars", 0) or 0)}
     except HTTPException:
         session.rollback()
@@ -1624,7 +1607,6 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
 
 
 @app.post("/api/rocket/cancel")
-@_rk_safe
 def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
     """تا قبل از پرتاب، شرط لغو و ورودی کامل برگردونده می‌شه."""
     _rocket_access_guard(tg_user)
@@ -1641,7 +1623,7 @@ def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
             raise HTTPException(status_code=409, detail="شرط همین الان تموم شد.")
         user.fox_points = int(user.fox_points or 0) + int(g["bet"])
         session.commit()
-        return {"ok": True, "rob_points": int(user.fox_points or 0)}
+        return {"ok": True, "balance": int(user.rub_toon or 0), "rob_points": int(user.fox_points or 0)}
     except HTTPException:
         session.rollback()
         raise
@@ -1650,7 +1632,6 @@ def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
 
 
 @app.get("/api/rocket/mine")
-@_rk_safe
 def rocket_mine(tg_user: dict = Depends(current_telegram_user)):
     _rocket_access_guard(tg_user)
     session = get_session()
@@ -1665,7 +1646,6 @@ class RocketStarsRedeem(BaseModel):
 
 
 @app.post("/api/rocket/stars/redeem")
-@_rk_safe
 def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current_telegram_user)):
     """تبدیل حداقل ۵۰ ستاره به ۱٬۰۰۰٬۰۰۰ روب‌پوینت."""
     _rocket_access_guard(tg_user)
@@ -1703,6 +1683,7 @@ def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current
             "done": True,
             "rocket_stars": int(user.rocket_stars),
             "rob_points": int(user.fox_points or 0),
+            "balance": int(user.rub_toon or 0),
         }
     except HTTPException:
         session.rollback()
@@ -1712,7 +1693,6 @@ def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current
 
 
 @app.get("/api/rocket/leaderboard")
-@_rk_safe
 def rocket_leaderboard(tg_user: dict = Depends(current_telegram_user)):
     _rocket_access_guard(tg_user)
     session = get_session()

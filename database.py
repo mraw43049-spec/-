@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, Float, UniqueConstraint, create_engine, inspect, text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Float, UniqueConstraint, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from config import DATABASE_URL
 
@@ -214,6 +214,9 @@ class GroupChat(Base):
     __tablename__ = 'group_chats'
     chat_id = Column(BigInteger, primary_key=True)
     title = Column(String, nullable=True)
+    # Legacy Railway databases may already contain this NOT NULL column.
+    # Always send a safe false value when creating a new group row.
+    ai_mod = Column(Boolean, nullable=False, default=False, server_default=text('false'))
     active = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     # ---------- کیف روب پوینت (اتفاق رندوم گروهی) ----------
@@ -812,6 +815,11 @@ def init_db():
                 conn.execute(text("ALTER TABLE ruby_marriages ADD COLUMN post_abort_actions INTEGER NOT NULL DEFAULT 0"))
         if 'group_chats' in inspector.get_table_names():
             group_chat_cols = {c['name'] for c in inspector.get_columns('group_chats')}
+            if 'ai_mod' not in group_chat_cols:
+                conn.execute(text('ALTER TABLE group_chats ADD COLUMN ai_mod BOOLEAN NOT NULL DEFAULT FALSE'))
+            elif engine.dialect.name == 'postgresql':
+                # Old PostgreSQL schema had ai_mod NOT NULL without a default.
+                conn.execute(text('ALTER TABLE group_chats ALTER COLUMN ai_mod SET DEFAULT FALSE'))
             if 'lucky_bag_msg_counter' not in group_chat_cols:
                 conn.execute(text("ALTER TABLE group_chats ADD COLUMN lucky_bag_msg_counter INTEGER NOT NULL DEFAULT 0"))
             if 'last_lucky_bag_at' not in group_chat_cols:

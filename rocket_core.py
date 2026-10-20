@@ -24,8 +24,8 @@ EDGE = float(os.environ.get("ROCKET_EDGE", "0.04"))  # حاشیه خانه
 GROWTH = float(os.environ.get("ROCKET_GROWTH", "0.06"))  # شیب رشد ضریب
 RISE = float(os.environ.get("ROCKET_RISE", "12"))  # ثانیه تقریبی تا سقف
 START = float(os.environ.get("ROCKET_START", "-1.5"))
-WAIT = float(os.environ.get("ROCKET_WAIT", "30"))  # ثانیه شرط‌بندی
-COOLDOWN = float(os.environ.get("ROCKET_COOLDOWN", "30"))  # بین پروازها
+WAIT = 10.0  # شمارش معکوس ثابت ۱۰ ثانیه تا پرواز خودکار
+COOLDOWN = 0.0  # پس از سقوط، شمارش معکوس ۱۰ ثانیه‌ای پرواز بعدی بلافاصله آغاز می‌شود
 
 # سیستم ستاره
 STARS_PER_MULT = 1  # هر ۱ ضریب = ۱ ستاره
