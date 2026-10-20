@@ -242,6 +242,8 @@ class GroupChat(Base):
     disabled_features = Column(String, nullable=False, default='')
     # سازگاری با دیتابیس‌های Railway قدیمی که این ستون را اجباری دارند
     ai_mod = Column(Integer, nullable=False, default=0, server_default='0')
+    # سازگاری با دیتابیس Railway قدیمی که ستون spell_mode را اجباری دارد.
+    spell_mode = Column(String, nullable=False, default='none', server_default='none')
 
 
 
@@ -905,10 +907,17 @@ def init_db():
                 'city_donors': "VARCHAR DEFAULT ''",
                 'disabled_features': "VARCHAR DEFAULT ''",
                 'ai_mod': 'INTEGER NOT NULL DEFAULT 0',
+                'spell_mode': "VARCHAR NOT NULL DEFAULT 'none'",
             }
             for name, definition in gc_additions.items():
                 if name not in gc_cols:
                     conn.execute(text(f'ALTER TABLE group_chats ADD COLUMN {name} {definition}'))
+            # نسخه‌های قدیمی دیتابیس ستون spell_mode را NOT NULL داشتند، اما کد قدیمی
+            # آن را نمی‌فرستاد؛ مقدار پیش‌فرض را روی دیتابیس هم تنظیم و داده‌های NULL را پاکسازی کن.
+            if 'spell_mode' in ({c['name'] for c in inspector.get_columns('group_chats')}):
+                conn.execute(text("UPDATE group_chats SET spell_mode = 'none' WHERE spell_mode IS NULL"))
+                if engine.dialect.name == 'postgresql':
+                    conn.execute(text("ALTER TABLE group_chats ALTER COLUMN spell_mode SET DEFAULT 'none'"))
             mayor_additions = {
                 'city_mayor_id': 'BIGINT',
                 'city_mayor_name': 'VARCHAR',

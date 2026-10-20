@@ -2403,7 +2403,7 @@ function __rubyMain(){
     var card = $("rocketCard");
     if (!card || card.style.display === "none") { rkStopPoll(); return; }
     if (document.hidden) return;
-    if (rkPollBusy) { rkPollSoon = true; return; }
+    if (rkPollBusy) return;
     rkPollBusy = true; var t0 = Date.now();
     api("/api/rocket").then(function(d){ var rb = $("segRocket"); if (rb) rb.style.display = ""; rkApply(d, t0, Date.now()); }).catch(function(err){
       if (err && (err.status === 403 || String(err.message || "").includes("403") || String(err.message || "").includes("این حساب فعال نیست"))) {
@@ -2412,10 +2412,10 @@ function __rubyMain(){
         if (typeof showWheelSection === "function") showWheelSection();
       }
     }).then(function(){
-      rkPollBusy = false; if (rkPollSoon) { rkPollSoon = false; rkPollOnce(); }
+      rkPollBusy = false;
     });
   }
-  function rkStartPoll(){ if (!rkPoll) rkPoll = setInterval(rkPollOnce, 700); }
+  function rkStartPoll(){ if (!rkPoll) rkPoll = setInterval(rkPollOnce, 1000); }
   function rkStopPoll(){ if (rkPoll) { clearInterval(rkPoll); rkPoll = null; } }
   document.addEventListener("visibilitychange", function(){ if (!document.hidden && $("rocketCard") && $("rocketCard").style.display !== "none") { rkPollOnce(); rkKick(); } });
   // ---- مبلغ شرط، ضریب هدف و پیش‌نمایش ----

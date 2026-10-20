@@ -6,6 +6,7 @@ import os
 import random
 import re
 import secrets
+import threading
 import hmac
 import hashlib
 from datetime import datetime, timezone, timedelta
@@ -16613,6 +16614,23 @@ async def gw_finish(bot, gid):
     return winners
 
 
+def _start_miniapp_http_server():
+    """Serve the FastAPI mini-app on Railway's assigned port alongside the Telegram bot."""
+    port = int(os.environ.get("PORT", "8080"))
+
+    def _serve():
+        try:
+            import uvicorn
+            logger.info("Starting Ruby mini-app HTTP server on 0.0.0.0:%s", port)
+            uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info", access_log=False)
+        except Exception:
+            logger.exception("Mini-app HTTP server failed to start")
+
+    thread = threading.Thread(target=_serve, name="miniapp-http-server", daemon=True)
+    thread.start()
+    return thread
+
+
 def main():
     if not BOT_TOKEN: raise RuntimeError('BOT_TOKEN is missing. Add BOT_TOKEN in Railway Variables.')
     init_db()
@@ -16779,6 +16797,8 @@ def main():
             app.job_queue.run_repeating(daily_backup_job, interval=BACKUP_INTERVAL_SECONDS, first=60, name="daily-backup")
     db_kind = "PostgreSQL (پایدار ✅)" if DATABASE_URL.startswith("postgres") else "SQLite محلی (⚠️ روی Railway بدون Volume با هر دیپلوی پاک می‌شود)"
     logger.info(f"Database in use: {db_kind}")
+    # Railway routes the mini-app domain to PORT. Start HTTP API in parallel with Telegram polling.
+    _start_miniapp_http_server()
     logger.info("Bot started polling...")
     app.run_polling()
 
