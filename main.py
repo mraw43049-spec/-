@@ -1793,6 +1793,27 @@ def _rocket_auto_start():
     threading.Thread(target=_rocket_auto_loop, name="rocket-auto", daemon=True).start()
 
 
+# ارسال خودکار از اکانت شخصی (فقط اگه Variables تنظیم شده باشه فعال می‌شه؛ خطاش به بقیهٔ ربات کاری نداره)
+# صفحهٔ ورود با مرورگر: /userbot/setup?key=<USERBOT_SETUP_KEY>  (بدون USERBOT_SETUP_KEY همیشه 404 می‌ده)
+try:
+    import userbot as _ub
+    app.include_router(_ub.make_router(engine))
+except Exception:  # noqa: BLE001
+    import logging as _lg
+    _lg.getLogger("userbot").exception("userbot router failed")
+    _ub = None
+
+
+@app.on_event("startup")
+def _userbot_start():
+    try:
+        if _ub is not None:
+            _ub.start_in_background()
+    except Exception:  # noqa: BLE001
+        import logging as _lg
+        _lg.getLogger("userbot").exception("userbot start failed")
+
+
 # ---------------------------------------------------------------------------
 # روباهیو درس (همون منطق education.py؛ پیشرفت بین بات و مینی‌اپ مشترکه)
 # ---------------------------------------------------------------------------

@@ -140,6 +140,21 @@ def ensure_table(engine) -> None:
     # فقط NOT NULL اون ستون‌ها برداشته می‌شه (چیزی حذف نمی‌شه).
     try:
         if engine.dialect.name == "postgresql":
+            # ستون id بدون شمارندهٔ خودکار (جدول قدیمی) → INSERT با id=NULL می‌شکنه؛ شمارنده ساخته و وصل می‌شه.
+            for tbl in ("rocket_rounds", "rocket_bets"):
+                try:
+                    with engine.begin() as conn:
+                        has_default = conn.execute(text(
+                            "SELECT column_default FROM information_schema.columns "
+                            "WHERE table_schema = current_schema() AND table_name = :t AND column_name = 'id'"),
+                            {"t": tbl}).all()
+                        if has_default and has_default[0][0] is None:
+                            seq = tbl + "_id_seq"
+                            conn.execute(text('CREATE SEQUENCE IF NOT EXISTS "%s"' % seq))
+                            conn.execute(text('ALTER TABLE "%s" ALTER COLUMN id SET DEFAULT nextval(\'"%s"\')' % (tbl, seq)))
+                            conn.execute(text('SELECT setval(\'"%s"\', COALESCE((SELECT MAX(id) FROM "%s"), 0) + 1, false)' % (seq, tbl)))
+                except Exception:
+                    pass
             expected = {
                 "rocket_rounds": {"id", "crash_point", "created_at", "liftoff_at", "crash_at"},
                 "rocket_bets": {"id", "round_id", "user_id", "bet", "target", "crash_point", "status", "final_mult",
