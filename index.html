@@ -6,7 +6,7 @@
 <title>روبی 🦊</title>
 <meta name="theme-color" content="#07140f">
 <script src="https://telegram.org/js/telegram-web-app.js" id="tgjs" async></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie_light.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie_light.min.js" crossorigin="anonymous" defer></script>
 <script>
 (function(){
   function show(msg){
@@ -18,7 +18,12 @@
       document.getElementById("__errt").textContent=String(msg).slice(0,400);
     }catch(e){}
   }
-  window.addEventListener("error",function(e){show("JS: "+(e.message||"error")+" @"+(e.lineno||"")+":"+(e.colno||""));});
+  window.addEventListener("error",function(e){
+    // "Script error." بدون شماره خط = خطای مبهمِ اسکریپت بیرونی (تلگرام/CDN)؛ قابل‌اجرا نیست و نباید به کاربر نشون داده بشه
+    var m=String(e&&e.message||"");
+    if((!e.lineno&&!e.colno)&&(!m||/^script error\.?$/i.test(m)||!e.error)){try{console.warn("ignored opaque script error",m);}catch(_){}return;}
+    show("JS: "+(m||"error")+" @"+(e.lineno||"")+":"+(e.colno||""));
+  });
   window.addEventListener("unhandledrejection",function(e){var r=e.reason;if(r&&r.gate)return;});
 })();
 </script>
@@ -2284,7 +2289,9 @@ function __rubyMain(){
       $("rkCancel").style.display = open ? "" : "none"; $("rkCancel").disabled = rkBusy;
     }
     var b = $("rkStart");
-    if (rkMe && rkMe.status !== "active") { b.disabled = true; b.textContent = "منتظر پرواز بعدی…"; }
+    if (rocket.disabled) { b.disabled = true; b.textContent = "🛠 کازینو موقتاً غیرفعاله"; }
+    else if (!rocket.unlocked) { b.disabled = true; b.textContent = "🔒 از سطح " + fa(rocket.unlock_level || 5) + " باز می‌شه (سطح تو: " + fa(rocket.level || 1) + ")"; }
+    else if (rkMe && rkMe.status !== "active") { b.disabled = true; b.textContent = "منتظر پرواز بعدی…"; }
     else if (!open) { b.disabled = true; b.textContent = "پرواز جاریه…"; }
     else { b.disabled = off || rkBusy; b.innerHTML = "شرط بندی " + fa(rkEntry()) + " " + RK_COIN; }
   }
