@@ -1465,7 +1465,11 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
 # ---------------------------------------------------------------------------
 # کازینو: موشک 🚀 (ضریب‌دار؛ بازی Crash)
 # شرط روی ضریب با روب‌پوینت: پروازهای همگانیِ خودکار؛ هر پرواز ۱۰ ثانیه شرط‌بندی دارد، بعد برای همه پرتاب می‌شود (حتی اگه کسی داخل نباشه).
-# اگر موشک قبل از سقوط به ضریبِ هدفِ بازیکن برسد، «ورودی × ضریب هدف» می‌گیرد؛ وگرنه ورودی می‌سوزد. شمارنده از −۱٫۵ شروع می‌شود تا ×۱۰؛ حداقل ضریب هدف ×۱٫۲.
+# ورود ثابت ۵۰٬۰۰۰ روب‌پوینت (چه با ضریب هدف، چه بدون ضریب). دو حالت برداشت:
+#  ۱) با ضریب هدف: اگر موشک قبل از سقوط به هدف برسد، «ورودی × ضریب هدف» خودکار واریز می‌شود؛ وگرنه ورودی می‌سوزد.
+#  ۲) بدون ضریب (target=۰): بازیکن خودش وسط پرواز با /api/rocket/cashout برداشت می‌کند (از ×۱٫۲ به بعد)؛
+#     اگر برداشت نکند و موشک به سقف برسد خودکار در سقف برداشت می‌شود، وگرنه با سقوط می‌سوزد.
+# شمارنده از −۱٫۵ شروع می‌شود تا سقف ×۱۰۰؛ حداقل ضریب هدف/برداشت ×۱٫۲.
 # نقطه‌ی سقوط سمت سرور ذخیره می‌شه و تا پایان بازی فرستاده نمی‌شه؛ ضریب فقط با ساعت سرور حساب می‌شه.
 # تنظیمات (Railway): ROCKET_MIN_ENTRY / ROCKET_MAX_ENTRY / ROCKET_WAIT / ROCKET_RISE / ROCKET_EDGE / ROCKET_MAX_MULT / ROCKET_MIN_TARGET / ROCKET_GROWTH
 # ---------------------------------------------------------------------------
@@ -1504,6 +1508,7 @@ def _rocket_cfg():
     return {"min_entry": _rk.MIN_ENTRY, "max_entry": _rk.MAX_ENTRY, "max_mult": _rk.MAX_MULT, "min_target": _rk.MIN_TARGET,
             "growth": _rk.GROWTH, "rise": _rk.RISE, "start": _rk.START, "wait": _rk.WAIT, "edge": _rk.EDGE,
             "entry_fixed": _rk.MIN_ENTRY,  # ورود ثابت ۵۰هزار
+            "manual_allowed": True, "min_cashout": _rk.MIN_TARGET,  # ورود بدون ضریب + برداشت دستی
             "stars_redeem_min": _rk.STARS_REDEEM_MIN,
             "stars_redeem_reward": _rk.STARS_REDEEM_REWARD}
 
@@ -1573,7 +1578,7 @@ def rocket_state(tg_user: dict = Depends(current_telegram_user)):
 
 class RocketStart(BaseModel):
     amount: int            # روب‌پوینت
-    target: float          # ضریب هدف (مثلاً ۲)
+    target: Optional[float] = None   # ضریب هدف (اختیاری)؛ خالی/۰ = بدون ضریب و برداشت دستی
 
 
 @app.post("/api/rocket/bet")
@@ -1597,9 +1602,13 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
         if int(body.amount or 0) not in (0, amount):
             # اگر کلاینت مبلغ دیگری فرستاد، فقط مبلغ ثابت پذیرفته می‌شود
             amount = int(_rk.MIN_ENTRY)
-        target = round(float(body.target), 2)
-        if not _rk.valid_target(target):
-            raise HTTPException(status_code=400, detail=f"ضریب هدف باید بین ×{_rk.MIN_TARGET:g} و ×{_rk.MAX_MULT:g} باشه (حداکثر دو رقم اعشار).")
+        # ضریب هدف اختیاری است: بدون ضریب (None/۰) = ورود با برداشت دستی (در دیتابیس target=0 ذخیره می‌شود)
+        if body.target is None or float(body.target) <= 0:
+            target = 0.0
+        else:
+            target = round(float(body.target), 2)
+            if not _rk.valid_target(target):
+                raise HTTPException(status_code=400, detail=f"ضریب هدف باید بین ×{_rk.MIN_TARGET:g} و ×{_rk.MAX_MULT:g} باشه (حداکثر دو رقم اعشار) — یا خالی بذار تا خودت برداشت کنی.")
         if _rk.get_active(session, user.telegram_id):
             raise HTTPException(status_code=409, detail="✅ برای همین پرواز قبلاً شرط بستی.")
         if int(user.fox_points or 0) < amount:
@@ -1612,7 +1621,7 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
             session.rollback()
             raise HTTPException(status_code=409, detail="✅ برای همین پرواز قبلاً شرط بستی.")
         session.commit()
-        return {"ok": True, "bet": amount, "target": target, "round_id": int(rnd["id"]),
+        return {"ok": True, "bet": amount, "target": target, "manual": target <= 0, "round_id": int(rnd["id"]),
                 "rob_points": int(user.fox_points or 0),
                 "rocket_stars": int(getattr(user, "rocket_stars", 0) or 0)}
     except HTTPException:
@@ -1649,6 +1658,46 @@ def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
         raise
     except Exception as e:  # noqa: BLE001
         _rocket_fail(session, e, "cancel")
+    finally:
+        session.close()
+
+
+@app.post("/api/rocket/cashout")
+def rocket_cashout(tg_user: dict = Depends(current_telegram_user)):
+    """برداشت دستی: وسط پرواز، «ورودی × ضریبِ همین لحظه» (طبق ساعت سرور) واریز می‌شود.
+    عمداً قفل ORM روی کاربر نمی‌گیریم؛ ترتیب قفل‌ها مثل حلقهٔ تسویه است (اول شرط، بعد کاربر) تا deadlock نشود."""
+    _rocket_access_guard(tg_user)
+    session = get_session()
+    try:
+        now = _time.time()
+        _rk.settle_all(session, now)   # اگه همین الان خودکار تموم شده باشه، اول تسویه می‌شه
+        session.commit()
+        uid = int(tg_user["id"])
+        g = _rk.get_active(session, uid)
+        if not g:
+            raise HTTPException(status_code=409, detail="💥 شرط فعالی نداری (احتمالاً پرواز همین الان تموم شد).")
+        res, err = _rk.manual_cashout(session, g, now)
+        if err:
+            msgs = {
+                "not_flying": "🚀 موشک هنوز پرتاب نشده.",
+                "too_early": f"⏳ برداشت از ×{_rk.MIN_TARGET:g} فعال می‌شه.",
+                "crashed": "💥 دیر شد؛ موشک سقوط کرد.",
+                "settled": "این شرط همین الان تموم شد.",
+            }
+            session.rollback()
+            raise HTTPException(status_code=409, detail=msgs.get(err, "برداشت ممکن نیست."))
+        session.commit()
+        row = session.execute(_sql_text(
+            "SELECT fox_points, rocket_stars FROM users WHERE telegram_id = :u"), {"u": uid}).mappings().first()
+        return {"ok": True, "mult": res["mult"], "payout": res["payout"], "stars": res["stars"],
+                "bet": res["bet"], "target": res["target"],
+                "rob_points": int((row or {}).get("fox_points") or 0),
+                "rocket_stars": int((row or {}).get("rocket_stars") or 0)}
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception as e:  # noqa: BLE001
+        _rocket_fail(session, e, "cashout")
     finally:
         session.close()
 

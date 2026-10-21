@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 """موشک همگانی (Crash) برای مینی‌اپ + بات.
 
-ورود ثابت: ۵۰٬۰۰۰ روب‌پوینت برای هر پرواز.
+ورود ثابت: ۵۰٬۰۰۰ روب‌پوینت برای هر پرواز (چه با ضریب هدف، چه بدون ضریب).
+دو حالت برداشت:
+  ۱) با ضریب هدف: به محض رسیدن موشک به هدف، خودکار برداشت می‌شود.
+  ۲) بدون ضریب (target = 0): بازیکن خودش وسط پرواز «برداشت» می‌زند؛ اگر موشک به سقف برسد خودکار در سقف برداشت می‌شود.
+سقف ضریب: ×۱۰۰.
 هر ضریب کامل که بازیکن با هدفش به آن برسد = ۱ ستاره.
 تبدیل: ۵۰ ستاره → ۱٬۰۰۰٬۰۰۰ روب‌پوینت.
 """
@@ -18,7 +22,7 @@ from sqlalchemy import text
 # ---------- تنظیمات (قابل override با env روی Railway) ----------
 MIN_ENTRY = int(os.environ.get("ROCKET_MIN_ENTRY", "50000"))
 MAX_ENTRY = int(os.environ.get("ROCKET_MAX_ENTRY", "50000"))  # ثابت ۵۰هزار
-MAX_MULT = float(os.environ.get("ROCKET_MAX_MULT", "10"))
+MAX_MULT = float(os.environ.get("ROCKET_MAX_MULT", "100"))  # سقف ضریب موشک
 MIN_TARGET = float(os.environ.get("ROCKET_MIN_TARGET", "1.2"))
 EDGE = float(os.environ.get("ROCKET_EDGE", "0.04"))  # حاشیه خانه
 GROWTH = float(os.environ.get("ROCKET_GROWTH", "0.06"))  # شیب رشد ضریب
@@ -51,13 +55,27 @@ def valid_target(t: float) -> bool:
     return abs(round(t, 2) - t) < 1e-9
 
 
+def is_manual(target) -> bool:
+    """شرط بدون ضریب هدف (برداشت دستی) با target <= 0 ذخیره می‌شود."""
+    try:
+        return float(target or 0) <= 1e-9
+    except (TypeError, ValueError):
+        return True
+
+
+def display_mult(elapsed: float) -> float:
+    """ضریب نمایشی دقیقاً مثل مینی‌اپ: گرد به پایین تا دو رقم اعشار و حداکثر MAX_MULT."""
+    m = mult_at_elapsed(elapsed)
+    return min(MAX_MULT, math.floor(m * 100 + 1e-9) / 100)
+
+
 def roll_crash() -> float:
-    """نقطه سقوط با حاشیه خانه (فرمول استاندارد crash)."""
-    r = random.random()
-    if r < EDGE:
-        return 1.0
-    # (1-edge) / U  — حداقل ۱
-    cp = (1.0 - EDGE) / max(1e-12, r)
+    """نقطه سقوط با حاشیه خانه (فرمول استاندارد crash):
+    P(cp >= x) = (1 - EDGE) / x برای x >= 1، و با احتمال EDGE موشک همان ×۱ سقوط می‌کند.
+    (قبلاً یک شاخهٔ اضافهٔ «r < EDGE → ×۱» بالاترین بخش توزیع را هم به سقوط فوری تبدیل می‌کرد؛
+    نتیجه این بود که هیچ پروازی از حدود ×۲۴ بالاتر نمی‌رفت و سقف ×۱۰۰ عملاً غیرقابل‌رسیدن بود.)"""
+    r = 1.0 - random.random()          # در بازهٔ (0, 1]
+    cp = (1.0 - EDGE) / max(1e-12, r)  # r >= 1-EDGE → cp <= 1 → همان ×۱ (سقوط فوری با احتمال EDGE)
     return min(MAX_MULT * 1.01, max(1.0, cp))
 
 
@@ -289,27 +307,33 @@ def settle_all(session, now: float) -> None:
         liftoff = float(b["liftoff_at"])
         crash_at = float(b["crash_at"])
         cp = float(b["crash_point"])
-        target = float(b["target"])
+        target = float(b["target"] or 0)
         amount = int(b["bet"])
         # هنوز پرواز شروع نشده
         if now < liftoff:
             continue
-        # هنوز به نقطه سقوط نرسیده و هدف هم نرسیده — صبر
-        t_target = elapsed_for_mult(target)
-        reach_at = liftoff + t_target
-        if is_win(cp, target):
-            # برنده وقتی ضریب به هدف برسد
+        if is_manual(target):
+            # بدون ضریب: اگر بازیکن خودش برداشت نکرده باشد، فقط وقتی موشک به سقف برسد
+            # خودکار در سقف برداشت می‌شود؛ در غیر این صورت با سقوط می‌سوزد.
+            win = cp + 1e-12 >= MAX_MULT
+            win_mult = MAX_MULT
+        else:
+            win = is_win(cp, target)
+            win_mult = target
+        reach_at = liftoff + elapsed_for_mult(win_mult)
+        if win:
+            # برنده وقتی ضریب به هدف (یا سقف) برسد
             if now < reach_at:
                 continue
-            pay = payout(amount, target)
-            if not finish_bet(session, int(b["id"]), "cashed", target, pay, now):
+            pay = payout(amount, win_mult)
+            if not finish_bet(session, int(b["id"]), "cashed", win_mult, pay, now):
                 continue
             # واریز روب‌پوینت + ستاره
             session.execute(text("""
                 UPDATE users SET fox_points = COALESCE(fox_points,0) + :p
                 WHERE telegram_id = :u
             """), {"p": pay, "u": int(b["user_id"])})
-            stars = max(0, int(math.floor(target + 1e-9))) * STARS_PER_MULT
+            stars = max(0, int(math.floor(win_mult + 1e-9))) * STARS_PER_MULT
             if stars > 0:
                 session.execute(text("""
                     UPDATE users SET rocket_stars = COALESCE(rocket_stars,0) + :s
@@ -323,6 +347,44 @@ def settle_all(session, now: float) -> None:
             if now < crash_at:
                 continue
             finish_bet(session, int(b["id"]), "crashed", min(cp, MAX_MULT), 0, now)
+
+
+def manual_cashout(session, bet: dict, now: float):
+    """برداشت دستی وسط پرواز. ضریب با ساعت «سرور» حساب می‌شود (نه کلاینت).
+    ترتیب قفل‌ها مثل settle_all است (اول شرط، بعد کاربر) تا deadlock نشود.
+    خروجی: (نتیجه | None, کد_خطا | None)"""
+    liftoff = float(bet["liftoff_at"])
+    crash_at = float(bet["crash_at"])
+    cp = float(bet["crash_point"])
+    if now < liftoff:
+        return None, "not_flying"
+    if now >= crash_at:
+        return None, "crashed"
+    m = display_mult(now - liftoff)
+    if m < MIN_TARGET - 1e-9:
+        return None, "too_early"
+    if m > cp + 1e-9:
+        return None, "crashed"
+    amount = int(bet["bet"])
+    pay = payout(amount, m)
+    if not finish_bet(session, int(bet["id"]), "cashed", m, pay, now):
+        return None, "settled"
+    uid = int(bet["user_id"])
+    session.execute(text("""
+        UPDATE users SET fox_points = COALESCE(fox_points,0) + :p
+        WHERE telegram_id = :u
+    """), {"p": pay, "u": uid})
+    stars = max(0, int(math.floor(m + 1e-9))) * STARS_PER_MULT
+    if stars > 0:
+        session.execute(text("""
+            UPDATE users SET rocket_stars = COALESCE(rocket_stars,0) + :s
+            WHERE telegram_id = :u
+        """), {"s": stars, "u": uid})
+        session.execute(text("""
+            UPDATE rocket_bets SET stars_awarded = :s WHERE id = :id
+        """), {"s": stars, "id": int(bet["id"])})
+    return {"mult": m, "payout": pay, "stars": stars, "bet": amount,
+            "target": float(bet.get("target") or 0)}, None
 
 
 def recent_crashes(session, now: float, limit: int = 12) -> list:
