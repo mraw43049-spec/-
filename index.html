@@ -713,6 +713,50 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
 .rk-flights-btn{display:block;width:100%;margin-top:10px}
 #rkLeaderboard,#rkMyFlights{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;direction:ltr;font-size:12.5px;color:#aeb8d4}
 #rkLeaderboard .rk-chip,#rkMyFlights .rk-chip{font-size:12.5px;padding:7px 12px;background:#161d33;color:#cfd8f5}
+
+/* ---- لیدربورد ۲۴ ساعتهٔ موشک ---- */
+.lb-screen{position:fixed;inset:0;z-index:70;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch;background:#1c1e22;color:#fff;padding:calc(12px + env(safe-area-inset-top)) 14px calc(24px + env(safe-area-inset-bottom))}
+.lb-screen.open{display:block}
+.lb-top{display:flex;align-items:center;justify-content:space-between;direction:rtl}
+.lb-x{border:0;border-radius:999px;background:#2b2e34;color:#fff;font-family:inherit;font-weight:800;font-size:15px;padding:10px 18px}
+.lb-wrap{max-width:520px;margin:0 auto}
+.lb-title{margin:26px 0 4px;text-align:center;font-size:30px;font-weight:900}
+.lb-sub{text-align:center;color:#8a8f99;font-size:14px;margin-bottom:18px}
+.lb-podium{display:grid;grid-template-columns:1fr 1.05fr 1fr;gap:10px;align-items:end;direction:ltr;margin:6px 0 10px;min-height:250px}
+.lb-slot{display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;min-width:0}
+.lb-crown{font-size:26px;line-height:1;margin-bottom:-4px}
+.lb-av{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;font-weight:900;font-size:19px;color:#fff;flex:none;box-shadow:0 2px 8px #0006}
+.lb-av.big{width:62px;height:62px;font-size:28px}
+.lb-slot.r1 .lb-av.big{width:78px;height:78px;font-size:34px;box-shadow:0 0 0 3px #f5c542,0 4px 18px #f5c54255}
+.lb-slot.r2 .lb-av.big{box-shadow:0 0 0 3px #c9d2de}
+.lb-slot.r3 .lb-av.big{box-shadow:0 0 0 3px #d9915a}
+.lb-nm{margin-top:8px;font-size:16px;font-weight:800;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lb-st{margin:3px 0 8px;font-size:15px;font-weight:800;color:#cfd3db;display:flex;align-items:center;gap:5px;direction:ltr}
+.lb-st .rk-star{width:1em;height:1em;fill:#fff;stroke:#fff;stroke-width:2.4;stroke-linejoin:round}
+.lb-step{width:100%;border-radius:14px 14px 0 0;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;background:linear-gradient(180deg,#2b2e34,#1f2126)}
+.lb-step::before{content:"";position:absolute;top:0;left:0;right:0;height:26%;border-radius:14px;background:var(--cap)}
+.lb-step b{position:relative;margin-top:22%;font-size:54px;font-weight:900;color:var(--num)}
+.lb-slot.r1{--cap:linear-gradient(180deg,#ffd75a,#f0a91c);--num:#f5c542}.lb-slot.r1 .lb-step{height:150px}
+.lb-slot.r2{--cap:linear-gradient(180deg,#eef2f7,#aeb8c6);--num:#c9d2de}.lb-slot.r2 .lb-step{height:118px}
+.lb-slot.r3{--cap:linear-gradient(180deg,#f2a66c,#cf6f2e);--num:#d9915a}.lb-slot.r3 .lb-step{height:100px}
+.lb-slot.me .lb-nm{color:#7fb6ff}
+.lb-empty{height:62px;display:flex;align-items:center;color:#555}
+.lb-timer{text-align:center;margin:12px 0 16px;font-size:16px;color:#cfd3db;display:flex;justify-content:center;gap:10px;align-items:center}
+.lb-timer b{color:#f5c542;font-size:24px;font-weight:900;font-variant-numeric:tabular-nums}
+.lb-me{display:flex;align-items:center;justify-content:space-between;direction:rtl;padding:12px 16px;border-radius:26px;background:linear-gradient(90deg,#2b2e34 30%,#6b4a2a);border:1px solid #ffffff22;margin-bottom:12px}
+.lb-me-l{display:flex;align-items:center;gap:12px}
+.lb-me-t{color:#9aa0ab;font-size:14px}
+.lb-me-s{font-size:22px;font-weight:900;display:flex;align-items:center;gap:6px}
+.lb-top-r b{display:flex;align-items:center;gap:6px;font-size:18px;font-weight:800;background:#2b2e34;border-radius:999px;padding:8px 14px;direction:ltr}.lb-top-r .rk-star,.lb-me-s .rk-star,.lb-rs .rk-star{width:1em;height:1em;fill:#fff;stroke:#fff;stroke-width:2.4;stroke-linejoin:round}
+.lb-me-r{font-size:36px;font-weight:900;direction:ltr}
+.lb-list{border-radius:26px;background:#2b2e34;padding:4px 14px}
+.lb-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #ffffff12;direction:ltr}
+.lb-row:last-child{border-bottom:0}
+.lb-row.me{background:#3a4a78;margin:0 -14px;padding:12px 14px}
+.lb-rk{width:26px;text-align:center;color:#8a8f99;font-size:20px;font-weight:800}
+.lb-rn{flex:1;min-width:0;font-size:18px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lb-rs{font-size:18px;font-weight:800;display:flex;align-items:center;gap:5px}
+.lb-none{text-align:center;color:#8a8f99;padding:18px 8px;font-size:14px}
 @media(max-width:380px){#rocketCard{padding:10px 8px 14px}.rk-pill{font-size:15px;padding:0 11px}.rk-go{font-size:18px}.rk-box{font-size:15px;padding:0 12px}}
 
 </style>
@@ -1028,8 +1072,7 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
       <div id="rkPlayers"></div>
     </div>
     <div id="rkExtra">
-      <button id="rkLeaderboardBtn" class="rk-small rk-flights-btn" type="button">🏆 لیدربورد ۲۴ ساعته</button>
-      <div id="rkLeaderboard" style="display:none">درحال بارگذاری…</div>
+      <button id="rkLeaderboardBtn" class="rk-small rk-flights-btn" type="button">🏆 برترین‌های ۲۴ ساعت</button>
       <button id="rkMyFlightsBtn" class="rk-small rk-flights-btn" type="button">✈️ پروازهای من</button>
       <div id="rkMyFlights" style="display:none"></div>
     </div>
@@ -1210,6 +1253,17 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
 </div></div>
 
 <!-- دیالوگ تأیید موشک؛ وجود این عناصر برای ادامه‌ی مقداردهی همه‌ی دکمه‌ها ضروری است. -->
+<div id="rkLb" class="lb-screen" role="dialog" aria-modal="true" aria-label="برترین‌های ۲۴ ساعت">
+  <div class="lb-top"><button id="rkLbClose" class="lb-x" type="button">✕ بستن</button><div class="lb-top-r"><b id="rkStarsLb"></b></div></div>
+  <div class="lb-wrap">
+    <h2 class="lb-title">برترین‌های ۲۴ ساعت</h2>
+    <div class="lb-sub">بر اساس ستاره‌ی برداشت‌شده از موشک</div>
+    <div class="lb-podium" id="rkLbPodium"></div>
+    <div class="lb-timer"><span>تا ریست بعدی</span> <b id="rkLbTimer" dir="ltr">--:--:--</b></div>
+    <div class="lb-me" id="rkLbMe"></div>
+    <div class="lb-list" id="rkLbList"></div>
+  </div>
+</div>
 <div id="rkConfirm" class="modal" role="dialog" aria-modal="true" aria-labelledby="rkCfTitle">
   <div class="sheet">
     <h3 id="rkCfTitle">تأیید عملیات</h3>
@@ -2009,26 +2063,23 @@ function __rubyMain(){
   var rkRid = 0, rkLift = 0, rkMe = null, rkPlayers = [], rkRecent = [], rkFrozen = null, rkLastRound = 0;
   var rkCrashAt = 0, rkCrashShow = false, rkFinal = 1, rkAltEnd = 0, rkEndPose = null, rkActKey = "", rkPlSig = "", rkHistSig = "";
   var rkParts = [], rkSky = [], rkAuto = false, rkWinToast = 0, rkCashSig = "", rkLocalCash = null, rkChipsBuilt = false;
-  var RK_W = 360, RK_H = 300, RK_S = 0.36;
+  var RK_W = 360, RK_H = 300, RK_S = 0.5;
   (function(){
     for (var i = 0; i < 52; i++) rkSky.push({ x: Math.random(), y: Math.random(), s: Math.random() < 0.55 ? 2 : 3, sp: 0.35 + Math.random() * 0.9, ph: Math.random() * 6.28 });
   })();
   function rkX(m){ return "x" + Number(m).toFixed(2); }
-  function rkStarN(n){ return fa(n) + " " + RK_STAR; }
+  function rkNumS(n){ n = Math.round((Number(n) || 0) * 100) / 100; return n.toLocaleString("fa-IR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
+  function rkStarN(n){ return rkNumS(n) + " " + RK_STAR; }
   function rkElapsed(){ return rkRid ? (Date.now() - rkLift) / 1000 : 99; }
   function rkSmooth(u){ return u * u * (3 - 2 * u); }
-  function rkStart(){ return (rocket && typeof rocket.start === "number") ? rocket.start : -1.5; }
+  function rkStart(){ return 1; }
   function rkDisp(t){
-    if (!rocket || t <= 0) return rkStart();
-    var R = rocket.rise, S0 = rkStart();
-    if (t < R) return S0 + (1 - S0) * rkSmooth(t / R);
-    return Math.min(rocket.max_mult, Math.floor(Math.exp(rocket.growth * (t - R)) * 100 + 1e-9) / 100);
+    if (!rocket || t <= 0) return 1;
+    return Math.min(rocket.max_mult, Math.max(1, Math.floor(Math.exp(rocket.growth * t) * 100 + 1e-9) / 100));
   }
   function rkAltT(t){
     if (!rocket || t <= 0) return 0;
-    var R = rocket.rise;
-    if (t < R) return 0.25 * rkSmooth(t / R);
-    return 0.25 + Math.min(Math.log(rocket.max_mult), rocket.growth * (t - R));
+    return 0.25 * (1 - Math.exp(-t * 1.6)) + Math.min(Math.log(rocket.max_mult), rocket.growth * t);
   }
   function rkDispNow(){ return rkRid ? rkDisp(rkElapsed()) : rkStart(); }
   function rkColor(m){ return m < 0 ? "#ff8a8a" : (m < 2 ? "#ffffff" : (m < 5 ? "#9ff0ff" : (m < 10 ? "#7dffb3" : "#ffe08a"))); }
@@ -2041,13 +2092,11 @@ function __rubyMain(){
   function rkConn(ok){ var el = $("rkConn"); if (el) el.classList.toggle("off", !ok); }
 
   // ---------- صحنه: آسمان شب با ستاره‌های پیکسلی + هواپیمای کاغذی با دو شعلهٔ فیروزه‌ای ----------
-  // مختصات هواپیما نسبت به مرکز (واحد: پیکسلِ عکس مرجع)؛ در رسم در RK_S ضرب می‌شه.
-  var PL_T = [187, -173], PL_L = [-183, -45], PL_F = [-78, -20], PL_B = [-55, 125], PL_R = [150, 95], PL_M = [22, 40];
-  var RK_DX = -0.93, RK_DY = 0.37;   // جهت خروج شعله (پایین‌چپ)
-  var RK_JETS = [[-118, -30], [-64, 58]];
+  // ---------- موشک واقعی (بدنهٔ سفید، دماغهٔ قرمز، پنجره، دو بال، شعلهٔ نارنجی) ----------
+  // مختصات نسبت به مرکز موشک؛ در رسم در RK_S ضرب می‌شه. نازل پایین موشک: y = 74
   function rkPose(alt){
     var climb = Math.min(1, alt / 1.6);
-    return { x: RK_W / 2 + 14, y: 172 - climb * 20, cam: alt * 110 };
+    return { x: RK_W / 2, y: 168 - climb * 18, cam: alt * 110 };
   }
   function rkSpawn(type, x, y, o){
     if (rkParts.length > 240) return;
@@ -2059,19 +2108,18 @@ function __rubyMain(){
     var i, a, sp;
     if (crashed) {
       for (i = 0; i < 70; i++) { a = Math.random() * 6.2832; sp = 60 + Math.random() * 280; rkSpawn("spark", x, y, { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 200, life: 0.5 + Math.random() * 0.9, r: 1.6 + Math.random() * 2.4 }); }
-      for (i = 0; i < 16; i++) { a = Math.random() * 6.2832; sp = 70 + Math.random() * 170; rkSpawn("debris", x, y, { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 30, g: 300, life: 1.1 + Math.random() * 0.9, r: 2.5 + Math.random() * 3.5, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 14, c: ["#e8f1fa", "#a9c0d3", "#6f8aa3", "#4d667d"][i % 4] }); }
+      for (i = 0; i < 16; i++) { a = Math.random() * 6.2832; sp = 70 + Math.random() * 170; rkSpawn("debris", x, y, { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 30, g: 300, life: 1.1 + Math.random() * 0.9, r: 2.5 + Math.random() * 3.5, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 14, c: ["#ffffff", "#dfe6f3", "#e5484d", "#8f9dbb"][i % 4] }); }
     } else {
       for (i = 0; i < 40; i++) { a = -Math.PI / 2 + (Math.random() - 0.5) * 2.6; sp = 80 + Math.random() * 230; rkSpawn("pix", x, y, { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 340, life: 0.9 + Math.random() * 0.8, r: 2 + Math.random() * 2.2 }); }
     }
   }
   function rkStep(dt, pose, flying){
-    var i, p, n, j;
+    var i, p, n;
     if (flying) {
       n = Math.min(3, Math.round(dt * 80));
       for (i = 0; i < n; i++) {
-        j = RK_JETS[i % 2];
-        rkSpawn("fire", pose.x + (j[0] + RK_DX * 40) * RK_S + (Math.random() - 0.5) * 8, pose.y + (j[1] + RK_DY * 40) * RK_S + (Math.random() - 0.5) * 8,
-          { vx: RK_DX * (80 + Math.random() * 100), vy: RK_DY * (80 + Math.random() * 100), life: 0.3 + Math.random() * 0.3, r: 1.1 + Math.random() * 1.5 });
+        rkSpawn("fire", pose.x + (Math.random() - 0.5) * 12, pose.y + 90 * RK_S + Math.random() * 6,
+          { vx: (Math.random() - 0.5) * 36, vy: 90 + Math.random() * 110, life: 0.3 + Math.random() * 0.3, r: 1.2 + Math.random() * 1.6 });
       }
     }
     for (i = rkParts.length - 1; i >= 0; i--) {
@@ -2085,72 +2133,77 @@ function __rubyMain(){
     for (i = 0; i < rkParts.length; i++) {
       p = rkParts[i]; k = p.life / p.max;
       c.globalAlpha = Math.max(0, Math.min(1, k * 1.4));
-      if (p.t === "fire") { c.fillStyle = k > 0.55 ? "#d8fff4" : "#35e0c0"; c.fillRect(p.x - p.r, p.y - p.r, p.r * 2, p.r * 2); }
-      else if (p.t === "spark") { c.fillStyle = k > 0.5 ? "#ffffff" : "#5be7ff"; c.fillRect(p.x - p.r * 0.5, p.y - p.r * 0.5, p.r, p.r); }
+      if (p.t === "fire") { c.fillStyle = k > 0.6 ? "#fff3b8" : (k > 0.3 ? "#ffb02e" : "#ff6a1f"); c.fillRect(p.x - p.r, p.y - p.r, p.r * 2, p.r * 2); }
+      else if (p.t === "spark") { c.fillStyle = k > 0.5 ? "#ffffff" : "#ffb347"; c.fillRect(p.x - p.r * 0.5, p.y - p.r * 0.5, p.r, p.r); }
       else if (p.t === "pix") { c.fillStyle = "#ffffff"; c.fillRect(p.x - p.r, p.y - p.r, p.r * 2, p.r * 2); }
       else if (p.t === "debris") { c.save(); c.translate(p.x, p.y); c.rotate(p.rot); c.fillStyle = p.c; c.fillRect(-p.r, -p.r * 0.6, p.r * 2, p.r * 1.2); c.restore(); }
     }
     c.globalAlpha = 1;
   }
-  // یک شعلهٔ راه‌راه فیروزه‌ای/سبز (سه لایه) که از (bx,by) به جهت (dx,dy) می‌ره
-  function rkJet(c, bx, by, dx, dy, len, wid){
-    var nx = -dy, ny = dx, i, k, g;
-    c.save();
-    c.globalCompositeOperation = "lighter";
-    var gx = bx + dx * len * 0.4, gy = by + dy * len * 0.4;
-    g = c.createRadialGradient(gx, gy, 2, gx, gy, len * 0.85);
-    g.addColorStop(0, "rgba(40,255,200,.42)"); g.addColorStop(1, "rgba(0,150,200,0)");
-    c.fillStyle = g; c.beginPath(); c.arc(gx, gy, len * 0.85, 0, 6.2832); c.fill();
-    var lay = [[1, 1, "rgba(0,185,170,.8)"], [0.68, 0.78, "rgba(70,255,175,.88)"], [0.34, 0.5, "rgba(225,255,242,.95)"]];
+  function rkBodyPath(c){
+    c.beginPath(); c.moveTo(0, -112);
+    c.bezierCurveTo(30, -88, 38, -42, 36, 56);
+    c.lineTo(-36, 56);
+    c.bezierCurveTo(-38, -42, -30, -88, 0, -112);
+    c.closePath();
+  }
+  function rkFin(c){
+    var g = c.createLinearGradient(-78, 0, -34, 0);
+    g.addColorStop(0, "#9d1d28"); g.addColorStop(1, "#e5484d");
+    c.beginPath(); c.moveTo(-33, 2); c.quadraticCurveTo(-50, 30, -78, 70); c.lineTo(-78, 94); c.lineTo(-33, 60); c.closePath();
+    c.fillStyle = g; c.fill(); c.lineWidth = 3; c.lineJoin = "round"; c.strokeStyle = "rgba(60,12,20,.65)"; c.stroke();
+    c.strokeStyle = "rgba(255,255,255,.35)"; c.lineWidth = 2.5; c.beginPath(); c.moveTo(-36, 10); c.quadraticCurveTo(-52, 34, -72, 66); c.stroke();
+  }
+  function rkFlame(c, len, wid){
+    var y0 = 72, i, L, w, lay = [[1, 1, "rgba(255,110,25,.92)"], [0.66, 0.76, "rgba(255,196,58,.96)"], [0.34, 0.5, "rgba(255,252,228,1)"]];
+    var g = c.createRadialGradient(0, y0 + len * 0.35, 4, 0, y0 + len * 0.35, len * 0.9);
+    c.save(); c.globalCompositeOperation = "lighter";
+    g.addColorStop(0, "rgba(255,170,60,.38)"); g.addColorStop(1, "rgba(255,90,20,0)");
+    c.fillStyle = g; c.beginPath(); c.arc(0, y0 + len * 0.35, len * 0.9, 0, 6.2832); c.fill();
+    c.restore();
     for (i = 0; i < 3; i++) {
-      var w = wid * lay[i][0], L = len * lay[i][1];
+      w = wid * lay[i][0]; L = len * lay[i][1];
       c.fillStyle = lay[i][2]; c.beginPath();
-      c.moveTo(bx + nx * w, by + ny * w);
-      c.quadraticCurveTo(bx + dx * L * 0.55 + nx * w * 0.85, by + dy * L * 0.55 + ny * w * 0.85, bx + dx * L, by + dy * L);
-      c.quadraticCurveTo(bx + dx * L * 0.55 - nx * w * 0.85, by + dy * L * 0.55 - ny * w * 0.85, bx - nx * w, by - ny * w);
-      c.closePath(); c.fill();
+      c.moveTo(-w, y0); c.bezierCurveTo(-w, y0 + L * 0.55, -w * 0.35, y0 + L * 0.86, 0, y0 + L);
+      c.bezierCurveTo(w * 0.35, y0 + L * 0.86, w, y0 + L * 0.55, w, y0); c.closePath(); c.fill();
     }
-    c.globalCompositeOperation = "source-over";
-    c.strokeStyle = "rgba(4,60,80,.38)"; c.lineWidth = Math.max(1.2, wid * 0.11);
-    for (k = 1; k <= 4; k++) {
-      var t = 0.14 * k, ww = wid * (1 - 0.17 * k), cx = bx + dx * len * t, cy = by + dy * len * t;
-      c.beginPath(); c.moveTo(cx + nx * ww, cy + ny * ww); c.lineTo(cx - nx * ww, cy - ny * ww); c.stroke();
-    }
-    c.restore();
-    // حلقهٔ آبی نازل
-    c.save(); c.translate(bx, by); c.rotate(Math.atan2(dy, dx));
-    g = c.createLinearGradient(0, -wid, 0, wid); g.addColorStop(0, "#1c46c8"); g.addColorStop(0.5, "#4f8bff"); g.addColorStop(1, "#173aa0");
-    c.fillStyle = g; c.beginPath(); c.ellipse(0, 0, wid * 0.34, wid * 1.02, 0, 0, 6.2832); c.fill();
-    c.strokeStyle = "rgba(210,230,255,.7)"; c.lineWidth = 2.4; c.stroke();
-    c.restore();
   }
-  function rkPoly(c, pts, fill, stroke){
-    c.beginPath(); c.moveTo(pts[0][0], pts[0][1]);
-    for (var i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]);
-    c.closePath(); c.fillStyle = fill; c.fill();
-    if (stroke) { c.strokeStyle = stroke; c.lineWidth = 3; c.lineJoin = "round"; c.stroke(); }
-  }
-  function rkPlane(c, x, y, fl, wob){
-    var S = RK_S, g, j, i;
+  function rkRocket(c, x, y, fl, wob){
+    var S = RK_S, g;
     c.save(); c.translate(x, y); c.rotate(wob); c.scale(S, S);
-    // درخشش آبی‌فیروزه‌ای پشت هواپیما
-    g = c.createRadialGradient(0, 10, 10, 0, 10, 330);
-    g.addColorStop(0, "rgba(70,210,235,.30)"); g.addColorStop(1, "rgba(40,120,200,0)");
-    c.fillStyle = g; c.beginPath(); c.arc(0, 10, 330, 0, 6.2832); c.fill();
-    // شعله‌ها (پشت بدنه)
-    if (fl > 0) for (i = 0; i < 2; i++) { j = RK_JETS[i]; rkJet(c, j[0], j[1], RK_DX, RK_DY, 150 * fl * (0.94 + Math.random() * 0.12), 34); }
-    // بدنه: سه وجه
-    g = c.createLinearGradient(PL_L[0], PL_L[1], PL_T[0], PL_T[1]); g.addColorStop(0, "#f4f9fd"); g.addColorStop(1, "#b7cde0");
-    rkPoly(c, [PL_T, PL_L, PL_F], g, "rgba(40,70,100,.45)");
-    g = c.createLinearGradient(PL_T[0], PL_T[1], PL_B[0], PL_B[1]); g.addColorStop(0, "#c9dbea"); g.addColorStop(1, "#6a849c");
-    rkPoly(c, [PL_T, PL_F, PL_B, PL_R], g, "rgba(30,55,85,.5)");
-    g = c.createLinearGradient(PL_F[0], PL_F[1], PL_B[0], PL_B[1]); g.addColorStop(0, "#52697f"); g.addColorStop(1, "#7e97ae");
-    rkPoly(c, [PL_F, PL_B, PL_M], g, "rgba(25,45,70,.55)");
-    // برق لبه‌ها
-    c.strokeStyle = "rgba(255,255,255,.8)"; c.lineWidth = 5; c.lineCap = "round";
-    c.beginPath(); c.moveTo(PL_L[0] + 14, PL_L[1] - 4); c.lineTo(PL_T[0] - 6, PL_T[1] + 6); c.stroke();
-    c.strokeStyle = "rgba(255,255,255,.35)"; c.lineWidth = 3.5;
-    c.beginPath(); c.moveTo(PL_T[0] - 14, PL_T[1] + 22); c.lineTo(PL_R[0] - 8, PL_R[1] - 18); c.stroke();
+    // درخشش نرم پشت موشک
+    g = c.createRadialGradient(0, 10, 10, 0, 10, 250);
+    g.addColorStop(0, "rgba(100,150,255,.22)"); g.addColorStop(1, "rgba(40,80,200,0)");
+    c.fillStyle = g; c.beginPath(); c.arc(0, 10, 250, 0, 6.2832); c.fill();
+    // شعله (پشت بدنه)
+    if (fl > 0) rkFlame(c, 118 * fl * (0.93 + Math.random() * 0.14), 21);
+    // نازل
+    g = c.createLinearGradient(-26, 0, 26, 0); g.addColorStop(0, "#3b4560"); g.addColorStop(0.5, "#7b88a8"); g.addColorStop(1, "#343d57");
+    c.beginPath(); c.moveTo(-21, 54); c.lineTo(21, 54); c.lineTo(27, 78); c.lineTo(-27, 78); c.closePath();
+    c.fillStyle = g; c.fill(); c.lineWidth = 3; c.strokeStyle = "rgba(20,28,50,.7)"; c.stroke();
+    // بال‌ها
+    rkFin(c); c.save(); c.scale(-1, 1); rkFin(c); c.restore();
+    // بدنه
+    g = c.createLinearGradient(-38, 0, 38, 0);
+    g.addColorStop(0, "#b9c4dc"); g.addColorStop(0.32, "#ffffff"); g.addColorStop(0.7, "#e2e8f4"); g.addColorStop(1, "#8794b3");
+    rkBodyPath(c); c.fillStyle = g; c.fill();
+    // دماغهٔ قرمز + نوار آبی (داخل بدنه)
+    c.save(); rkBodyPath(c); c.clip();
+    g = c.createLinearGradient(-38, 0, 38, 0); g.addColorStop(0, "#a81f2b"); g.addColorStop(0.35, "#ff6065"); g.addColorStop(1, "#b32632");
+    c.fillStyle = g; c.beginPath(); c.moveTo(-42, -120); c.lineTo(42, -120); c.lineTo(42, -58); c.quadraticCurveTo(0, -44, -42, -58); c.closePath(); c.fill();
+    c.fillStyle = "#2f6bff"; c.fillRect(-42, 32, 84, 11);
+    c.fillStyle = "rgba(255,255,255,.55)"; c.fillRect(-42, 32, 84, 2.2);
+    c.restore();
+    rkBodyPath(c); c.lineWidth = 3.4; c.lineJoin = "round"; c.strokeStyle = "rgba(25,38,78,.62)"; c.stroke();
+    // برق بدنه
+    c.strokeStyle = "rgba(255,255,255,.7)"; c.lineWidth = 4.5; c.lineCap = "round";
+    c.beginPath(); c.moveTo(-23, -52); c.quadraticCurveTo(-28, -10, -26, 24); c.stroke();
+    // پنجره
+    g = c.createLinearGradient(-20, -26, 20, 10); g.addColorStop(0, "#8d9ab8"); g.addColorStop(1, "#4b5878");
+    c.beginPath(); c.arc(0, -8, 20, 0, 6.2832); c.fillStyle = g; c.fill(); c.lineWidth = 2.5; c.strokeStyle = "rgba(25,38,78,.7)"; c.stroke();
+    g = c.createRadialGradient(-5, -14, 2, 0, -8, 15); g.addColorStop(0, "#d6f1ff"); g.addColorStop(0.45, "#4fb4ff"); g.addColorStop(1, "#1d63d6");
+    c.beginPath(); c.arc(0, -8, 14.5, 0, 6.2832); c.fillStyle = g; c.fill();
+    c.strokeStyle = "rgba(255,255,255,.85)"; c.lineWidth = 2.6; c.beginPath(); c.arc(-1, -9, 9, 3.5, 4.5); c.stroke();
     c.restore();
   }
   function rkDraw(){
@@ -2162,8 +2215,8 @@ function __rubyMain(){
     var ph = rkPhaseNow(), fly = ph === "fly", crashed = ph === "crashed";
     var secsLeft = rkRid ? (rkLift - now) / 1000 : 0;
     var ignite = ph === "wait" && secsLeft < 0.9;
-    var rise = rocket ? rocket.rise : 2, el = fly ? rkElapsed() : 0;
-    var m = fly ? rkDispNow() : (crashed ? rkFinal : -1);
+    var rise = 2, el = fly ? rkElapsed() : 0;
+    var m = fly ? rkDispNow() : (crashed ? rkFinal : 1);
     var alt = fly ? rkAltT(el) : (crashed ? rkAltEnd : 0);
     var pose = crashed && rkEndPose ? rkEndPose : rkPose(alt);
     var shake = 0;
@@ -2191,15 +2244,15 @@ function __rubyMain(){
       if (age < 0.9) {
         var fr = 18 + 60 * Math.min(1, age / 0.35), fa2 = Math.max(0, 1 - age / 0.9);
         c.globalCompositeOperation = "lighter";
-        var fb = c.createRadialGradient(pose.x, pose.y, 2, pose.x, pose.y, fr); fb.addColorStop(0, "rgba(235,255,255," + fa2 + ")"); fb.addColorStop(0.4, "rgba(70,220,235," + fa2 * 0.85 + ")"); fb.addColorStop(1, "rgba(20,90,200,0)");
+        var fb = c.createRadialGradient(pose.x, pose.y, 2, pose.x, pose.y, fr); fb.addColorStop(0, "rgba(255,250,225," + fa2 + ")"); fb.addColorStop(0.4, "rgba(255,170,60," + fa2 * 0.85 + ")"); fb.addColorStop(1, "rgba(220,60,20,0)");
         c.fillStyle = fb; c.beginPath(); c.arc(pose.x, pose.y, fr, 0, 6.2832); c.fill();
         c.globalCompositeOperation = "source-over";
-        c.strokeStyle = "rgba(190,240,255," + Math.max(0, 0.7 - age) + ")"; c.lineWidth = 3; c.beginPath(); c.arc(pose.x, pose.y, 20 + 170 * Math.min(1, age / 0.7), 0, 6.2832); c.stroke();
+        c.strokeStyle = "rgba(255,214,150," + Math.max(0, 0.7 - age) + ")"; c.lineWidth = 3; c.beginPath(); c.arc(pose.x, pose.y, 20 + 170 * Math.min(1, age / 0.7), 0, 6.2832); c.stroke();
       }
     } else {
       var fl = fly ? 1 + Math.min(0.5, alt * 0.12) + Math.sin(now / 38) * 0.08 : (ignite ? 0.95 + Math.random() * 0.2 : (ph === "wait" ? 0.62 + Math.random() * 0.05 : 0));
       var bob = fly ? Math.sin(now / 520) * 1.5 : Math.sin(now / 700) * 3;
-      rkPlane(c, pose.x, pose.y + bob, fl, Math.sin(now / 900) * 0.025);
+      rkRocket(c, pose.x, pose.y + bob, fl, Math.sin(now / 900) * 0.02);
     }
     rkDrawParts(c);
     c.restore();
@@ -2241,14 +2294,14 @@ function __rubyMain(){
     var act = !!rkMe && rkMe.status === "active", show = act && rkPhaseNow() === "fly", sig;
     if (!show) { if (rkCashSig !== "off") { rkCashSig = "off"; b.style.display = "none"; } return; }
     var m = rkDispNow(), ok = m >= rocket.min_target - 1e-9;
-    var html = ok ? ("برداشت <span dir=\"ltr\">" + rkX(m) + " · " + rkStarN(Math.floor(m + 1e-9)) + "</span>") : ("برداشت از " + rkX(rocket.min_target) + " فعال می‌شه");
+    var html = ok ? ("برداشت <span dir=\"ltr\">" + rkX(m) + " · " + rkStarN(m) + "</span>") : ("برداشت از " + rkX(rocket.min_target) + " فعال می‌شه");
     sig = html + "|" + (ok ? 1 : 0) + "|" + (rkBusy ? 1 : 0);
     if (sig === rkCashSig) return; rkCashSig = sig;
     b.style.display = ""; b.innerHTML = html; b.disabled = !ok || rkBusy;
   }
   function rkStatusBadge(p, flying){
     var man = !(p.target > 0);
-    if (p.status === "cashed") return "<span class=\"rk-bd ok\">" + rkX(p.mult || p.target) + " · +" + rkStarN(p.stars || Math.floor((p.mult || p.target || 0) + 1e-9)) + "</span>";
+    if (p.status === "cashed") return "<span class=\"rk-bd ok\">" + rkX(p.mult || p.target) + " · +" + rkStarN(p.stars || (p.mult || p.target || 0)) + "</span>";
     if (p.status === "crashed") return "<span class=\"rk-bd bad\">" + (man ? "💥" : "💥 " + rkX(p.target)) + "</span>";
     if (man) return "<span class=\"rk-bd\">" + (flying ? "دستی · در پرواز" : "دستی") + "</span>";
     return "<span class=\"rk-bd\">" + (flying ? "🔥 " : "🕒 ") + rkX(p.target) + "</span>";
@@ -2285,13 +2338,13 @@ function __rubyMain(){
   }
   function rkKick(){ if (!rkRAF) { rkLastFrame = Date.now() - 16; rkRAF = requestAnimationFrame(rkLoop); } }
   // ---- دریافت وضعیت پرواز از سرور ----
-  function rkWinMsg(stars){ return "🎉 " + fa(stars) + " ستاره گرفتی!"; }
+  function rkWinMsg(stars){ return "🎉 " + rkNumS(stars) + " ستاره گرفتی!"; }
   function rkEndRound(last){
     rkFinal = last.crash_point; rkAltEnd = 0.25 + Math.log(Math.max(1, rkFinal)); rkCrashAt = Date.now(); rkCrashShow = true; rkLastRound = last.id;
     rkEndPose = rkPose(rkAltEnd); rkBurst(!last.capped, rkEndPose.x, rkEndPose.y);
     rkFrozen = (last.players || []).map(function(p){ return p; });
     var mine = last.mine, won = mine && mine.status === "cashed";
-    if (won && rkWinToast !== last.id) { rkWinToast = last.id; toast(rkWinMsg(mine.stars || Math.floor((mine.mult || mine.target || 0) + 1e-9)), true); }
+    if (won && rkWinToast !== last.id) { rkWinToast = last.id; toast(rkWinMsg(mine.stars || (mine.mult || mine.target || 0)), true); }
     try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(won ? "light" : "heavy"); } catch(e){}
     rkPlSig = "";
   }
@@ -2309,7 +2362,7 @@ function __rubyMain(){
     // توقف خودکار وسط پرواز فعال شد
     if (prevMe && prevMe.status === "active" && rkMe && rkMe.status === "cashed" && d.round.phase === "flying" && !rkCrashShow) {
       var pose = rkPose(rkAltT(rkElapsed())); rkBurst(false, pose.x, pose.y);
-      if (rkWinToast !== rkRid) { rkWinToast = rkRid; toast(rkWinMsg(rkMe.stars || Math.floor((rkMe.mult || rkMe.target || 0) + 1e-9)), true); }
+      if (rkWinToast !== rkRid) { rkWinToast = rkRid; toast(rkWinMsg(rkMe.stars || (rkMe.mult || rkMe.target || 0)), true); }
       try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred("success"); } catch(e){}
     }
     rkActKey = ""; rkSyncBal();
@@ -2331,8 +2384,16 @@ function __rubyMain(){
       rkPollBusy = false;
     });
   }
-  function rkStartPoll(){ if (!rkPoll) rkPoll = setInterval(rkPollOnce, 1000); }
-  function rkStopPoll(){ if (rkPoll) { clearInterval(rkPoll); rkPoll = null; } }
+  // هنگام پرواز هر ۰٫۵ ثانیه از سرور می‌پرسیم تا لحظهٔ سقوط دقیق نمایش داده بشه؛ در انتظار هر ۱ ثانیه
+  function rkStartPoll(){
+    if (rkPoll) return; rkPoll = true;
+    (function loop(){
+      if (!rkPoll) return;
+      rkPollOnce();
+      setTimeout(loop, (rkRid && Date.now() >= rkLift) ? 500 : 1000);
+    })();
+  }
+  function rkStopPoll(){ rkPoll = null; }
   document.addEventListener("visibilitychange", function(){ if (!document.hidden && $("rocketCard") && $("rocketCard").style.display !== "none") { rkPollOnce(); rkKick(); } });
   // ---- توقف خودکار: سوییچ + ضریب خروج ----
   function rkTgtVal(){
@@ -2347,7 +2408,7 @@ function __rubyMain(){
   function rkAutoPreview(){
     var el = $("rkAutoStars"); if (!el) return;
     var a = rkTgtVal();
-    el.innerHTML = rkTgtOk(a) ? ("= " + rkStarN(Math.floor(a + 1e-9))) : "";
+    el.innerHTML = rkTgtOk(a) ? ("= " + rkStarN(a)) : "";
   }
   function rkSetAuto(on){
     rkAuto = !!on;
@@ -2369,8 +2430,9 @@ function __rubyMain(){
     if (!rocket) return;
     $("rkBal").textContent = fa(rocket.rob_points || 0);
     var st = rocket.rocket_stars || 0;
-    if ($("rkStars")) $("rkStars").textContent = fa(st);
-    if ($("rkStarsBig")) $("rkStarsBig").textContent = fa(st);
+    if ($("rkStars")) $("rkStars").textContent = rkNumS(st);
+    if ($("rkStarsBig")) $("rkStarsBig").textContent = rkNumS(st);
+    if ($("rkStarsLb")) $("rkStarsLb").innerHTML = rkNumS(st) + " " + RK_STAR;
     if ($("rkAmtTxt")) $("rkAmtTxt").textContent = fa(rkEntry());
     var btn = $("rkStarsRedeem");
     if (btn) {
@@ -2388,8 +2450,49 @@ function __rubyMain(){
       rkSyncBal(); rkStartPoll(); rkKick(); stamp();
     }).catch(function(e){ if (!e.gate) { rkConn(false); toast(e.message, false); } });
   }
-  function rkLoadLeaderboard(){ api("/api/rocket/leaderboard").then(function(d){ var box=$("rkLeaderboard"); box.innerHTML=""; (d.items||[]).forEach(function(x,i){ var row=document.createElement("span"); row.className="rk-chip"; row.textContent=(i+1)+". "+x.player+" — "+rkX(x.best)+" · "+fa(x.games)+" بازی"; box.appendChild(row); }); if(!box.children.length) box.textContent="هنوز رکوردی در ۲۴ ساعت گذشته ثبت نشده."; }).catch(function(){ $("rkLeaderboard").textContent="لیدربورد فعلاً در دسترس نیست."; }); }
-  $("rkLeaderboardBtn").onclick=function(){var box=$("rkLeaderboard"),show=box.style.display==="none";box.style.display=show?"flex":"none";if(show)rkLoadLeaderboard();};
+  // ---------- لیدربورد ۲۴ ساعته (ریست هر شب ۰۰:۰۰ به وقت تهران) ----------
+  var rkLbEnd = 0, rkLbTick = null;
+  var RK_LB_COLORS = [["#3aa0ff", "#1f6fe0"], ["#8b6cff", "#5a3ee0"], ["#34d399", "#12926a"], ["#f59e0b", "#c26a05"], ["#f472b6", "#c0357f"], ["#22d3ee", "#0e8fb0"]];
+  function rkAvatar(name, key, big){
+    var ch = (String(name || "?").trim().charAt(0) || "?").toUpperCase(), c = RK_LB_COLORS[Math.abs(key | 0) % RK_LB_COLORS.length];
+    return '<span class="lb-av' + (big ? " big" : "") + '" style="background:linear-gradient(145deg,' + c[0] + "," + c[1] + ')">' + ch.replace(/</g, "&lt;") + "</span>";
+  }
+  function rkEsc(t){ return String(t).replace(/[&<>"]/g, function(m){ return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[m]; }); }
+  function rkLbClock(){
+    var left = Math.max(0, Math.floor((rkLbEnd - Date.now()) / 1000)), el = $("rkLbTimer");
+    if (el) el.textContent = pad2(Math.floor(left / 3600)) + ":" + pad2(Math.floor(left % 3600 / 60)) + ":" + pad2(left % 60);
+    if (left <= 0 && $("rkLb").classList.contains("open")) { rkLbEnd = Date.now() + 5000; rkLoadLeaderboard(); }
+  }
+  function pad2(n){ return (n < 10 ? "0" : "") + n; }
+  function rkLoadLeaderboard(){
+    api("/api/rocket/leaderboard").then(function(d){
+      var items = d.items || [], i, html = "", pod = "", it;
+      rkLbEnd = Date.now() + (d.ends_in || 0) * 1000; rkLbClock();
+      // سکوی ۳ نفر اول: ۲ - ۱ - ۳
+      function slot(rank){
+        var x = items[rank - 1];
+        if (!x) return '<div class="lb-slot r' + rank + '"><div class="lb-empty">—</div><div class="lb-step"><b>' + fa(rank) + "</b></div></div>";
+        return '<div class="lb-slot r' + rank + (x.me ? " me" : "") + '">' + (rank === 1 ? '<div class="lb-crown">👑</div>' : "") + rkAvatar(x.name, x.rank, true) +
+          '<div class="lb-nm">' + rkEsc(x.name) + '</div><div class="lb-st">' + rkNumS(x.stars) + " " + RK_STAR + '</div><div class="lb-step"><b>' + fa(rank) + "</b></div></div>";
+      }
+      pod = slot(2) + slot(1) + slot(3);
+      $("rkLbPodium").innerHTML = pod;
+      var me = d.me || {};
+      $("rkLbMe").innerHTML = '<div class="lb-me-l">' + rkAvatar("من", 0, true) + '<div><div class="lb-me-t">مکان شما</div><div class="lb-me-s">' + rkNumS(me.stars || 0) + " " + RK_STAR + '</div></div></div><div class="lb-me-r">' + (me.rank ? ("#" + fa(me.rank)) : "—") + "</div>";
+      for (i = 3; i < items.length; i++) {
+        it = items[i];
+        html += '<div class="lb-row' + (it.me ? " me" : "") + '"><span class="lb-rk">' + fa(it.rank) + "</span>" + rkAvatar(it.name, it.rank, false) +
+          '<span class="lb-rn">' + rkEsc(it.name) + '</span><span class="lb-rs">' + rkNumS(it.stars) + " " + RK_STAR + "</span></div>";
+      }
+      $("rkLbList").innerHTML = html || (items.length ? "" : '<div class="lb-none">هنوز کسی امروز ستاره‌ای برداشت نکرده؛ اولین نفر باش! 🚀</div>');
+    }).catch(function(){ $("rkLbList").innerHTML = '<div class="lb-none">لیدربورد فعلاً در دسترس نیست.</div>'; });
+  }
+  $("rkLeaderboardBtn").onclick = function(){
+    $("rkLb").classList.add("open"); document.body.style.overflow = "hidden";
+    $("rkLbList").innerHTML = '<div class="lb-none">درحال بارگذاری…</div>';
+    rkLoadLeaderboard(); if (!rkLbTick) rkLbTick = setInterval(rkLbClock, 1000);
+  };
+  $("rkLbClose").onclick = function(){ $("rkLb").classList.remove("open"); document.body.style.overflow = ""; if (rkLbTick) { clearInterval(rkLbTick); rkLbTick = null; } };
   $("rkMyFlightsBtn").onclick=function(){
     var box=$("rkMyFlights"), show=box.style.display==="none"; box.style.display=show?"flex":"none";
     $("rkMyFlightsBtn").textContent=show?"✈️ بستن پروازهای من":"✈️ پروازهای من";
@@ -2398,7 +2501,7 @@ function __rubyMain(){
       box.innerHTML=""; var items=d.items||[];
       if(!items.length){ box.textContent="هنوز پروازی ثبت نشده."; return; }
       items.forEach(function(h){ var row=document.createElement("span"); row.className="rk-chip";
-        row.innerHTML=(h.status==="cashed"?(rkX(h.mult||h.target)+" · +"+rkStarN(h.stars||Math.floor((h.mult||h.target||0)+1e-9))):("💥 "+(h.target>0?("هدف "+rkX(h.target)):"دستی")+(h.crash?" · سقوط "+rkX(h.crash):""))); box.appendChild(row); });
+        row.innerHTML=(h.status==="cashed"?(rkX(h.mult||h.target)+" · +"+rkStarN(h.stars||(h.mult||h.target||0))):("💥 "+(h.target>0?("هدف "+rkX(h.target)):"دستی")+(h.crash?" · سقوط "+rkX(h.crash):""))); box.appendChild(row); });
     }).catch(function(e){ box.textContent=e.message; });
   };
   // تبدیل ستاره
@@ -2417,7 +2520,7 @@ function __rubyMain(){
         rkBusy = false;
         var q = d.quote || {};
         $("rkCfTitle").textContent = "تبدیل ستاره به روب‌پوینت";
-        $("rkCfBody").innerHTML = "با <b>" + fa(q.stars_spent || need) + "</b> " + RK_STAR + " ستاره، <b>" + fa(q.reward || 1000000) + "</b> " + RK_COIN + " روب‌پوینت می‌گیری.<br>ستاره‌ها بعد از تبدیل: <b>" + fa(q.stars_after || 0) + "</b>";
+        $("rkCfBody").innerHTML = "با <b>" + fa(q.stars_spent || need) + "</b> " + RK_STAR + " ستاره، <b>" + fa(q.reward || 1000000) + "</b> " + RK_COIN + " روب‌پوینت می‌گیری.<br>ستاره‌ها بعد از تبدیل: <b>" + rkNumS(q.stars_after || 0) + "</b>";
         $("rkConfirm").classList.add("open");
         $("rkCfYes").onclick = function(){
           if (rkBusy) return;
@@ -2457,8 +2560,9 @@ function __rubyMain(){
   // برداشت دستی وسط پرواز؛ ضریب نهایی را «سرور» با ساعت خودش حساب می‌کنه
   $("rkCash").onclick = function(){
     if (rkBusy || !rocket || !rkMe || rkMe.status !== "active" || rkPhaseNow() !== "fly") return;
+    var shownMult = rkDispNow();   // دقیقاً همون ضریبی که لحظهٔ زدن دکمه روی صفحه بود
     rkBusy = true; rkActKey = ""; rkCashSig = "";
-    api("/api/rocket/cashout", "POST").then(function(r){
+    api("/api/rocket/cashout", "POST", { mult: shownMult }).then(function(r){
       rocket.rob_points = r.rob_points; if (typeof r.rocket_stars === "number") rocket.rocket_stars = r.rocket_stars;
       rkMe = { bet: r.bet, target: r.target || 0, status: "cashed", mult: r.mult, payout: 0, stars: r.stars };
       rkLocalCash = { rid: rkRid, me: rkMe, st: r.rocket_stars, until: Date.now() + 2500 };

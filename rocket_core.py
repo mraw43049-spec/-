@@ -3,11 +3,12 @@
 
 ورود ثابت: ۵۰٬۰۰۰ روب‌پوینت برای هر پرواز.
 جایزه فقط ⭐ ستاره است؛ برد هیچ روب‌پوینتی پس نمی‌دهد (ورودی همیشه خرج می‌شود).
+تعداد ستاره = دقیقاً همان ضریبی که بازیکن برداشت کرده (مثلاً برداشت روی ×۱٫۵۰ = ۱٫۵ ستاره).
 دو حالت برداشت:
   ۱) توقف خودکار روشن (target > 0): به محض رسیدن موشک به ضریبِ واردشده، خودکار برداشت می‌شود.
   ۲) توقف خودکار خاموش (target = 0): بازیکن خودش وسط پرواز «برداشت» می‌زند؛ اگر موشک به سقف برسد خودکار در سقف برداشت می‌شود.
 سقف ضریب: ×۱۰۰.
-هر ضریب کامل که بازیکن با هدفش به آن برسد = ۱ ستاره.
+هر ۱٫۰۰ ضریب = ۱ ستاره (اعشار تا دو رقم حفظ می‌شود).
 تبدیل: ۵۰ ستاره → ۱٬۰۰۰٬۰۰۰ روب‌پوینت.
 """
 from __future__ import annotations
@@ -27,17 +28,24 @@ MAX_MULT = float(os.environ.get("ROCKET_MAX_MULT", "100"))  # سقف ضریب م
 MIN_TARGET = float(os.environ.get("ROCKET_MIN_TARGET", "1.2"))
 EDGE = float(os.environ.get("ROCKET_EDGE", "0.04"))  # حاشیه خانه
 GROWTH = float(os.environ.get("ROCKET_GROWTH", "0.06"))  # شیب رشد ضریب
-RISE = float(os.environ.get("ROCKET_RISE", "12"))  # ثانیه تقریبی تا سقف
-START = float(os.environ.get("ROCKET_START", "-1.5"))
+# ضریب از لحظهٔ پرتاب دقیقاً از ×۱٫۰۰ شروع می‌شود (بدون مرحلهٔ منفی/مکث). این دو مقدار عمداً ثابت‌اند و env نمی‌گیرند.
+RISE = 0.0
+START = 1.0
+MIN_FLIGHT = 0.6  # حداقل مدت پرواز (ثانیه)؛ پرواز با سقوط ×۱٫۰۰ هم یک دور واقعی (crash_at > liftoff_at) می‌ماند
 WAIT = float(os.environ.get("ROCKET_WAIT", "10"))  # ثانیه شرط‌بندی
 COOLDOWN = float(os.environ.get("ROCKET_COOLDOWN", "10"))  # بین پروازها
 BUY_RATE = int(os.environ.get("ROCKET_BUY_RATE", "1000"))  # روب‌پوینت برای ۱ روب‌تون
 SELL_RATE = int(os.environ.get("ROCKET_SELL_RATE", "800"))
 
 # سیستم ستاره
-STARS_PER_MULT = 1  # هر ۱ ضریب = ۱ ستاره
+STARS_PER_MULT = 1  # هر ۱٫۰۰ ضریب = ۱ ستاره (اعشاری)
 STARS_REDEEM_MIN = 50
 STARS_REDEEM_REWARD = 1_000_000  # روب‌پوینت
+
+
+def stars_for(mult: float) -> float:
+    """ستارهٔ برداشت = همان ضریب (گرد به دو رقم اعشار)."""
+    return round(max(0.0, float(mult)) * STARS_PER_MULT + 1e-9, 2)
 
 
 def payout(amount: int, target: float) -> int:
@@ -86,18 +94,15 @@ def is_win(crash_point: float, target: float) -> bool:
 
 def mult_at_elapsed(elapsed: float) -> float:
     """ضریب نمایشی بر اساس زمان از liftoff؛ دقیقاً هم‌ساعت با مینی‌اپ:
-    RISE ثانیه اول از START تا ×۱ بالا می‌رود، بعدش نمایی رشد می‌کند."""
+    از ×۱٫۰۰ شروع و بلافاصله نمایی رشد می‌کند (بدون مرحلهٔ منفی)."""
     if elapsed <= 0:
         return START
-    if elapsed < RISE:
-        u = elapsed / RISE
-        return START + (1.0 - START) * (u * u * (3 - 2 * u))
-    return min(MAX_MULT, math.exp(GROWTH * (elapsed - RISE)))
+    return min(MAX_MULT, max(START, math.exp(GROWTH * elapsed)))
 
 
 def elapsed_for_mult(mult: float) -> float:
-    """چند ثانیه بعد از liftoff ضریب به mult می‌رسد (با احتساب RISE ثانیه‌ی اول)."""
-    return RISE + math.log(max(1.0, mult)) / max(1e-9, GROWTH)
+    """چند ثانیه بعد از liftoff ضریب به mult می‌رسد."""
+    return math.log(max(1.0, mult)) / max(1e-9, GROWTH)
 
 
 def ensure_table(engine) -> None:
@@ -122,7 +127,7 @@ def ensure_table(engine) -> None:
                 status VARCHAR(20) NOT NULL DEFAULT 'active',
                 final_mult DOUBLE PRECISION,
                 payout INTEGER NOT NULL DEFAULT 0,
-                stars_awarded INTEGER NOT NULL DEFAULT 0,
+                stars_awarded DOUBLE PRECISION NOT NULL DEFAULT 0,
                 created_at DOUBLE PRECISION NOT NULL,
                 ended_at DOUBLE PRECISION,
                 UNIQUE (round_id, user_id)
@@ -142,7 +147,7 @@ def ensure_table(engine) -> None:
         "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'",
         "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS final_mult DOUBLE PRECISION",
         "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS payout INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS stars_awarded INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS stars_awarded DOUBLE PRECISION NOT NULL DEFAULT 0",
         "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS created_at DOUBLE PRECISION NOT NULL DEFAULT 0",
         "ALTER TABLE rocket_bets ADD COLUMN IF NOT EXISTS ended_at DOUBLE PRECISION",
         "CREATE INDEX IF NOT EXISTS ix_rocket_bets_user ON rocket_bets (user_id)",
@@ -154,6 +159,28 @@ def ensure_table(engine) -> None:
                 conn.execute(text(st))
         except Exception:
             pass
+
+    # ستاره‌ها اعشاری شدند (مثلاً ۱٫۵ ستاره): نوع ستون‌های قدیمیِ INTEGER به عدد اعشاری تبدیل می‌شود (فقط یک‌بار، داده‌ها حفظ می‌شوند)
+    try:
+        if engine.dialect.name == "postgresql":
+            for tbl, col, new_t, using in (
+                ("rocket_bets", "stars_awarded", "DOUBLE PRECISION", "stars_awarded::double precision"),
+                ("users", "rocket_stars", "NUMERIC(14,2)", "rocket_stars::numeric"),
+            ):
+                try:
+                    with engine.begin() as conn:
+                        dt = conn.execute(text(
+                            "SELECT data_type FROM information_schema.columns "
+                            "WHERE table_schema = current_schema() AND table_name = :t AND column_name = :c"),
+                            {"t": tbl, "c": col}).scalar()
+                        if dt in ("integer", "bigint", "smallint"):
+                            conn.execute(text('ALTER TABLE "%s" ALTER COLUMN "%s" DROP DEFAULT' % (tbl, col)))
+                            conn.execute(text('ALTER TABLE "%s" ALTER COLUMN "%s" TYPE %s USING %s' % (tbl, col, new_t, using)))
+                            conn.execute(text('ALTER TABLE "%s" ALTER COLUMN "%s" SET DEFAULT 0' % (tbl, col)))
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     # ستون‌های قدیمی که کد فعلی پرشون نمی‌کنه ولی NOT NULL و بدون پیش‌فرضن، INSERT رو با خطای ۵۰۰ می‌شکنن.
     # فقط NOT NULL اون ستون‌ها برداشته می‌شه (چیزی حذف نمی‌شه).
@@ -235,7 +262,7 @@ def ensure_round(session, now: float) -> dict:
         liftoff = max(liftoff, float(last["crash_at"]) + COOLDOWN)
 
     cp = roll_crash()
-    crash_at = liftoff + elapsed_for_mult(min(cp, MAX_MULT))
+    crash_at = liftoff + max(MIN_FLIGHT, elapsed_for_mult(min(cp, MAX_MULT)))
     session.execute(text("""
         INSERT INTO rocket_rounds (crash_point, created_at, liftoff_at, crash_at)
         VALUES (:cp, :c, :l, :ca)
@@ -329,7 +356,7 @@ def settle_all(session, now: float) -> None:
             # جایزه فقط ستاره است؛ روب‌پوینت برنمی‌گردد (payout = 0)
             if not finish_bet(session, int(b["id"]), "cashed", win_mult, 0, now):
                 continue
-            stars = max(0, int(math.floor(win_mult + 1e-9))) * STARS_PER_MULT
+            stars = stars_for(win_mult)
             if stars > 0:
                 session.execute(text("""
                     UPDATE users SET rocket_stars = COALESCE(rocket_stars,0) + :s
@@ -345,8 +372,10 @@ def settle_all(session, now: float) -> None:
             finish_bet(session, int(b["id"]), "crashed", min(cp, MAX_MULT), 0, now)
 
 
-def manual_cashout(session, bet: dict, now: float):
-    """برداشت دستی وسط پرواز. ضریب با ساعت «سرور» حساب می‌شود (نه کلاینت).
+def manual_cashout(session, bet: dict, now: float, claim=None):
+    """برداشت دستی وسط پرواز. سقوط/زمان با ساعت «سرور» تعیین می‌شود (نه کلاینت).
+    ضریبی که بازیکن لحظهٔ زدن دکمه روی صفحه دیده (claim) پذیرفته می‌شود، ولی هرگز بیشتر از ضریب
+    همین لحظهٔ سرور نیست؛ پس تأخیر اینترنت باعث کم‌شدن ستاره نمی‌شود و تقلب هم ممکن نیست.
     ترتیب قفل‌ها مثل settle_all است (اول شرط، بعد کاربر) تا deadlock نشود.
     خروجی: (نتیجه | None, کد_خطا | None)"""
     liftoff = float(bet["liftoff_at"])
@@ -356,17 +385,25 @@ def manual_cashout(session, bet: dict, now: float):
         return None, "not_flying"
     if now >= crash_at:
         return None, "crashed"
-    m = display_mult(now - liftoff)
-    if m < MIN_TARGET - 1e-9:
+    m_srv = display_mult(now - liftoff)
+    if m_srv < MIN_TARGET - 1e-9:
         return None, "too_early"
-    if m > cp + 1e-9:
+    if m_srv > cp + 1e-9:
         return None, "crashed"
+    m = m_srv
+    try:
+        if claim is not None:
+            c = math.floor(float(claim) * 100 + 1e-9) / 100
+            if c >= MIN_TARGET - 1e-9:
+                m = min(m_srv, c)
+    except (TypeError, ValueError):
+        m = m_srv
     amount = int(bet["bet"])
     # جایزه فقط ستاره است؛ روب‌پوینت برنمی‌گردد (payout = 0)
     if not finish_bet(session, int(bet["id"]), "cashed", m, 0, now):
         return None, "settled"
     uid = int(bet["user_id"])
-    stars = max(0, int(math.floor(m + 1e-9))) * STARS_PER_MULT
+    stars = stars_for(m)
     if stars > 0:
         session.execute(text("""
             UPDATE users SET rocket_stars = COALESCE(rocket_stars,0) + :s
@@ -406,7 +443,7 @@ def history(session, user_id: int, now: float, limit: int = 15) -> list:
             "mult": float(r["final_mult"] or 0),
             "crash": float(min(float(r["crash_point"] or 0), MAX_MULT)),
             "payout": int(r["payout"] or 0),
-            "stars": int(r["stars_awarded"] or 0),
+            "stars": float(r["stars_awarded"] or 0),
             "ended_at": float(r["ended_at"] or r["created_at"] or 0),
         })
     return out
@@ -424,7 +461,7 @@ def record_solo(session, user_id: int, amount: int, target: float, cp: float,
     rid = session.execute(text("SELECT id FROM rocket_rounds ORDER BY id DESC LIMIT 1")).scalar()
     stars = 0
     if status == "cashed":
-        stars = max(0, int(math.floor(float(target) + 1e-9))) * STARS_PER_MULT
+        stars = stars_for(float(target))
         if stars > 0:
             session.execute(text("""
                 UPDATE users SET rocket_stars = COALESCE(rocket_stars,0) + :s
@@ -439,3 +476,37 @@ def record_solo(session, user_id: int, amount: int, target: float, cp: float,
         "r": rid, "u": user_id, "b": amount, "t": target, "cp": cp,
         "s": status, "m": final_mult, "p": pay, "st": stars, "n": now,
     })
+
+
+# ---------- لیدربورد ۲۴ ساعته (ریست هر شب ساعت ۰۰:۰۰ به وقت تهران) ----------
+TEHRAN_OFFSET = 12600  # UTC+3:30 (ایران ساعت تابستانی ندارد)
+
+
+def day_window(now: float):
+    """(شروع، پایان) روزِ جاری به وقت تهران به‌صورت timestamp."""
+    start = math.floor((now + TEHRAN_OFFSET) / 86400.0) * 86400.0 - TEHRAN_OFFSET
+    return start, start + 86400.0
+
+
+def daily_board(session, now: float, exclude_ids=()) -> list:
+    """ستارهٔ برداشت‌شدهٔ هر بازیکن در همین بازهٔ ۲۴ ساعته، مرتب از بیشترین."""
+    start, end = day_window(now)
+    rows = session.execute(text("""
+        SELECT b.user_id AS uid,
+               COALESCE(u.username, u.first_name, 'بازیکن') AS name,
+               SUM(b.stars_awarded) AS stars,
+               COUNT(b.id) AS games,
+               MAX(COALESCE(b.final_mult, 0)) AS best
+        FROM rocket_bets b LEFT JOIN users u ON u.telegram_id = b.user_id
+        WHERE b.status = 'cashed' AND b.ended_at >= :s AND b.ended_at < :e AND b.stars_awarded > 0
+        GROUP BY b.user_id, u.username, u.first_name
+        ORDER BY SUM(b.stars_awarded) DESC, COUNT(b.id) DESC, b.user_id ASC
+    """), {"s": start, "e": end}).mappings().all()
+    ex = {int(x) for x in (exclude_ids or ())}
+    out = []
+    for r in rows:
+        if int(r["uid"]) in ex:
+            continue
+        out.append({"uid": int(r["uid"]), "name": str(r["name"]), "stars": round(float(r["stars"] or 0), 2),
+                    "games": int(r["games"] or 0), "best": float(r["best"] or 0)})
+    return out

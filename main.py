@@ -1469,7 +1469,8 @@ def plinko_drop(body: PlinkoDrop, tg_user: dict = Depends(current_telegram_user)
 #  ۱) توقف خودکار روشن (target>۰): اگر موشک قبل از سقوط به ضریب واردشده برسد، خودکار برداشت و ستاره داده می‌شود؛ وگرنه ورودی می‌سوزد.
 #  ۲) توقف خودکار خاموش (target=۰): بازیکن خودش وسط پرواز با /api/rocket/cashout برداشت می‌کند (از ×۱٫۲ به بعد)؛
 #     اگر برداشت نکند و موشک به سقف برسد خودکار در سقف برداشت می‌شود، وگرنه با سقوط می‌سوزد.
-# شمارنده از −۱٫۵ شروع می‌شود تا سقف ×۱۰۰؛ حداقل ضریب هدف/برداشت ×۱٫۲.
+# شمارنده از لحظهٔ پرتاب دقیقاً از ×۱٫۰۰ شروع می‌شود تا سقف ×۱۰۰؛ حداقل ضریب هدف/برداشت ×۱٫۲.
+# ستاره‌ی هر برداشت = همان ضریب (مثلاً ×۱٫۵۰ = ۱٫۵ ستاره، اعشار تا دو رقم).
 # نقطه‌ی سقوط سمت سرور ذخیره می‌شه و تا پایان بازی فرستاده نمی‌شه؛ ضریب فقط با ساعت سرور حساب می‌شه.
 # تنظیمات (Railway): ROCKET_MIN_ENTRY / ROCKET_MAX_ENTRY / ROCKET_WAIT / ROCKET_RISE / ROCKET_EDGE / ROCKET_MAX_MULT / ROCKET_MIN_TARGET / ROCKET_GROWTH
 # ---------------------------------------------------------------------------
@@ -1513,17 +1514,24 @@ def _rocket_cfg():
             "stars_redeem_reward": _rk.STARS_REDEEM_REWARD}
 
 
+def _rk_stars(x):
+    try:
+        return round(float(x or 0), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _rocket_mine(players, uid):
     for p in players:
         if p["uid"] == uid:
             return {"bet": p["bet"], "target": p["target"], "status": p["status"], "mult": p["mult"],
-                    "payout": p["payout"], "stars": int(p.get("stars_awarded") or 0)}
+                    "payout": p["payout"], "stars": _rk_stars(p.get("stars_awarded"))}
     return None
 
 
 def _rocket_public_players(players, uid=None):
     return [{"name": p["name"], "bet": p["bet"], "status": p["status"], "mult": p["mult"],
-             "payout": p["payout"], "stars": int(p.get("stars_awarded") or 0),
+             "payout": p["payout"], "stars": _rk_stars(p.get("stars_awarded")),
              "target": p["target"], "me": (uid is not None and p["uid"] == uid)} for p in players]
 
 
@@ -1550,7 +1558,7 @@ def rocket_state(tg_user: dict = Depends(current_telegram_user)):
             "unlock_level": botmod.CASINO_UNLOCK_LEVEL, "level": int(user.level or 1),
             "disabled": bool(getattr(botmod, "CASINO_DISABLED", False)),
             "rob_points": int(user.fox_points or 0),
-            "rocket_stars": int(getattr(user, "rocket_stars", 0) or 0),
+            "rocket_stars": _rk_stars(getattr(user, "rocket_stars", 0)),
             "round": {"id": int(rnd["id"]), "phase": "flying" if flying else "waiting",
                       "liftoff_in": liftoff - now, "elapsed": max(0.0, now - liftoff)},
             "me": _rocket_mine(pl, uid),
@@ -1624,7 +1632,7 @@ def rocket_bet(body: RocketStart, tg_user: dict = Depends(current_telegram_user)
         session.commit()
         return {"ok": True, "bet": amount, "target": target, "manual": target <= 0, "round_id": int(rnd["id"]),
                 "rob_points": int(user.fox_points or 0),
-                "rocket_stars": int(getattr(user, "rocket_stars", 0) or 0)}
+                "rocket_stars": _rk_stars(getattr(user, "rocket_stars", 0))}
     except HTTPException:
         session.rollback()
         raise
@@ -1663,8 +1671,12 @@ def rocket_cancel(tg_user: dict = Depends(current_telegram_user)):
         session.close()
 
 
+class RocketCash(BaseModel):
+    mult: Optional[float] = None   # ضریبی که بازیکن لحظهٔ زدن دکمه روی صفحه دیده (سرور هرگز بیشتر از ضریب خودش نمی‌دهد)
+
+
 @app.post("/api/rocket/cashout")
-def rocket_cashout(tg_user: dict = Depends(current_telegram_user)):
+def rocket_cashout(body: Optional[RocketCash] = None, tg_user: dict = Depends(current_telegram_user)):
     """برداشت دستی: وسط پرواز، «ورودی × ضریبِ همین لحظه» (طبق ساعت سرور) واریز می‌شود.
     عمداً قفل ORM روی کاربر نمی‌گیریم؛ ترتیب قفل‌ها مثل حلقهٔ تسویه است (اول شرط، بعد کاربر) تا deadlock نشود."""
     _rocket_access_guard(tg_user)
@@ -1677,7 +1689,7 @@ def rocket_cashout(tg_user: dict = Depends(current_telegram_user)):
         g = _rk.get_active(session, uid)
         if not g:
             raise HTTPException(status_code=409, detail="💥 شرط فعالی نداری (احتمالاً پرواز همین الان تموم شد).")
-        res, err = _rk.manual_cashout(session, g, now)
+        res, err = _rk.manual_cashout(session, g, now, claim=(body.mult if body else None))
         if err:
             msgs = {
                 "not_flying": "🚀 موشک هنوز پرتاب نشده.",
@@ -1693,7 +1705,7 @@ def rocket_cashout(tg_user: dict = Depends(current_telegram_user)):
         return {"ok": True, "mult": res["mult"], "payout": res["payout"], "stars": res["stars"],
                 "bet": res["bet"], "target": res["target"],
                 "rob_points": int((row or {}).get("fox_points") or 0),
-                "rocket_stars": int((row or {}).get("rocket_stars") or 0)}
+                "rocket_stars": _rk_stars((row or {}).get("rocket_stars"))}
     except HTTPException:
         session.rollback()
         raise
@@ -1726,17 +1738,17 @@ def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current
     session = get_session()
     try:
         user = _rocket_user_locked(session, tg_user)
-        stars = int(getattr(user, "rocket_stars", 0) or 0)
+        stars = _rk_stars(getattr(user, "rocket_stars", 0))
         need = int(_rk.STARS_REDEEM_MIN)
         reward = int(_rk.STARS_REDEEM_REWARD)
         if stars < need:
             raise HTTPException(
                 status_code=400,
-                detail=f"❌ حداقل {need} ستاره لازم است. الان {stars} ستاره داری.",
+                detail=f"❌ حداقل {need} ستاره لازم است. الان {stars:g} ستاره داری.",
             )
         quote = {
             "stars_before": stars,
-            "stars_after": stars - need,
+            "stars_after": _rk_stars(stars - need),
             "stars_spent": need,
             "reward": reward,
             "rob_points_after": int(user.fox_points or 0) + reward,
@@ -1749,13 +1761,13 @@ def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current
                 "rocket_stars": stars,
                 "rob_points": int(user.fox_points or 0),
             }
-        user.rocket_stars = stars - need
+        user.rocket_stars = _rk_stars(stars - need)
         user.fox_points = int(user.fox_points or 0) + reward
         session.commit()
         return {
             "quote": quote,
             "done": True,
-            "rocket_stars": int(user.rocket_stars),
+            "rocket_stars": _rk_stars(user.rocket_stars),
             "rob_points": int(user.fox_points or 0),
         }
     except HTTPException:
@@ -1769,21 +1781,29 @@ def rocket_stars_redeem(body: RocketStarsRedeem, tg_user: dict = Depends(current
 
 @app.get("/api/rocket/leaderboard")
 def rocket_leaderboard(tg_user: dict = Depends(current_telegram_user)):
+    """برترین‌های ۲۴ ساعته: مجموع ستاره‌ای که هر بازیکن از برداشت‌های موشک گرفته.
+    هر شب ساعت ۰۰:۰۰ به وقت تهران صفر می‌شود؛ «ends_in» ثانیه‌های مانده تا ریست است."""
     _rocket_access_guard(tg_user)
     session = get_session()
     try:
-        from sqlalchemy import text
-        rows = session.execute(text("""
-            SELECT u.telegram_id, COALESCE(u.username, u.first_name, 'بازیکن') AS player,
-                   MAX(COALESCE(g.final_mult, 0)) AS best,
-                   COUNT(g.id) AS games
-            FROM rocket_bets g LEFT JOIN users u ON u.telegram_id = g.user_id
-            WHERE g.ended_at >= :cutoff AND g.status = 'cashed'
-            GROUP BY u.telegram_id, u.username, u.first_name
-            ORDER BY best DESC, games DESC LIMIT 10
-        """), {"cutoff": _time.time() - 86400}).mappings().all()
-        return {"items": [{"player": str(x["player"]), "best": float(x["best"] or 0),
-                           "games": int(x["games"] or 0)} for x in rows]}
+        now = _time.time()
+        try:
+            hidden = list(getattr(load_botmod(), "ADMIN_IDS", []) or [])   # پشتیبانی توی هیچ لیدربردی نیست
+        except Exception:  # noqa: BLE001
+            hidden = []
+        board = _rk.daily_board(session, now, hidden)
+        uid = int(tg_user["id"])
+        items = []
+        me = {"rank": None, "stars": 0.0, "games": 0}
+        for i, r in enumerate(board, 1):
+            is_me = r["uid"] == uid
+            if is_me:
+                me = {"rank": i, "stars": r["stars"], "games": r["games"]}
+            if i <= 50:
+                items.append({"rank": i, "name": r["name"], "stars": r["stars"], "games": r["games"],
+                              "best": r["best"], "me": is_me})
+        _, end = _rk.day_window(now)
+        return {"items": items, "me": me, "total": len(board), "ends_in": max(0.0, end - now), "period": "day"}
     except Exception as e:  # noqa: BLE001
         _rocket_fail(session, e, "leaderboard")
     finally:

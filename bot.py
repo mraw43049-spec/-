@@ -3634,7 +3634,7 @@ def _rkt_panel(owner_id, st, points):
            f"💵 مبلغ شرط: {(f'{int(amount):,} روب‌پوینت') if amount else 'انتخاب نشده ❌'}\n"
            f"🎯 ضریب هدف: {('×' + _rkt_fmt_t(target)) if target else 'انتخاب نشده ❌'}"
            f"{chance}\n\n"
-           f"موشک از ‎−۱٫۵‎ شروع می‌شه و تا ×{rocket_core.MAX_MULT:g} بالا می‌ره. اگه قبل از سقوط به ضریب هدفت برسه، «شرط × ضریب هدف» رو می‌گیری؛ وگرنه شرطت می‌سوزه.\n"
+           f"موشک از ×۱٫۰۰ شروع می‌شه و تا ×{rocket_core.MAX_MULT:g} بالا می‌ره. اگه قبل از سقوط به ضریب هدفت برسه، «شرط × ضریب هدف» رو می‌گیری؛ وگرنه شرطت می‌سوزه.\n"
            f"حداقل شرط {rocket_core.MIN_ENTRY:,} و سقف {rocket_core.MAX_ENTRY:,} روب‌پوینت · ضریب هدف از ×{rocket_core.MIN_TARGET:g} (کمتر از این مجاز نیست) تا ×{rocket_core.MAX_MULT:g}.\n"
            f"⏱ هر {rocket_core.COOLDOWN:g} ثانیه بعد از پایان پرواز می‌تونی دوباره پرتاب کنی.\n"
            "⛔️ فقط خودت می‌تونی روی این پنل بزنی.")
@@ -10240,6 +10240,7 @@ def admin_main_keyboard():
         [InlineKeyboardButton("📣 پیام همگانی", callback_data="admin:broadcast")],
         [InlineKeyboardButton("🦊 افزودن/کسر روب‌پوینت", callback_data="admin:addpoints")],
         [InlineKeyboardButton("🦉 افزودن/کسر جغد کاربر", callback_data="admin:addowls")],
+        [InlineKeyboardButton("⭐ افزودن/کسر ستاره موشک", callback_data="admin:addrkstars")],
         [InlineKeyboardButton("💸 جریمه کردن کاربر", callback_data="admin:fineadd")],
         [InlineKeyboardButton("✅ لغو جریمه کاربر", callback_data="admin:finefree")],
         [InlineKeyboardButton("🎁 هدیه روب‌پوینت به همه", callback_data="admin:giftall")],
@@ -10438,6 +10439,7 @@ async def admin_callback(update, context):
     elif action == "finefree":
         context.user_data["admin_action"]="fine:free"
         await q.message.reply_text("✅ لغو جریمه\n\nآیدی عددی کاربر رو بفرست.")
+    elif action == "addrkstars": context.user_data["admin_action"]="addrkstars"; await q.message.reply_text("⭐ ستاره موشک\n\nفرمت: آیدی عددی (یا @شناسه) + تعداد ستاره\nمثال افزودن: 123456789 10\nمثال اعشاری: 123456789 2.5\nمثال کسر: 123456789 -3\n\n(دستور سریع: /givestars آیدی تعداد)")
     elif action == "addowls": context.user_data["admin_action"]="addowls"; await q.message.reply_text("🦉 فرمت: آیدی عددی یا @شناسه کاربر + تعداد جغد\nمثال افزودن: 123456789 5\nمثال کسر: 123456789 -3")
     elif action == "giftall":
         context.user_data["admin_action"]="giftall"
@@ -10604,6 +10606,54 @@ async def admin_broadcast_media(update, context):
     await run_admin_broadcast(update, context, mode=str(action).split(":", 1)[1] if ":" in str(action) else "all")
     raise ApplicationHandlerStop
 
+
+
+# ---------- ستاره‌ی موشک: پشتیبانی با آیدی عددی به هر کسی ستاره می‌دهد/کم می‌کند ----------
+def _rk_parse_stars_args(raw):
+    """«آیدی تعداد» → (توکن, مقدار) یا None. ارقام فارسی و اعشار (۲.۵ یا ۲٫۵) پشتیبانی می‌شود."""
+    t = (raw or "").translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٫', '01234567890123456789.')).replace(',', '').replace('،', '')
+    parts = t.split()
+    if len(parts) != 2:
+        return None
+    try:
+        val = round(float(parts[1]), 2)
+    except ValueError:
+        return None
+    return parts[0].lstrip('@'), val
+
+async def _rk_give_stars(update, context, raw):
+    """True اگر پیام پردازش شد (حتی با خطا)."""
+    msg = update.message
+    parsed = _rk_parse_stars_args(raw)
+    if not parsed or parsed[1] == 0 or abs(parsed[1]) > 1_000_000:
+        await msg.reply_text("❗️ فرمت اشتباهه.\nدرست: آیدی عددی + تعداد ستاره\nمثال: 123456789 10  یا  123456789 -2.5", **reply_kwargs(msg))
+        return False
+    token, value = parsed
+    session = get_session()
+    try:
+        user = session.get(User, int(token)) if token.isdigit() else session.query(User).filter(User.username.ilike(token)).first()
+        if not user:
+            await msg.reply_text("❌ کاربر با این آیدی یا شناسه پیدا نشد.", **reply_kwargs(msg))
+            return False
+        uid = int(user.telegram_id)
+        old = round(float(user.rocket_stars or 0), 2)
+        new = max(0.0, round(old + value, 2))
+        user.rocket_stars = new
+        session.commit()
+    finally:
+        session.close()
+    await msg.reply_text(f"⭐ انجام شد.\n👤 {uid}\nستاره‌های موشک: {old:g} ← {new:g}", **reply_kwargs(msg))
+    await notify_user_private(context.bot, uid, f"📢 اطلاعیه پشتیبانی\n\n⭐ ستاره‌های موشک شما توسط پشتیبانی تغییر کرد.\n⭐ مقدار قبلی: {old:g}\n⭐ مقدار جدید: {new:g}")
+    return True
+
+async def givestars_command(update, context):
+    if not update.message or not update.effective_user or not admin_only(update.effective_user.id):
+        return
+    raw = " ".join(context.args or [])
+    if not raw.strip():
+        await update.message.reply_text("⭐ فرمت: /givestars آیدی_عددی تعداد\nمثال: /givestars 123456789 10\nکسر: /givestars 123456789 -2.5", **reply_kwargs(update.message))
+        return
+    await _rk_give_stars(update, context, raw)
 
 async def admin_text(update, context):
     if not admin_only(update.effective_user.id): return
@@ -10795,6 +10845,10 @@ async def admin_text(update, context):
         await update.message.reply_text(f"✅ کاربر {uid} آزاد شد{note}.", **reply_kwargs(update.message))
         await notify_user_private(context.bot, uid, "📢 اطلاعیه پشتیبانی\n\n✅ شما از زندان روبی آزاد شدید و می‌تونید دوباره از ربات استفاده کنید.")
         return
+    if action == "addrkstars":
+        ok = await _rk_give_stars(update, context, text)
+        if not ok: context.user_data["admin_action"] = "addrkstars"
+        return True
     parts=text.split()
     if len(parts)!=2 or not all(p.lstrip("-").isdigit() for p in parts): await update.message.reply_text("فرمت اشتباه است.", **reply_kwargs(update.message)); return
     session=get_session()
@@ -16661,6 +16715,7 @@ def main():
     app.add_handler(CommandHandler("game",game_command))
     app.add_handler(CommandHandler("challenge",challenge_command))
     app.add_handler(CommandHandler("admin",admin_command))
+    app.add_handler(CommandHandler("givestars",givestars_command,filters=filters.User(user_id=list(ADMIN_IDS))))
     app.add_handler(CommandHandler("transfer",transfer_command))
     app.add_handler(CommandHandler("hunt",hunt_command))
     app.add_handler(CommandHandler("fox",fox_command))
@@ -16684,7 +16739,7 @@ def main():
     app.add_handler(CallbackQueryHandler(membership_callback,pattern=r"^check_membership$"))
     app.add_handler(CallbackQueryHandler(recovery_callback, pattern=r"^recovery:(?:get|enter)$"))
     app.add_handler(CallbackQueryHandler(guide_callback,pattern=r"^guide:(main|home|item:\d+)$"))
-    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|broadcastgroups|broadcastusers|addpoints|addowls|fineadd|finefree|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|gwcreate|gwmanage|backup|back)$"))
+    app.add_handler(CallbackQueryHandler(admin_callback,pattern=r"^admin:(?:stats|users|broadcast|broadcastgroups|broadcastusers|addpoints|addowls|addrkstars|fineadd|finefree|giftall|giftcode|setlevel|setclaims|eduq|baby|marriage_relation|babyrefresh:\d+|jailmenu|gwcreate|gwmanage|backup|back)$"))
     app.add_handler(CallbackQueryHandler(admin_jailset_callback,pattern=r"^admin:jailset:(?:add|free)$"))
     app.add_handler(CallbackQueryHandler(gw_create_callback,pattern=r"^gwc:(?:home|cancel|create|chdef|opt:[a-z]+|set:[a-z]+:[A-Za-z0-9]+)$"))
     app.add_handler(CallbackQueryHandler(gw_admin_callback,pattern=r"^gwa:(?:list|(?:view|top|toggletop|draw|drawyes|cancel|cancelyes|postch|bc):\d+(?::\d+)?|(?:bcc|bcgo):\d+:[gua]|user:\d+:\d+:\d+)$"))
