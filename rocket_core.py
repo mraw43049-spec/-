@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """موشک همگانی (Crash) برای مینی‌اپ + بات.
 
-ورود ثابت: ۵۰٬۰۰۰ روب‌پوینت برای هر پرواز (چه با ضریب هدف، چه بدون ضریب).
+ورود ثابت: ۵۰٬۰۰۰ روب‌پوینت برای هر پرواز.
+جایزه فقط ⭐ ستاره است؛ برد هیچ روب‌پوینتی پس نمی‌دهد (ورودی همیشه خرج می‌شود).
 دو حالت برداشت:
-  ۱) با ضریب هدف: به محض رسیدن موشک به هدف، خودکار برداشت می‌شود.
-  ۲) بدون ضریب (target = 0): بازیکن خودش وسط پرواز «برداشت» می‌زند؛ اگر موشک به سقف برسد خودکار در سقف برداشت می‌شود.
+  ۱) توقف خودکار روشن (target > 0): به محض رسیدن موشک به ضریبِ واردشده، خودکار برداشت می‌شود.
+  ۲) توقف خودکار خاموش (target = 0): بازیکن خودش وسط پرواز «برداشت» می‌زند؛ اگر موشک به سقف برسد خودکار در سقف برداشت می‌شود.
 سقف ضریب: ×۱۰۰.
 هر ضریب کامل که بازیکن با هدفش به آن برسد = ۱ ستاره.
 تبدیل: ۵۰ ستاره → ۱٬۰۰۰٬۰۰۰ روب‌پوینت.
@@ -325,14 +326,9 @@ def settle_all(session, now: float) -> None:
             # برنده وقتی ضریب به هدف (یا سقف) برسد
             if now < reach_at:
                 continue
-            pay = payout(amount, win_mult)
-            if not finish_bet(session, int(b["id"]), "cashed", win_mult, pay, now):
+            # جایزه فقط ستاره است؛ روب‌پوینت برنمی‌گردد (payout = 0)
+            if not finish_bet(session, int(b["id"]), "cashed", win_mult, 0, now):
                 continue
-            # واریز روب‌پوینت + ستاره
-            session.execute(text("""
-                UPDATE users SET fox_points = COALESCE(fox_points,0) + :p
-                WHERE telegram_id = :u
-            """), {"p": pay, "u": int(b["user_id"])})
             stars = max(0, int(math.floor(win_mult + 1e-9))) * STARS_PER_MULT
             if stars > 0:
                 session.execute(text("""
@@ -366,14 +362,10 @@ def manual_cashout(session, bet: dict, now: float):
     if m > cp + 1e-9:
         return None, "crashed"
     amount = int(bet["bet"])
-    pay = payout(amount, m)
-    if not finish_bet(session, int(bet["id"]), "cashed", m, pay, now):
+    # جایزه فقط ستاره است؛ روب‌پوینت برنمی‌گردد (payout = 0)
+    if not finish_bet(session, int(bet["id"]), "cashed", m, 0, now):
         return None, "settled"
     uid = int(bet["user_id"])
-    session.execute(text("""
-        UPDATE users SET fox_points = COALESCE(fox_points,0) + :p
-        WHERE telegram_id = :u
-    """), {"p": pay, "u": uid})
     stars = max(0, int(math.floor(m + 1e-9))) * STARS_PER_MULT
     if stars > 0:
         session.execute(text("""
@@ -383,7 +375,7 @@ def manual_cashout(session, bet: dict, now: float):
         session.execute(text("""
             UPDATE rocket_bets SET stars_awarded = :s WHERE id = :id
         """), {"s": stars, "id": int(bet["id"])})
-    return {"mult": m, "payout": pay, "stars": stars, "bet": amount,
+    return {"mult": m, "payout": 0, "stars": stars, "bet": amount,
             "target": float(bet.get("target") or 0)}, None
 
 
