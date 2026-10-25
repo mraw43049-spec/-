@@ -512,6 +512,10 @@ class FootballMatch(Base):
     match_time = Column(String, nullable=False)  # متن آزاد؛ همونی که پشتیبانی وارد کرده (تاریخ/ساعت)
     status = Column(String, nullable=False, default='open')  # open | closed
     created_by = Column(BigInteger, nullable=True)
+    reward = Column(Integer, nullable=True)            # جایزه‌ی بازی (روب‌پوینت)؛ خالی = پیش‌فرض
+    ann_chat_id = Column(BigInteger, nullable=True)    # پیام (متن/مدیا) ذخیره‌شده‌ی پشتیبانی برای پست کانال
+    ann_message_id = Column(BigInteger, nullable=True)
+    channel_message_id = Column(BigInteger, nullable=True)   # پست ارسال‌شده توی کانال اصلی
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -522,6 +526,8 @@ class FootballPrediction(Base):
     user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
     choice = Column(String, nullable=False)  # home | draw | away
     status = Column(String, nullable=False, default='pending')  # pending | approved | rejected
+    score_home = Column(Integer, nullable=True)   # نتیجه‌ی دقیق پیش‌بینی‌شده (گل میزبان)
+    score_away = Column(Integer, nullable=True)   # گل میهمان
     reward = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
@@ -902,6 +908,16 @@ def init_db():
             for name, definition in ruby_additions.items():
                 if name not in ruby_cols:
                     conn.execute(text(f'ALTER TABLE ruby_tables ADD COLUMN {name} {definition}'))
+        if 'football_matches' in inspector.get_table_names():
+            fbm_cols = {c['name'] for c in inspector.get_columns('football_matches')}
+            for name, definition in {'reward': 'INTEGER', 'ann_chat_id': 'BIGINT', 'ann_message_id': 'BIGINT', 'channel_message_id': 'BIGINT'}.items():
+                if name not in fbm_cols:
+                    conn.execute(text(f'ALTER TABLE football_matches ADD COLUMN {name} {definition}'))
+        if 'football_predictions' in inspector.get_table_names():
+            fbp_cols = {c['name'] for c in inspector.get_columns('football_predictions')}
+            for name in ('score_home', 'score_away'):
+                if name not in fbp_cols:
+                    conn.execute(text(f'ALTER TABLE football_predictions ADD COLUMN {name} INTEGER'))
         # دیتای قدیمی را حفظ می‌کنیم و فقط مقدارهای روباه را برای کاربران قدیمی آماده می‌کنیم.
         conn.execute(text("UPDATE users SET fox_name = 'مکار' WHERE fox_name IS NULL OR fox_name = ''"))
         conn.execute(text("UPDATE users SET fox_level = 1 WHERE fox_level IS NULL OR fox_level < 1"))
