@@ -767,17 +767,13 @@ body{padding-top:calc(14px + var(--ruby-top))!important}
 
 /* ===== سیستم تم روبی ===== */
 body{position:relative;transition:background .4s}
-body::before{content:"";position:fixed;inset:-40px;z-index:-1;pointer-events:none;background-image:var(--pat,none);background-size:var(--pat-size,220px) var(--pat-size,220px);opacity:var(--pat-op,.2);will-change:transform}
-body.pat-anim::before{animation:patDrift 70s linear infinite}
-@keyframes patDrift{to{background-position:var(--pat-size,220px) var(--pat-size,220px)}}
+body::before{content:"";position:fixed;inset:-260px -260px -40px -40px;z-index:-1;pointer-events:none;background-image:var(--pat,none);background-size:var(--pat-size,220px) var(--pat-size,220px);opacity:var(--pat-op,.2);will-change:transform}
+body.pat-anim::before{animation:patDrift 60s linear infinite}
+@keyframes patDrift{to{transform:translate3d(220px,220px,0)}}
 body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(60% 40% at 15% 0%,var(--glow,#3be0a033),transparent 70%),radial-gradient(55% 35% at 100% 100%,var(--glow2,#ff9a3c22),transparent 70%)}
-.card{backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
-.action:not(:disabled){position:relative;overflow:hidden}
-.action:not(:disabled)::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 35%,#ffffff2e 50%,transparent 65%);transform:translateX(-120%);animation:shine 4.5s ease-in-out infinite;pointer-events:none}
-@keyframes shine{0%,60%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
 .view.active{animation:viewIn .35s ease both}
 @keyframes viewIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-#themeFab{position:fixed;left:12px;top:calc(10px + var(--ruby-top,0px));z-index:40;width:44px;height:44px;border-radius:50%;border:1px solid #ffffff40;background:linear-gradient(145deg,var(--tf1,#ff9a3c),var(--tf2,#e0407e));color:#fff;font-size:22px;box-shadow:0 6px 18px #0009,0 0 18px var(--tf1,#ff9a3c)66;display:flex;align-items:center;justify-content:center;padding:0}
+#themeFab{display:none;position:fixed;left:12px;top:calc(10px + var(--ruby-top,0px));z-index:40;width:44px;height:44px;border-radius:50%;border:1px solid #ffffff40;background:linear-gradient(145deg,var(--tf1,#ff9a3c),var(--tf2,#e0407e));color:#fff;font-size:22px;box-shadow:0 6px 18px #0009,0 0 18px var(--tf1,#ff9a3c)66;align-items:center;justify-content:center;padding:0}
 #themeFab:active{transform:scale(.92)}
 #themeModal{align-items:flex-end;padding:0;z-index:70}
 #themeModal .tsheet{width:100%;max-width:520px;margin:0 auto;background:var(--ts-bg,#0e271d);border:1px solid #ffffff22;border-bottom:0;border-radius:26px 26px 0 0;padding:10px 16px calc(18px + env(safe-area-inset-bottom,0px));max-height:88vh;overflow-y:auto;box-shadow:0 -12px 40px #000c;animation:sheetUp .3s cubic-bezier(.2,.9,.3,1)}
@@ -811,6 +807,21 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;bac
 .tbtns button{border:0;border-radius:14px;padding:14px;font-family:inherit;font-weight:900;font-size:15px}
 .tbtns .ok{background:linear-gradient(135deg,var(--tf1,#ff9a3c),var(--tf2,#e0407e));color:#fff}
 .tbtns .rs{background:#ffffff1c;color:#fff}
+
+body[data-view="fox"] #themeFab{display:flex}
+body:not([data-view="fox"]) #themeModal{display:none!important}
+/* ===== دکمه‌های واقع‌گرایانه (فقط transform/opacity → بدون لگ) ===== */
+.action,.spin-btn,.topic .go,.opt,.atk-btns button,.bk-quick button,.filter,.seg button,.chips button{transition:transform .22s cubic-bezier(.34,1.56,.64,1),box-shadow .18s ease,filter .2s}
+.action:not(:disabled)::before,.spin-btn:not(:disabled)::before,.topic .go:not(:disabled)::before,.opt:not(:disabled)::before{content:"";position:absolute;left:2px;right:2px;top:1px;height:52%;border-radius:inherit;border-bottom-left-radius:60% 40%;border-bottom-right-radius:60% 40%;background:linear-gradient(180deg,#ffffff5c,#ffffff0a);pointer-events:none;z-index:1}
+.action.secondary:not(:disabled)::before,.opt:not(:disabled)::before{background:linear-gradient(180deg,#ffffff26,#ffffff04)}
+.action:active:not(:disabled),.spin-btn:active:not(:disabled),.topic .go:active:not(:disabled),.opt:active:not(:disabled),.atk-btns button:active,.bk-quick button:active,.filter:active,.seg button:active{transform:translateY(3px) scale(.965);transition-duration:.06s;filter:brightness(.94)}
+.spin-btn:not(:disabled){animation:btnPulse 2.6s ease-in-out infinite}
+@keyframes btnPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.022)}}
+.spin-btn:active:not(:disabled){animation:none}
+.rp{position:absolute;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;background:radial-gradient(circle,#ffffffa0,#ffffff00 70%);transform:scale(0);animation:rpl .6s ease-out forwards;pointer-events:none;z-index:3}
+@keyframes rpl{to{transform:scale(14);opacity:0}}
+.lite .spin-btn,.lite body.pat-anim::before{animation:none!important}
+@media (prefers-reduced-motion:reduce){.spin-btn,body.pat-anim::before{animation:none!important}.rp{display:none}}
 </style>
 </head>
 <body>
@@ -3353,7 +3364,7 @@ function __rubyMain(){
   function show(v){
     prevView = view;
     if (v !== view) { try { window.scrollTo(0, 0); } catch(e){} }
-    view = v;
+    view = v; try { document.body.setAttribute("data-view", v); } catch(e){}
     ["fox","wheel","leader","bank","store"].forEach(function(n){
       $(n + "View").classList.toggle("active", v === n);
       var t = $(n + "Tab"); if (t) t.classList.toggle("active", v === n || (n === "fox" && v === "bank"));
@@ -3406,6 +3417,23 @@ function __rubyMain(){
     if (!b || b.disabled) return;
     b.classList.remove("shine"); void b.offsetWidth; b.classList.add("shine");
   }, { passive: true });
+  document.addEventListener("pointerdown", function(e){
+    var b = e.target.closest && e.target.closest("button");
+    if (!b || b.disabled || b.classList.contains("tab") || b.classList.contains("tsw") || b.classList.contains("tdot") || b.classList.contains("tpat")) return;
+    try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred("light"); } catch(e2){}
+    var r = b.getBoundingClientRect(), s = document.createElement("span");
+    s.className = "rp"; s.style.left = (e.clientX - r.left) + "px"; s.style.top = (e.clientY - r.top) + "px";
+    b.appendChild(s); setTimeout(function(){ if (s.parentNode) s.parentNode.removeChild(s); }, 650);
+  }, { passive: true });
+  setInterval(function(){
+    if (document.hidden || document.documentElement.classList.contains("lite")) return;
+    var v = document.querySelector(".view.active"); if (!v) return;
+    var bs = v.querySelectorAll(".action:not(.secondary):not(:disabled),.spin-btn:not(:disabled),.topic .go:not(:disabled)");
+    if (!bs.length) return;
+    var b = bs[Math.floor(Math.random() * bs.length)];
+    var r = b.getBoundingClientRect(); if (r.bottom < 0 || r.top > innerHeight) return;
+    b.classList.remove("shine"); void b.offsetWidth; b.classList.add("shine");
+  }, 3500);
   document.addEventListener("animationend", function(e){ if (e.animationName === "sheen") e.target.classList.remove("shine"); }, true);
   try {
     if ((navigator.deviceMemory && navigator.deviceMemory <= 2) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2)) document.documentElement.classList.add("lite");
