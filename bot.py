@@ -55,7 +55,7 @@ from config import (
 )
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
-    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, FoxLevelPurchase, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, RubyOwl, Giveaway, GiveawayEntry, RecoveryCode, Base, get_session, init_db
+    FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, LevelPurchase, PointsShopOrder, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, RubyOwl, Giveaway, GiveawayEntry, RecoveryCode, Base, get_session, init_db
 )
 import attack_owl
 import bridge
@@ -8324,7 +8324,8 @@ def gift_shop_text():
 def gift_shop_keyboard():
     rows = [
         [InlineKeyboardButton("🎁 خرید گیفت استارزی", callback_data="gift:tiers:0:0")],
-        [InlineKeyboardButton("🦊 خرید سطح روباهیو", callback_data="flvl:shop:0")],
+        [InlineKeyboardButton("⭐ خرید سطح (لول)", callback_data="flvl:shop:0")],
+        [InlineKeyboardButton("💲 خرید روب پوینت", callback_data="rpts:shop:0")],
         [InlineKeyboardButton("کمد VIP 🪄", callback_data="vip:home")],
     ]
     return InlineKeyboardMarkup(rows)
@@ -8723,7 +8724,7 @@ async def gift_shop_command(update, context):
         return
     context.user_data.pop("gift_flow", None)
     context.user_data.pop("points_flow", None)
-    context.user_data.pop("flvl_flow", None)
+    _clear_shop_flows(context)
     await update.message.reply_text(gift_shop_text(), reply_markup=gift_shop_keyboard(), **reply_kwargs(update.message))
 
 
@@ -8742,7 +8743,7 @@ async def gift_button(update, context):
     if action == "backshop":
         context.user_data.pop("gift_flow", None)
         context.user_data.pop("points_flow", None)
-        context.user_data.pop("flvl_flow", None)
+        _clear_shop_flows(context)
         await q.answer()
         await q.message.edit_text(gift_shop_text(), reply_markup=gift_shop_keyboard())
         return
@@ -9207,6 +9208,9 @@ async def purchase_flow_gate(update, context):
     if context.user_data.get("flvl_flow"):
         await flvl_flow_gate(update, context)
         return
+    if context.user_data.get("rpts_flow"):
+        await rpts_flow_gate(update, context)
+        return
 
 
 async def fake_receipt_ban_button(update, context):
@@ -9343,9 +9347,9 @@ async def points_admin_button(update, context):
         session.close()
 
 
-# ---------- خرید سطح روباهیو 🦊 ----------
+# ---------- خرید سطح (لول کل) 🦊 ----------
 
-FOX_LEVEL_PACKAGES = {
+LEVEL_PACKAGES = {
     "10": {"level": 10, "price": 800000},
     "20": {"level": 20, "price": 1300000},
 }
@@ -9354,33 +9358,40 @@ FLVL_CARD_OWNER = GIFT_CARD_OWNER
 FLVL_SUPPORT_CONTACT = POINTS_SUPPORT_CONTACT
 
 
+def buyer_identity_text(user):
+    """شناسه خریدار برای پشتیبانی: آیدی عددی + یوزرنیم + نام."""
+    uname = f"@{user.username}" if getattr(user, "username", None) else "ندارد"
+    name = " ".join(x for x in [getattr(user, "first_name", None), getattr(user, "last_name", None)] if x) or "—"
+    return f"🆔 آیدی عددی: {user.telegram_id}\n👤 شناسه کاربری: {uname}\n📛 نام: {name}"
+
+
 def flvl_package_label(key):
-    p = FOX_LEVEL_PACKAGES[key]
-    return f"🦊 خرید لول {p['level']} — {p['price']:,} تومان"
+    p = LEVEL_PACKAGES[key]
+    return f"⭐ خرید لول {p['level']} — {p['price']:,} تومان"
 
 
 def flvl_shop_text():
     return (
-        "🦊 خرید سطح روباهیو\n\n"
-        "با خرید هر بسته، لول روباهت مستقیم به همون لول می‌رسه.\n\n"
-        + "\n".join(f"┘─ لول {p['level']} — {p['price']:,} تومان" for p in FOX_LEVEL_PACKAGES.values())
+        "⭐ خرید سطح (لول)\n\n"
+        "با خرید هر بسته، لول کل حساب تو مستقیم به همون لول می‌رسه.\n\n"
+        + "\n".join(f"┘─ لول {p['level']} — {p['price']:,} تومان" for p in LEVEL_PACKAGES.values())
         + "\n\nیکی از گزینه‌ها رو انتخاب کن ⬇️\n"
         f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {FLVL_SUPPORT_CONTACT}"
     )
 
 
 def flvl_shop_keyboard():
-    rows = [[InlineKeyboardButton(flvl_package_label(k), callback_data=f"flvl:pick:{k}")] for k in FOX_LEVEL_PACKAGES]
+    rows = [[InlineKeyboardButton(flvl_package_label(k), callback_data=f"flvl:pick:{k}")] for k in LEVEL_PACKAGES]
     rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="gift:backshop:0:0")])
     return InlineKeyboardMarkup(rows)
 
 
 def flvl_order_summary_text(flow, user):
-    pkg = FOX_LEVEL_PACKAGES[flow["package_key"]]
+    pkg = LEVEL_PACKAGES[flow["package_key"]]
     return (
         f"🧾 خلاصه سفارش\n\n"
-        f"🦊 خرید لول {pkg['level']} روباهیو\n"
-        f"📈 لول فعلی روباه تو: {int(user.fox_level or 1)} ← لول {pkg['level']}\n"
+        f"⭐ خرید لول {pkg['level']}\n"
+        f"📈 لول فعلی تو: {int(user.level or 1)} ← لول {pkg['level']}\n"
         f"💰 مبلغ قابل پرداخت: {pkg['price']:,} تومان\n\n"
         f"💳 پرداخت کارت به کارت به شماره کارت زیر:\n"
         f"{FLVL_CARD_NUMBER}\n"
@@ -9393,12 +9404,13 @@ def flvl_order_summary_text(flow, user):
 
 
 def flvl_admin_caption(order, user=None):
-    cur = f"\n📈 لول فعلی روباه: {int(user.fox_level or 1)}" if user is not None else ""
+    ident = buyer_identity_text(user) if user is not None else f"🆔 آیدی عددی: {order.user_id}\n👤 شناسه کاربری: {('@' + order.username) if order.username else 'ندارد'}"
+    cur = f"\n📈 لول فعلی: {int(user.level or 1)}" if user is not None else ""
     return (
-        f"🆕 سفارش خرید سطح روباهیو #{order.id}\n\n"
-        f"🦊 لول درخواستی: {order.target_level}{cur}\n"
+        f"🆕 سفارش خرید لول #{order.id}\n\n"
+        f"⭐ لول درخواستی: {order.target_level}{cur}\n"
         f"💰 مبلغ: {order.price:,} تومان\n"
-        f"👤 آیدی عددی سفارش‌دهنده: {order.user_id}\n"
+        f"{ident}\n"
         f"🕐 زمان سفارش: {jalali_datetime_str(tehran_dt(order.created_at))}\n\n"
         f"⏳ وضعیت: در انتظار بررسی"
     )
@@ -9414,6 +9426,11 @@ def flvl_admin_keyboard(order_id, user_id):
     ])
 
 
+def _clear_shop_flows(context):
+    for k in ("gift_flow", "points_flow", "flvl_flow", "rpts_flow"):
+        context.user_data.pop(k, None)
+
+
 async def flvl_button(update, context):
     q = update.callback_query
     try:
@@ -9424,33 +9441,28 @@ async def flvl_button(update, context):
     if not await require_membership(update, context):
         return
     if action == "shop":
-        context.user_data.pop("gift_flow", None)
-        context.user_data.pop("points_flow", None)
-        context.user_data.pop("flvl_flow", None)
+        _clear_shop_flows(context)
         await q.answer()
         await q.message.edit_text(flvl_shop_text(), reply_markup=flvl_shop_keyboard())
         return
     if action == "cancel":
-        context.user_data.pop("flvl_flow", None)
+        _clear_shop_flows(context)
         await q.answer("❌ خرید لغو شد.")
         await q.message.edit_text(flvl_shop_text(), reply_markup=flvl_shop_keyboard())
         return
     if action == "pick":
-        pkg = FOX_LEVEL_PACKAGES.get(arg)
+        pkg = LEVEL_PACKAGES.get(arg)
         if not pkg:
             await q.answer()
             return
         session = get_session()
         try:
             user = get_or_create_user(session, q.from_user)
-            if user.level < FOX_UNLOCK_LEVEL:
-                await q.answer(f"🦊 روباه از سطح {FOX_UNLOCK_LEVEL} باز می‌شه؛ بعد از بازشدنش می‌تونی لول بخری.", show_alert=True)
+            if int(user.level or 1) >= pkg["level"]:
+                await q.answer(f"✅ لول تو همین الان {int(user.level or 1)}ـه و این بسته برات لازم نیست.", show_alert=True)
                 return
-            if int(user.fox_level or 1) >= pkg["level"]:
-                await q.answer(f"✅ روباهت همین الان لول {int(user.fox_level or 1)}ـه و این بسته برات لازم نیست.", show_alert=True)
-                return
-            pending = session.query(FoxLevelPurchase).filter(
-                FoxLevelPurchase.user_id == user.telegram_id, FoxLevelPurchase.status == "pending"
+            pending = session.query(LevelPurchase).filter(
+                LevelPurchase.user_id == user.telegram_id, LevelPurchase.status == "pending"
             ).first()
             if pending:
                 await q.answer(
@@ -9459,8 +9471,7 @@ async def flvl_button(update, context):
                 )
                 return
             flow = {"stage": "await_receipt", "package_key": arg, "started_at": now_utc().isoformat()}
-            context.user_data.pop("gift_flow", None)
-            context.user_data.pop("points_flow", None)
+            _clear_shop_flows(context)
             context.user_data["flvl_flow"] = flow
             await q.answer()
             await q.message.edit_text(
@@ -9477,7 +9488,7 @@ async def finalize_flvl_order(update, context, flow):
     session = get_session()
     try:
         user = get_or_create_user(session, update.effective_user)
-        pkg = FOX_LEVEL_PACKAGES.get(flow["package_key"])
+        pkg = LEVEL_PACKAGES.get(flow["package_key"])
         if not pkg:
             context.user_data.pop("flvl_flow", None)
             return
@@ -9485,8 +9496,9 @@ async def finalize_flvl_order(update, context, flow):
             started_at = datetime.fromisoformat(flow["started_at"])
         except Exception:
             started_at = now_utc()
-        order = FoxLevelPurchase(
+        order = LevelPurchase(
             user_id=user.telegram_id,
+            username=user.username,
             package_key=flow["package_key"],
             target_level=pkg["level"],
             price=pkg["price"],
@@ -9500,7 +9512,7 @@ async def finalize_flvl_order(update, context, flow):
         context.user_data.pop("flvl_flow", None)
         await update.message.reply_text(
             f"✅ سفارش خرید لول {order.target_level} ثبت شد (شماره سفارش: {order_id}).\n"
-            f"⏳ منتظر تایید پشتیبانی باشید؛ بعد از تایید، لول روباهت بلافاصله تغییر می‌کنه.\n"
+            f"⏳ منتظر تایید پشتیبانی باشید؛ بعد از تایید، لولت بلافاصله تغییر می‌کنه.\n"
             f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {FLVL_SUPPORT_CONTACT}",
             **reply_kwargs(update.message)
         )
@@ -9513,24 +9525,23 @@ async def finalize_flvl_order(update, context, flow):
                     reply_markup=flvl_admin_keyboard(order_id, order.user_id),
                 )
             except Exception:
-                logger.warning("ارسال سفارش خرید سطح روباهیو به ادمین %s ناموفق بود", admin_id)
+                logger.warning("ارسال سفارش خرید لول به ادمین %s ناموفق بود", admin_id)
     finally:
         session.close()
 
 
-async def flvl_flow_gate(update, context):
-    """وقتی کاربر منتظر ارسال رسید خرید سطح روباهیو است: فقط عکس رسید پذیرفته می‌شه."""
-    flow = context.user_data.get("flvl_flow")
+async def _receipt_gate(update, context, flow_key, finalize):
+    flow = context.user_data.get(flow_key)
     if not flow or flow.get("stage") != "await_receipt":
         return
     if not update.message:
         return
     if update.message.photo:
-        await finalize_flvl_order(update, context, flow)
+        await finalize(update, context, flow)
         raise ApplicationHandlerStop
     txt = (update.message.text or "").strip()
     if txt in {"لغو", "/cancel", "/cancelgift"}:
-        context.user_data.pop("flvl_flow", None)
+        context.user_data.pop(flow_key, None)
         await update.message.reply_text("❌ خرید لغو شد.", **reply_kwargs(update.message))
         raise ApplicationHandlerStop
     await update.message.reply_text(
@@ -9540,6 +9551,10 @@ async def flvl_flow_gate(update, context):
         **reply_kwargs(update.message)
     )
     raise ApplicationHandlerStop
+
+
+async def flvl_flow_gate(update, context):
+    await _receipt_gate(update, context, "flvl_flow", finalize_flvl_order)
 
 
 async def flvl_admin_button(update, context):
@@ -9554,7 +9569,7 @@ async def flvl_admin_button(update, context):
     action, order_id = m.group(1), int(m.group(2))
     session = get_session()
     try:
-        order = session.get(FoxLevelPurchase, order_id)
+        order = session.get(LevelPurchase, order_id)
         if not order:
             await q.answer("این سفارش دیگه پیدا نشد.", show_alert=True)
             return
@@ -9566,34 +9581,35 @@ async def flvl_admin_button(update, context):
             if buyer is None:
                 await q.answer("⚠️ کاربر سفارش‌دهنده پیدا نشد؛ تایید انجام نشد.", show_alert=True)
                 return
-            if int(buyer.fox_level or 1) >= order.target_level:
+            old_level = int(buyer.level or 1)
+            if old_level >= order.target_level:
                 await q.answer(
-                    f"⚠️ روباه این کاربر الان لول {int(buyer.fox_level or 1)}ـه (≥ {order.target_level}) و ارتقا معنی نداره. اگه لازمه سفارش رو رد کن.",
+                    f"⚠️ لول این کاربر الان {old_level}ـه (≥ {order.target_level}) و ارتقا معنی نداره. اگه لازمه سفارش رو رد کن.",
                     show_alert=True,
                 )
                 return
-            settle_fox_production(buyer)   # تولید معوق با لول قبلی حساب شود
-            buyer.fox_level = order.target_level
-            buyer.fox_belly_capacity = fox_belly_capacity_for(buyer.fox_level)
-            buyer.fox_last_production_at = now_utc()
+            # دقیقاً مثل دستور ادمین «setlevel»: لول + تعداد روب‌روب لازم + جایزه‌های لول
+            buyer.level = order.target_level
+            buyer.fox_claim_count = max(int(buyer.fox_claim_count or 0), user_level_requirement(order.target_level))
+            rewards = apply_level_rewards(session, buyer, old_level, order.target_level)
             order.status = "approved"
             order.decided_at = now_utc()
             order.decided_by = q.from_user.id
             session.commit()
             await q.answer("✅ تایید شد.", show_alert=True)
             try:
-                await q.message.edit_caption(caption=flvl_admin_caption(order) + "\n✅ تایید شد و لول روباه تنظیم شد.")
+                await q.message.edit_caption(caption=flvl_admin_caption(order) + "\n✅ تایید شد و لول کاربر تنظیم شد.")
             except Exception:
                 pass
+            msg = (
+                f"✅ سفارش شما (#{order.id}) تایید شد!\n"
+                f"🎉 لول تو از {old_level} به {order.target_level} رسید.\n\n"
+                f"🔓 قابلیت‌های این سطح:\n{level_capabilities(order.target_level)}"
+            )
+            if rewards:
+                msg += "\n\n" + level_up_message(old_level, order.target_level, rewards)
             try:
-                await context.bot.send_message(
-                    chat_id=order.user_id,
-                    text=(
-                        f"✅ سفارش شما (#{order.id}) تایید شد!\n"
-                        f"🎉 روباهت به لول {order.target_level} رسید.\n"
-                        f"🏅 مقام جدید: {fox_rank(order.target_level)}"
-                    ),
-                )
+                await context.bot.send_message(chat_id=order.user_id, text=msg)
             except Exception:
                 pass
         else:
@@ -9612,6 +9628,301 @@ async def flvl_admin_button(update, context):
                     text=(
                         f"❌ سفارش شما (#{order.id}) رد شد.\n"
                         f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {FLVL_SUPPORT_CONTACT}"
+                    ),
+                )
+            except Exception:
+                pass
+    finally:
+        session.close()
+
+
+# ---------- خرید روب پوینت 💲 (با تعداد دلخواه) ----------
+
+RPTS_PACKAGES = {
+    "500k": {"points": 500000, "price": 55000, "qty": False},
+    "1m": {"points": 1000000, "price": 95000, "qty": True},     # فقط بسته‌ی ۱ میلیونی ➖/➕ دارد
+}
+
+
+def rpts_label(key):
+    p = RPTS_PACKAGES[key]
+    return f"💲 {p['points']:,} روب پوینت — {p['price']:,} تومان"
+
+
+def rpts_shop_text():
+    return (
+        "💲 خرید روب پوینت\n\n"
+        + "\n".join(f"┘─ {p['points']:,} روب پوینت 💲 — {p['price']:,} تومان" for p in RPTS_PACKAGES.values())
+        + "\n\nیکی از بسته‌ها رو انتخاب کن ⬇️\n"
+        f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}"
+    )
+
+
+def rpts_shop_keyboard():
+    rows = [[InlineKeyboardButton(rpts_label(k), callback_data=f"rpts:pick:{k}")] for k in RPTS_PACKAGES]
+    rows.append([InlineKeyboardButton("🔙 بازگشت به فروشگاه", callback_data="gift:backshop:0:0")])
+    return InlineKeyboardMarkup(rows)
+
+
+def rpts_qty_text(key, qty):
+    p = RPTS_PACKAGES[key]
+    return (
+        f"💲 خرید روب پوینت\n\n"
+        f"📦 بسته: {p['points']:,} روب پوینت — {p['price']:,} تومان\n"
+        f"🔢 تعداد رو با ➖ و ➕ تنظیم کن (بدون سقف).\n\n"
+        f"🪙 مجموع روب پوینت: {p['points'] * qty:,}\n"
+        f"💰 مبلغ کل ({qty:,} عدد): {p['price'] * qty:,} تومان\n\n"
+        f"وقتی تعداد درست بود، «✅ تایید تعداد» رو بزن."
+    )
+
+
+def rpts_qty_keyboard(qty):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("➖", callback_data="rpts:dec:1"),
+            InlineKeyboardButton(f"{qty:,}", callback_data="rpts:noop:0"),
+            InlineKeyboardButton("➕", callback_data="rpts:inc:1"),
+        ],
+        [
+            InlineKeyboardButton("➖10", callback_data="rpts:dec:10"),
+            InlineKeyboardButton("➕10", callback_data="rpts:inc:10"),
+            InlineKeyboardButton("➖100", callback_data="rpts:dec:100"),
+            InlineKeyboardButton("➕100", callback_data="rpts:inc:100"),
+        ],
+        [InlineKeyboardButton("✅ تایید تعداد", callback_data="rpts:ok:0")],
+        [InlineKeyboardButton("🔙 بازگشت به بسته‌ها", callback_data="rpts:shop:0")],
+        [InlineKeyboardButton("❌ لغو خرید", callback_data="rpts:cancel:0")],
+    ])
+
+
+def rpts_summary_text(flow):
+    p = RPTS_PACKAGES[flow["package_key"]]
+    qty = flow["qty"]
+    return (
+        f"🧾 خلاصه سفارش\n\n"
+        f"💲 روب پوینت: {p['points'] * qty:,}"
+        + (f" ({qty:,} × {p['points']:,})" if qty > 1 else "") + "\n"
+        f"💰 مبلغ قابل پرداخت: {p['price'] * qty:,} تومان\n\n"
+        f"💳 پرداخت کارت به کارت به شماره کارت زیر:\n"
+        f"{FLVL_CARD_NUMBER}\n"
+        f"به نام: {FLVL_CARD_OWNER}\n\n"
+        f"بعد از واریز، عکس رسیدِ پرداخت رو همینجا بفرست تا سفارش برای پشتیبانی ارسال بشه.\n\n"
+        f"⚠️ توجه: فقط عکس رسید واقعی پرداخت رو بفرست.\n"
+        f"🚫 اگه رسید فیک (جعلی) بفرستی، توسط پشتیبانی به‌طور دائم از ربات بن می‌شی.\n"
+        f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}"
+    )
+
+
+def rpts_admin_caption(order, user=None):
+    ident = buyer_identity_text(user) if user is not None else f"🆔 آیدی عددی: {order.user_id}\n👤 شناسه کاربری: {('@' + order.username) if order.username else 'ندارد'}"
+    return (
+        f"🆕 سفارش خرید روب پوینت #{order.id}\n\n"
+        f"💲 مقدار: {order.points_amount:,} روب پوینت"
+        + (f" ({order.quantity:,} × {order.unit_points:,})" if order.quantity > 1 else "") + "\n"
+        f"💰 مبلغ: {order.price:,} تومان\n"
+        f"{ident}\n"
+        f"🕐 زمان سفارش: {jalali_datetime_str(tehran_dt(order.created_at))}\n\n"
+        f"⏳ وضعیت: در انتظار بررسی"
+    )
+
+
+def rpts_admin_keyboard(order_id, user_id):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ تایید", callback_data=f"rptsad:approve:{order_id}"),
+            InlineKeyboardButton("❌ رد", callback_data=f"rptsad:reject:{order_id}"),
+        ],
+        [InlineKeyboardButton("🚫 بن کاربر (رسید فیک)", callback_data=f"fakeban:{int(user_id)}")],
+    ])
+
+
+async def rpts_button(update, context):
+    q = update.callback_query
+    try:
+        _, action, arg = q.data.split(":")
+    except Exception:
+        await q.answer()
+        return
+    if not await require_membership(update, context):
+        return
+    if action == "noop":
+        await q.answer()
+        return
+    if action in ("shop", "cancel"):
+        _clear_shop_flows(context)
+        await q.answer("❌ خرید لغو شد." if action == "cancel" else None)
+        await q.message.edit_text(rpts_shop_text(), reply_markup=rpts_shop_keyboard())
+        return
+    if action == "pick":
+        p = RPTS_PACKAGES.get(arg)
+        if not p:
+            await q.answer()
+            return
+        _clear_shop_flows(context)
+        if p["qty"]:
+            context.user_data["rpts_flow"] = {"stage": "qty", "package_key": arg, "qty": 1}
+            await q.answer()
+            await q.message.edit_text(rpts_qty_text(arg, 1), reply_markup=rpts_qty_keyboard(1))
+        else:
+            flow = {"stage": "await_receipt", "package_key": arg, "qty": 1, "started_at": now_utc().isoformat()}
+            context.user_data["rpts_flow"] = flow
+            await q.answer()
+            await q.message.edit_text(
+                rpts_summary_text(flow),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو خرید", callback_data="rpts:cancel:0")]]),
+            )
+        return
+    flow = context.user_data.get("rpts_flow") or {}
+    if action in ("inc", "dec"):
+        if flow.get("stage") != "qty":
+            await q.answer("لطفاً دوباره از فروشگاه شروع کن.", show_alert=True)
+            return
+        try:
+            step = max(1, int(arg))
+        except Exception:
+            step = 1
+        qty = int(flow.get("qty", 1))
+        qty = qty + step if action == "inc" else max(1, qty - step)
+        if qty == flow.get("qty"):
+            await q.answer("حداقل تعداد ۱ ـه.")
+            return
+        flow["qty"] = qty
+        context.user_data["rpts_flow"] = flow
+        await q.answer()
+        await q.message.edit_text(rpts_qty_text(flow["package_key"], qty), reply_markup=rpts_qty_keyboard(qty))
+        return
+    if action == "ok":
+        if flow.get("stage") != "qty":
+            await q.answer("لطفاً دوباره از فروشگاه شروع کن.", show_alert=True)
+            return
+        flow["stage"] = "await_receipt"
+        flow["started_at"] = now_utc().isoformat()
+        context.user_data["rpts_flow"] = flow
+        await q.answer()
+        await q.message.edit_text(
+            rpts_summary_text(flow),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو خرید", callback_data="rpts:cancel:0")]]),
+        )
+        return
+    await q.answer()
+
+
+async def finalize_rpts_order(update, context, flow):
+    session = get_session()
+    try:
+        user = get_or_create_user(session, update.effective_user)
+        p = RPTS_PACKAGES.get(flow["package_key"])
+        if not p:
+            context.user_data.pop("rpts_flow", None)
+            return
+        qty = max(1, int(flow.get("qty", 1)))
+        try:
+            started_at = datetime.fromisoformat(flow["started_at"])
+        except Exception:
+            started_at = now_utc()
+        order = PointsShopOrder(
+            user_id=user.telegram_id,
+            username=user.username,
+            package_key=flow["package_key"],
+            unit_points=p["points"],
+            quantity=qty,
+            points_amount=p["points"] * qty,
+            price=p["price"] * qty,
+            receipt_file_id=update.message.photo[-1].file_id,
+            status="pending",
+            started_at=started_at,
+        )
+        session.add(order)
+        session.commit()
+        order_id = order.id
+        context.user_data.pop("rpts_flow", None)
+        await update.message.reply_text(
+            f"✅ سفارش خرید روب پوینت ثبت شد (شماره سفارش: {order_id}).\n"
+            f"⏳ منتظر تایید پشتیبانی باشید؛ بعد از تایید {order.points_amount:,} روب پوینت به حسابت اضافه می‌شه.\n"
+            f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}",
+            **reply_kwargs(update.message)
+        )
+        for admin_id in ADMIN_IDS:
+            try:
+                await context.bot.send_photo(
+                    chat_id=admin_id,
+                    photo=order.receipt_file_id,
+                    caption=rpts_admin_caption(order, user),
+                    reply_markup=rpts_admin_keyboard(order_id, order.user_id),
+                )
+            except Exception:
+                logger.warning("ارسال سفارش خرید روب پوینت به ادمین %s ناموفق بود", admin_id)
+    finally:
+        session.close()
+
+
+async def rpts_flow_gate(update, context):
+    flow = context.user_data.get("rpts_flow")
+    if not flow or flow.get("stage") not in ("await_receipt", "qty"):
+        return
+    if flow.get("stage") == "qty":
+        return          # هنوز تعداد تایید نشده؛ پیام‌های عادی را مزاحم نشو
+    await _receipt_gate(update, context, "rpts_flow", finalize_rpts_order)
+
+
+async def rpts_admin_button(update, context):
+    q = update.callback_query
+    if not q or not q.from_user or q.from_user.id not in ADMIN_IDS:
+        await q.answer("⛔️ این دکمه فقط برای پشتیبانیه.", show_alert=True)
+        return
+    m = re.fullmatch(r"rptsad:(approve|reject):(\d+)", q.data or "")
+    if not m:
+        await q.answer()
+        return
+    action, order_id = m.group(1), int(m.group(2))
+    session = get_session()
+    try:
+        order = session.get(PointsShopOrder, order_id)
+        if not order:
+            await q.answer("این سفارش دیگه پیدا نشد.", show_alert=True)
+            return
+        if order.status != "pending":
+            await q.answer("قبلاً روی این سفارش تصمیم گرفته شده.", show_alert=True)
+            return
+        if action == "approve":
+            buyer = session.get(User, order.user_id)
+            if buyer is None:
+                await q.answer("⚠️ کاربر سفارش‌دهنده پیدا نشد؛ تایید انجام نشد.", show_alert=True)
+                return
+            new_total = int(buyer.fox_points or 0) + int(order.points_amount)
+            buyer.fox_points = new_total
+            order.status = "approved"
+            order.decided_at = now_utc()
+            order.decided_by = q.from_user.id
+            session.commit()
+            await q.answer("✅ تایید شد.", show_alert=True)
+            try:
+                await q.message.edit_caption(caption=rpts_admin_caption(order) + "\n✅ تایید شد و روب پوینت واریز شد.")
+            except Exception:
+                pass
+            try:
+                await context.bot.send_message(
+                    chat_id=order.user_id,
+                    text=f"✅ سفارش شما (#{order.id}) تایید شد و {order.points_amount:,} روب پوینت 💲 به حسابت اضافه شد.\n💰 موجودی جدید: {buyer.fox_points:,}",
+                )
+            except Exception:
+                pass
+        else:
+            order.status = "rejected"
+            order.decided_at = now_utc()
+            order.decided_by = q.from_user.id
+            session.commit()
+            await q.answer("❌ رد شد.", show_alert=True)
+            try:
+                await q.message.edit_caption(caption=rpts_admin_caption(order) + "\n❌ رد شد.")
+            except Exception:
+                pass
+            try:
+                await context.bot.send_message(
+                    chat_id=order.user_id,
+                    text=(
+                        f"❌ سفارش شما (#{order.id}) رد شد.\n"
+                        f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}"
                     ),
                 )
             except Exception:
@@ -17078,6 +17389,8 @@ def main():
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(flvl_button,pattern=r"^flvl:(?:shop|pick|cancel):[^:]+$"))
     app.add_handler(CallbackQueryHandler(flvl_admin_button,pattern=r"^flvlad:(?:approve|reject):\d+$"))
+    app.add_handler(CallbackQueryHandler(rpts_button,pattern=r"^rpts:(?:shop|pick|inc|dec|ok|cancel|noop):[^:]+$"))
+    app.add_handler(CallbackQueryHandler(rpts_admin_button,pattern=r"^rptsad:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(fake_receipt_ban_button,pattern=r"^fakeban:\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(owl_transfer_button,pattern=r"^owltransfer:(yes|no):\d+:\d+:\d+$"))

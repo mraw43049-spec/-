@@ -82,11 +82,11 @@ class User(Base):
     fox_level = Column(Integer, nullable=False, default=1)
     fox_belly = Column(Integer, nullable=False, default=3)
     fox_belly_capacity = Column(Integer, nullable=False, default=3)
-    fox_points = Column(Integer, nullable=False, default=0)
+    fox_points = Column(BigInteger, nullable=False, default=0)
     rub_toon = Column(BigInteger, nullable=False, default=0)  # ارز اختصاصی بازی جغد/موشک
     rocket_stars = Column(Numeric(14, 2, asdecimal=False), nullable=False, default=0)  # ستاره‌های جمع‌شده از موشک
     fox_storage = Column(Integer, nullable=False, default=0)
-    fox_total_earned = Column(Integer, nullable=False, default=0)
+    fox_total_earned = Column(BigInteger, nullable=False, default=0)
     fox_production_remainder = Column(Float, nullable=False, default=0.0)
     fox_last_production_at = Column(DateTime(timezone=True), nullable=True)
     last_hunt_at = Column(DateTime(timezone=True), nullable=True)
@@ -487,7 +487,7 @@ class BankAccount(Base):
     __tablename__ = 'bank_accounts'
     account_number = Column(String(12), primary_key=True)
     user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False, unique=True)
-    balance = Column(Integer, nullable=False, default=0)
+    balance = Column(BigInteger, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_interest_at = Column(DateTime(timezone=True), nullable=True)
     last_card_transfer_at = Column(DateTime(timezone=True), nullable=True)
@@ -499,7 +499,7 @@ class BankTransaction(Base):
     counterparty_account = Column(String(12), nullable=True)
     counterparty_user_id = Column(BigInteger, nullable=True)
     direction = Column(String(10), nullable=False)
-    amount = Column(Integer, nullable=False)
+    amount = Column(BigInteger, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     description = Column(String, nullable=True)
 
@@ -564,14 +564,34 @@ class PointsPurchase(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
-class FoxLevelPurchase(Base):
-    """سفارش خرید سطح (لول) روباهیو با کارت‌به‌کارت؛ بعد از تایید پشتیبانی لول روباه کاربر تنظیم می‌شود."""
-    __tablename__ = 'fox_level_purchases'
+class LevelPurchase(Base):
+    """سفارش خرید سطح (لول کل) با کارت‌به‌کارت؛ بعد از تایید پشتیبانی لول کاربر تنظیم می‌شود."""
+    __tablename__ = 'level_purchases'
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    username = Column(String, nullable=True)             # یوزرنیم زمان سفارش (برای پشتیبانی)
     package_key = Column(String, nullable=False)         # '10' | '20'
     target_level = Column(Integer, nullable=False)
     price = Column(Integer, nullable=False)              # تومان
+    receipt_file_id = Column(String, nullable=True)
+    status = Column(String, nullable=False, default='pending')  # pending | approved | rejected
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    decided_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class PointsShopOrder(Base):
+    """سفارش خرید روب پوینت (با تعداد دلخواه) با کارت‌به‌کارت؛ بعد از تایید پشتیبانی به حساب خریدار اضافه می‌شود."""
+    __tablename__ = 'points_shop_orders'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    username = Column(String, nullable=True)
+    package_key = Column(String, nullable=False)         # '500k' | '1m'
+    unit_points = Column(Integer, nullable=False)
+    quantity = Column(Integer, nullable=False, default=1)
+    points_amount = Column(BigInteger, nullable=False)   # unit_points × quantity
+    price = Column(BigInteger, nullable=False)           # تومان
     receipt_file_id = Column(String, nullable=True)
     status = Column(String, nullable=False, default='pending')  # pending | approved | rejected
     started_at = Column(DateTime(timezone=True), nullable=True)
@@ -715,6 +735,18 @@ def init_db():
             _tc = {c['name'] for c in inspector.get_columns(_t)}
             if 'recipient_username' not in _tc:
                 with engine.begin() as conn: conn.execute(text(f'ALTER TABLE {_t} ADD COLUMN recipient_username VARCHAR'))
+    # موجودی روب‌پوینت/بانک ۶۴ بیتی شود تا خرید تعداد بالا از سقف ۲.۱ میلیارد ردنشود (فقط PostgreSQL؛ فقط اگر هنوز INTEGER باشد)
+    if engine.dialect.name == 'postgresql':
+        for _tbl, _col in (('users', 'fox_points'), ('users', 'fox_total_earned'),
+                           ('bank_accounts', 'balance'), ('bank_transactions', 'amount')):
+            try:
+                if _tbl in inspector.get_table_names():
+                    _ctype = next((c['type'] for c in inspector.get_columns(_tbl) if c['name'] == _col), None)
+                    if _ctype is not None and 'BIGINT' not in str(_ctype).upper():
+                        with engine.begin() as conn:
+                            conn.execute(text(f'ALTER TABLE {_tbl} ALTER COLUMN {_col} TYPE BIGINT'))
+            except Exception as _exc:
+                print(f'bigint migration skipped for {_tbl}.{_col}: {_exc}')
     cols = {c['name'] for c in inspector.get_columns('users')}
     injured_cols = {c['name'] for c in inspector.get_columns('injured_foxes')}
     bank_cols = {c['name'] for c in inspector.get_columns('bank_accounts')}
