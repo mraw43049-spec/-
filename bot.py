@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 import io
 import json
 import logging
@@ -11612,6 +11613,7 @@ def football_match_admin_view(m):
          InlineKeyboardButton("📝 متن/مدیا", callback_data=f"admin:football:an:{m.id}")],
         [InlineKeyboardButton("👁 پیش‌نمایش", callback_data=f"admin:football:pv:{m.id}"),
          InlineKeyboardButton("📢 ارسال به کانال اصلی", callback_data=f"admin:football:post:{m.id}")],
+        [InlineKeyboardButton("📣 ارسال به گپ‌ها", callback_data=f"admin:football:grp:{m.id}")],
         [InlineKeyboardButton("🔒 بستن بازی" if is_open else "🔓 باز کردن بازی", callback_data=f"admin:football:toggle:{m.id}"),
          InlineKeyboardButton("🗑 حذف", callback_data=f"admin:football:del:{m.id}")],
         [InlineKeyboardButton("🔙 لیست بازی‌ها", callback_data="admin:football:matches")],
@@ -11670,6 +11672,30 @@ async def _football_send_announce(bot, chat_id, m):
     return await bot.send_message(chat_id=chat_id, text=football_auto_announce_text(m), reply_markup=kb)
 
 
+async def _football_groups_task(bot, admin_chat, chat_ids, snap):
+    ok = fail = 0
+    try:
+        for cid in chat_ids:
+            sent = False
+            for _ in range(3):
+                try:
+                    await _football_send_announce(bot, cid, snap)
+                    sent = True
+                    break
+                except RetryAfter as e:
+                    await asyncio.sleep(float(e.retry_after) + 0.5)
+                except (TimedOut, NetworkError):
+                    await asyncio.sleep(1.5)
+                except Exception:
+                    break
+            ok += 1 if sent else 0
+            fail += 0 if sent else 1
+            await asyncio.sleep(0.1)
+    except Exception:
+        logger.exception("football groups send failed")
+    await notify_user_private(bot, admin_chat, f"✅ ارسال بازی به گپ‌ها تموم شد.\n📨 موفق: {ok:,}\n❌ ناموفق (ربات حذف شده/بسته/بدون دسترسی): {fail:,}")
+
+
 async def admin_football_callback(update, context):
     q = update.callback_query
     if not admin_only(q.from_user.id):
@@ -11707,7 +11733,7 @@ async def admin_football_callback(update, context):
         await _edit_or_send(q, text, kb)
         return
 
-    mt = re.fullmatch(r"admin:football:(m|rw|an|pv|post|toggle|del):(\d+)", data)
+    mt = re.fullmatch(r"admin:football:(m|rw|an|pv|post|grp|gok|toggle|del):(\d+)", data)
     if mt:
         op, match_id = mt.group(1), int(mt.group(2))
         session = get_session()
@@ -11761,6 +11787,29 @@ async def admin_football_callback(update, context):
                 await q.answer("📢 توی کانال اصلی گذاشته شد.")
                 text, kb = football_match_admin_view(m)
                 await _edit_or_send(q, text, kb)
+                return
+
+            if op == "grp":
+                n = session.query(GroupChat).filter(GroupChat.active == 1).count()
+                await q.answer()
+                if not n:
+                    await q.message.reply_text("❌ هیچ گپ فعالی ثبت نشده.")
+                    return
+                await _edit_or_send(q, f"📣 متن/مدیای بازی #{match_id} (با دکمه‌ی «⚽ پیش‌بینی») برای {n:,} گپ فعال فرستاده بشه؟",
+                                    InlineKeyboardMarkup([[InlineKeyboardButton("✅ بله، بفرست", callback_data=f"admin:football:gok:{match_id}"),
+                                                           InlineKeyboardButton("لغو", callback_data=f"admin:football:m:{match_id}")]]))
+                return
+
+            if op == "gok":
+                chat_ids = [c.chat_id for c in session.query(GroupChat).filter(GroupChat.active == 1).all()]
+                snap = SimpleNamespace(id=m.id, team_home=m.team_home, team_away=m.team_away, match_time=m.match_time,
+                                       reward=m.reward, ann_chat_id=m.ann_chat_id, ann_message_id=m.ann_message_id)
+                await q.answer("📣 ارسال شروع شد.")
+                await _edit_or_send(q, f"📣 ارسال به {len(chat_ids):,} گپ شروع شد؛ وقتی تموم شد گزارشش رو می‌فرستم.",
+                                    InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازی", callback_data=f"admin:football:m:{match_id}")]]))
+                task = asyncio.create_task(_football_groups_task(context.bot, q.message.chat_id, chat_ids, snap))
+                _GW_TASKS.add(task)
+                task.add_done_callback(_GW_TASKS.discard)
                 return
 
             if op == "toggle":
