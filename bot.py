@@ -19,6 +19,8 @@ from telegram.ext import (
     ContextTypes, MessageHandler, filters, ExtBot
 )
 from telegram.request import HTTPXRequest
+from telegram import LabeledPrice
+from telegram.ext import PreCheckoutQueryHandler
 
 
 # Telegram inline-button color policy (Bot API button styles).
@@ -9355,6 +9357,287 @@ async def points_admin_button(update, context):
         session.close()
 
 
+# ---------- پرداخت با استارز تلگرام ⭐ (XTR) ----------
+# قیمت استارزی هر بسته = قیمت تومانی ÷ STARS_TOMAN_RATE (رو بالا گرد می‌شه). مقدار پیش‌فرض رو می‌تونی با
+# متغیر محیطی STARS_TOMAN_RATE توی Railway عوض کنی، یا داخل هر بسته یک کلید "stars" بذاری تا قیمت ثابت داشته باشه.
+import math as _math
+
+STARS_TOMAN_RATE = max(1, int(os.environ.get("STARS_TOMAN_RATE", "4000") or 4000))
+STARS_MAX_PER_INVOICE = max(1, int(os.environ.get("STARS_MAX_PER_INVOICE", "10000") or 10000))
+
+
+def stars_for_toman(price):
+    return max(1, int(_math.ceil(int(price) / STARS_TOMAN_RATE)))
+
+
+def pkg_stars(pkg, qty=1):
+    fixed = pkg.get("stars")
+    if fixed:
+        return int(fixed) * int(qty)
+    return stars_for_toman(int(pkg["price"]) * int(qty))
+
+
+def stars_available(stars):
+    return 1 <= int(stars) <= STARS_MAX_PER_INVOICE
+
+
+async def send_stars_invoice(bot, chat_id, title, description, payload, stars):
+    title = title[:32]
+    await bot.send_invoice(
+        chat_id=chat_id,
+        title=title,
+        description=description[:255],
+        payload=payload,
+        provider_token="",            # برای استارز باید خالی باشه
+        currency="XTR",
+        prices=[LabeledPrice(title, int(stars))],
+    )
+
+
+_STARS_MODELS = {"lvl": LevelPurchase, "rpt": PointsShopOrder}
+
+
+def _stars_payload_parse(payload):
+    m = re.fullmatch(r"(lvl|rpt):(\d+)", payload or "")
+    return (m.group(1), int(m.group(2))) if m else (None, None)
+
+
+async def _try_refund_stars(context, user_id, charge_id):
+    try:
+        await context.bot.refund_star_payment(user_id=int(user_id), telegram_payment_charge_id=charge_id)
+        return True, ""
+    except Exception as e:  # noqa: BLE001
+        logger.warning("refund_star_payment failed: %s", e)
+        return False, str(e)
+
+
+async def _notify_admins_text(context, text):
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=text)
+        except Exception:
+            logger.warning("ارسال پیام پرداخت استارزی به ادمین %s ناموفق بود", admin_id)
+
+
+async def stars_precheckout(update, context):
+    """تلگرام قبل از برداشت استارز می‌پرسه؛ باید تا ۱۰ ثانیه جواب بدیم."""
+    q = update.pre_checkout_query
+    if not q:
+        return
+    kind, oid = _stars_payload_parse(q.invoice_payload)
+    if not kind:
+        await q.answer(ok=False, error_message="این سفارش نامعتبره.")
+        return
+    session = get_session()
+    try:
+        order = session.get(_STARS_MODELS[kind], oid)
+        if (
+            order is None
+            or int(order.user_id) != int(q.from_user.id)
+            or order.status != "stars_pending"
+            or q.currency != "XTR"
+            or int(q.total_amount) != int(order.stars_amount or -1)
+        ):
+            await q.answer(ok=False, error_message="این سفارش دیگه معتبر نیست؛ از فروشگاه دوباره شروع کن.")
+            return
+        if kind == "lvl":
+            buyer = session.get(User, order.user_id)
+            if buyer is None or int(buyer.level or 1) >= int(order.target_level):
+                await q.answer(ok=False, error_message="لول تو همین الان با این بسته برابره یا بالاتره؛ نیازی به پرداخت نیست.")
+                return
+        await q.answer(ok=True)
+    except Exception:
+        logger.exception("stars precheckout failed")
+        try:
+            await q.answer(ok=False, error_message="خطای موقت؛ چند لحظه بعد دوباره تلاش کن.")
+        except Exception:
+            pass
+    finally:
+        session.close()
+
+
+async def stars_successful_payment(update, context):
+    """بعد از پرداخت موفق: تحویل خودکار (لول یا روب پوینت). تکراری‌ها ایمن‌اند (idempotent)."""
+    msg = update.message
+    sp = msg.successful_payment if msg else None
+    if not sp or sp.currency != "XTR":
+        return
+    kind, oid = _stars_payload_parse(sp.invoice_payload)
+    if not kind:
+        return
+    charge_id = sp.telegram_payment_charge_id
+    user_id = int(update.effective_user.id)
+    user_msg = None
+    admin_msg = None
+    session = get_session()
+    try:
+        model = _STARS_MODELS[kind]
+        order = session.query(model).filter(model.id == oid).with_for_update().first()
+        if order is None or int(order.user_id) != user_id:
+            ok, err = await _try_refund_stars(context, user_id, charge_id)
+            admin_msg = (f"⚠️ پرداخت استارزی بدون سفارش معتبر ({sp.invoice_payload}) از کاربر {user_id}، {sp.total_amount} ⭐\n"
+                         f"charge_id: {charge_id}\n" + ("↩️ خودکار ریفاند شد." if ok else f"❌ ریفاند خودکار نشد: {err}"))
+            user_msg = "⚠️ سفارش این پرداخت پیدا نشد" + ("؛ استارزت برگشت داده شد." if ok else "؛ پشتیبانی بررسی می‌کنه.")
+        elif order.status != "stars_pending":
+            if order.charge_id == charge_id:
+                pass   # همون آپدیت دوباره رسیده؛ قبلاً تحویل شده
+            else:
+                ok, err = await _try_refund_stars(context, user_id, charge_id)
+                admin_msg = (f"⚠️ پرداخت استارزی تکراری برای سفارش {sp.invoice_payload} (کاربر {user_id}، {sp.total_amount} ⭐)\n"
+                             f"charge_id: {charge_id}\n" + ("↩️ خودکار ریفاند شد." if ok else f"❌ ریفاند خودکار نشد: {err}"))
+                user_msg = "⚠️ این سفارش قبلاً پرداخت شده بود" + ("؛ استارز این پرداخت برگشت داده شد." if ok else "؛ پشتیبانی بررسی می‌کنه.")
+        else:
+            try:
+                buyer = session.get(User, order.user_id)
+                if buyer is None:
+                    raise RuntimeError("buyer not found")
+                if kind == "lvl":
+                    old_level = int(buyer.level or 1)
+                    if old_level >= int(order.target_level):
+                        ok, err = await _try_refund_stars(context, user_id, charge_id)
+                        order.status = "refunded" if ok else "stars_error"
+                        order.charge_id = charge_id
+                        session.commit()
+                        user_msg = (f"⚠️ لول تو همین الان {old_level}ـه و ارتقا معنی نداشت" +
+                                    ("؛ استارزت برگشت داده شد." if ok else "؛ پشتیبانی بررسی می‌کنه."))
+                        admin_msg = f"⚠️ پرداخت استارزی لول #{order.id} (کاربر {user_id}) وقتی لولش از قبل بالاتر بود؛ " + ("ریفاند شد." if ok else f"ریفاند ناموفق: {err}") + f"\ncharge_id: {charge_id}"
+                    else:
+                        buyer.level = int(order.target_level)
+                        buyer.fox_claim_count = max(int(buyer.fox_claim_count or 0), user_level_requirement(int(order.target_level)))
+                        rewards = apply_level_rewards(session, buyer, old_level, int(order.target_level))
+                        order.status = "approved"
+                        order.decided_at = now_utc()
+                        order.decided_by = 0
+                        order.charge_id = charge_id
+                        session.commit()
+                        user_msg = (
+                            f"✅ پرداخت استارزی انجام شد (سفارش #{order.id}).\n"
+                            f"🎉 لول تو از {old_level} به {order.target_level} رسید.\n\n"
+                            f"🔓 قابلیت‌های این سطح:\n{level_capabilities(int(order.target_level))}"
+                        )
+                        if rewards:
+                            user_msg += "\n\n" + level_up_message(old_level, int(order.target_level), rewards)
+                        admin_msg = (f"⭐ پرداخت استارزی: لول {order.target_level} برای {user_id} (@{order.username or '—'})\n"
+                                     f"{order.stars_amount} ⭐ · سفارش #{order.id} · تحویل خودکار انجام شد.\ncharge_id: {charge_id}")
+                else:
+                    buyer.fox_points = int(buyer.fox_points or 0) + int(order.points_amount)
+                    order.status = "approved"
+                    order.decided_at = now_utc()
+                    order.decided_by = 0
+                    order.charge_id = charge_id
+                    session.commit()
+                    user_msg = (f"✅ پرداخت استارزی انجام شد (سفارش #{order.id}).\n"
+                                f"{order.points_amount:,} روب پوینت 💲 به حسابت اضافه شد.\n💰 موجودی جدید: {buyer.fox_points:,}")
+                    admin_msg = (f"⭐ پرداخت استارزی: {order.points_amount:,} روب پوینت برای {user_id} (@{order.username or '—'})\n"
+                                 f"{order.stars_amount} ⭐ · سفارش #{order.id} · تحویل خودکار انجام شد.\ncharge_id: {charge_id}")
+            except Exception:
+                logger.exception("stars delivery failed (order %s)", sp.invoice_payload)
+                try:
+                    session.rollback()
+                    order = session.get(model, oid)
+                    order.status = "stars_error"
+                    order.charge_id = charge_id
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                user_msg = (f"⚠️ پرداختت ثبت شد ولی تحویل خودکار مشکل داشت. به پشتیبانی بگو: {POINTS_SUPPORT_CONTACT}\n"
+                            f"کد پیگیری: {charge_id}")
+                admin_msg = (f"🚨 پرداخت استارزی انجام شد ولی تحویل خودکار خطا داد!\nسفارش {sp.invoice_payload} · کاربر {user_id} · {sp.total_amount} ⭐\n"
+                             f"charge_id: {charge_id}\nدستی تحویل بده یا /refundstars {charge_id}")
+    finally:
+        session.close()
+    if user_msg:
+        try:
+            await context.bot.send_message(chat_id=user_id, text=user_msg)
+        except Exception:
+            pass
+    if admin_msg:
+        await _notify_admins_text(context, admin_msg)
+    raise ApplicationHandlerStop
+
+
+async def paysupport_command(update, context):
+    """تلگرام برای رباتی که استارز می‌گیره دستور /paysupport رو الزامی می‌دونه."""
+    if not update.message:
+        return
+    await update.message.reply_text(
+        "💬 پشتیبانی پرداخت\n\n"
+        "اگه پرداخت استارزیت انجام شد ولی لول/روب پوینت نیومد، یا اشتباه پرداخت کردی، "
+        f"کد پیگیری پرداخت (یا اسکرین‌شات) رو برای پشتیبانی بفرست: {POINTS_SUPPORT_CONTACT}",
+        **reply_kwargs(update.message),
+    )
+
+
+async def refundstars_command(update, context):
+    """فقط ادمین: /refundstars <charge_id> → استارز پرداخت‌شده رو به کاربر برمی‌گردونه."""
+    if not update.message or not update.effective_user or not admin_only(update.effective_user.id):
+        return
+    cid = (context.args[0].strip() if context.args else "")
+    if not cid:
+        await update.message.reply_text("فرمت: /refundstars charge_id", **reply_kwargs(update.message))
+        return
+    session = get_session()
+    try:
+        order = None
+        for model in (LevelPurchase, PointsShopOrder):
+            order = session.query(model).filter(model.charge_id == cid).first()
+            if order:
+                break
+        if order is None:
+            await update.message.reply_text("❌ سفارشی با این charge_id پیدا نشد.", **reply_kwargs(update.message))
+            return
+        if order.status == "refunded":
+            await update.message.reply_text("ℹ️ این پرداخت قبلاً ریفاند شده.", **reply_kwargs(update.message))
+            return
+        ok, err = await _try_refund_stars(context, order.user_id, cid)
+        if not ok:
+            await update.message.reply_text(f"❌ ریفاند ناموفق: {err}", **reply_kwargs(update.message))
+            return
+        was = order.status
+        order.status = "refunded"
+        session.commit()
+        extra = "\n⚠️ سفارش قبلاً تحویل شده بود؛ لول/روب پوینت کاربر خودکار کم نمی‌شه، اگه لازمه دستی اصلاحش کن." if was == "approved" else ""
+        await update.message.reply_text(f"✅ استارز به کاربر {order.user_id} برگشت داده شد.{extra}", **reply_kwargs(update.message))
+    finally:
+        session.close()
+
+
+def flvl_method_text(pkg, user, stars_n):
+    return (
+        "🧾 خلاصه سفارش\n\n"
+        f"⭐ خرید لول {pkg['level']}\n"
+        f"📈 لول فعلی تو: {int(user.level or 1)} ← لول {pkg['level']}\n"
+        f"💳 کارت به کارت: {pkg['price']:,} تومان\n"
+        + (f"⭐ استارز تلگرام: {stars_n:,} استارز\n" if stars_available(stars_n) else "")
+        + "\nروش پرداخت رو انتخاب کن ⬇️\n"
+        f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {FLVL_SUPPORT_CONTACT}"
+    )
+
+
+def rpts_method_text(flow):
+    p = RPTS_PACKAGES[flow["package_key"]]
+    qty = int(flow.get("qty", 1))
+    stars_n = pkg_stars(p, qty)
+    return (
+        "🧾 خلاصه سفارش\n\n"
+        f"💲 روب پوینت: {p['points'] * qty:,}" + (f" ({qty:,} × {p['points']:,})" if qty > 1 else "") + "\n"
+        f"💳 کارت به کارت: {p['price'] * qty:,} تومان\n"
+        + (f"⭐ استارز تلگرام: {stars_n:,} استارز\n" if stars_available(stars_n) else "")
+        + "\nروش پرداخت رو انتخاب کن ⬇️\n"
+        f"در صورت بروز مشکل با پشتیبانی تماس بگیرید: {POINTS_SUPPORT_CONTACT}"
+    )
+
+
+def rpts_method_keyboard(flow):
+    p = RPTS_PACKAGES[flow["package_key"]]
+    stars_n = pkg_stars(p, int(flow.get("qty", 1)))
+    rows = [[InlineKeyboardButton("💳 کارت به کارت", callback_data="rpts:card:0")]]
+    if stars_available(stars_n):
+        rows.append([InlineKeyboardButton(f"⭐ پرداخت با استارز — {stars_n:,} ⭐", callback_data="rpts:stars:0")])
+    rows.append([InlineKeyboardButton("❌ لغو خرید", callback_data="rpts:cancel:0")])
+    return InlineKeyboardMarkup(rows)
+
+
 # ---------- خرید سطح (لول کل) 🦊 ----------
 
 LEVEL_PACKAGES = {
@@ -9458,7 +9741,7 @@ async def flvl_button(update, context):
         await q.answer("❌ خرید لغو شد.")
         await q.message.edit_text(flvl_shop_text(), reply_markup=flvl_shop_keyboard())
         return
-    if action == "pick":
+    if action in ("pick", "card", "stars"):
         pkg = LEVEL_PACKAGES.get(arg)
         if not pkg:
             await q.answer()
@@ -9477,6 +9760,51 @@ async def flvl_button(update, context):
                     f"⏳ سفارش قبلی شما (#{pending.id}) هنوز در انتظار بررسی پشتیبانیه. بعد از تعیین‌تکلیف می‌تونی سفارش جدید بدی.",
                     show_alert=True,
                 )
+                return
+            stars_n = pkg_stars(pkg)
+            if action == "pick":
+                _clear_shop_flows(context)
+                await q.answer()
+                rows = [[InlineKeyboardButton("💳 کارت به کارت", callback_data=f"flvl:card:{arg}")]]
+                if stars_available(stars_n):
+                    rows.append([InlineKeyboardButton(f"⭐ پرداخت با استارز — {stars_n:,} ⭐", callback_data=f"flvl:stars:{arg}")])
+                rows.append([InlineKeyboardButton("❌ لغو خرید", callback_data="flvl:cancel:0")])
+                await q.message.edit_text(flvl_method_text(pkg, user, stars_n), reply_markup=InlineKeyboardMarkup(rows))
+                return
+            if action == "stars":
+                if not stars_available(stars_n):
+                    await q.answer("پرداخت استارزی برای این بسته فعال نیست؛ کارت‌به‌کارت رو بزن.", show_alert=True)
+                    return
+                order = session.query(LevelPurchase).filter(
+                    LevelPurchase.user_id == user.telegram_id,
+                    LevelPurchase.status == "stars_pending",
+                    LevelPurchase.package_key == arg,
+                ).first()
+                if order is None:
+                    order = LevelPurchase(
+                        user_id=user.telegram_id, username=user.username, package_key=arg,
+                        target_level=pkg["level"], price=pkg["price"], status="stars_pending",
+                        payment_method="stars", stars_amount=stars_n, started_at=now_utc(),
+                    )
+                    session.add(order)
+                else:
+                    order.target_level = pkg["level"]
+                    order.price = pkg["price"]
+                    order.stars_amount = stars_n
+                session.commit()
+                oid = order.id
+                _clear_shop_flows(context)
+                await q.answer()
+                try:
+                    await send_stars_invoice(
+                        context.bot, q.message.chat_id, f"خرید لول {pkg['level']}",
+                        f"ارتقای لول کل حساب تو به لول {pkg['level']}", f"lvl:{oid}", stars_n,
+                    )
+                except Exception:
+                    logger.exception("send_invoice (level) failed")
+                    await q.message.reply_text("⚠️ ساخت فاکتور استارزی ناموفق بود؛ چند لحظه بعد دوباره امتحان کن یا کارت‌به‌کارت بزن.")
+                    return
+                await q.message.reply_text("⭐ فاکتور بالا رو با دکمه‌ی «پرداخت» تایید کن؛ بعد از پرداخت لولت بلافاصله تغییر می‌کنه.")
                 return
             flow = {"stage": "await_receipt", "package_key": arg, "started_at": now_utc().isoformat()}
             _clear_shop_flows(context)
@@ -9772,13 +10100,10 @@ async def rpts_button(update, context):
             await q.answer()
             await q.message.edit_text(rpts_qty_text(arg, 1), reply_markup=rpts_qty_keyboard(1))
         else:
-            flow = {"stage": "await_receipt", "package_key": arg, "qty": 1, "started_at": now_utc().isoformat()}
+            flow = {"stage": "method", "package_key": arg, "qty": 1}
             context.user_data["rpts_flow"] = flow
             await q.answer()
-            await q.message.edit_text(
-                rpts_summary_text(flow),
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو خرید", callback_data="rpts:cancel:0")]]),
-            )
+            await q.message.edit_text(rpts_method_text(flow), reply_markup=rpts_method_keyboard(flow))
         return
     flow = context.user_data.get("rpts_flow") or {}
     if action in ("inc", "dec"):
@@ -9803,14 +10128,70 @@ async def rpts_button(update, context):
         if flow.get("stage") != "qty":
             await q.answer("لطفاً دوباره از فروشگاه شروع کن.", show_alert=True)
             return
-        flow["stage"] = "await_receipt"
-        flow["started_at"] = now_utc().isoformat()
+        flow["stage"] = "method"
         context.user_data["rpts_flow"] = flow
         await q.answer()
-        await q.message.edit_text(
-            rpts_summary_text(flow),
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو خرید", callback_data="rpts:cancel:0")]]),
-        )
+        await q.message.edit_text(rpts_method_text(flow), reply_markup=rpts_method_keyboard(flow))
+        return
+    if action in ("card", "stars"):
+        if flow.get("stage") != "method":
+            await q.answer("لطفاً دوباره از فروشگاه شروع کن.", show_alert=True)
+            return
+        p = RPTS_PACKAGES.get(flow.get("package_key"))
+        if not p:
+            await q.answer()
+            return
+        qty = max(1, int(flow.get("qty", 1)))
+        if action == "card":
+            flow["stage"] = "await_receipt"
+            flow["started_at"] = now_utc().isoformat()
+            context.user_data["rpts_flow"] = flow
+            await q.answer()
+            await q.message.edit_text(
+                rpts_summary_text(flow),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو خرید", callback_data="rpts:cancel:0")]]),
+            )
+            return
+        stars_n = pkg_stars(p, qty)
+        if not stars_available(stars_n):
+            await q.answer("پرداخت استارزی برای این مقدار فعال نیست؛ کارت‌به‌کارت رو بزن.", show_alert=True)
+            return
+        session = get_session()
+        try:
+            user = get_or_create_user(session, q.from_user)
+            order = session.query(PointsShopOrder).filter(
+                PointsShopOrder.user_id == user.telegram_id,
+                PointsShopOrder.status == "stars_pending",
+                PointsShopOrder.package_key == flow["package_key"],
+                PointsShopOrder.quantity == qty,
+            ).first()
+            if order is None:
+                order = PointsShopOrder(
+                    user_id=user.telegram_id, username=user.username, package_key=flow["package_key"],
+                    unit_points=p["points"], quantity=qty, points_amount=p["points"] * qty,
+                    price=p["price"] * qty, status="stars_pending", payment_method="stars",
+                    stars_amount=stars_n, started_at=now_utc(),
+                )
+                session.add(order)
+            else:
+                order.stars_amount = stars_n
+                order.price = p["price"] * qty
+            session.commit()
+            oid = order.id
+        finally:
+            session.close()
+        _clear_shop_flows(context)
+        await q.answer()
+        try:
+            await send_stars_invoice(
+                context.bot, q.message.chat_id, f"{p['points'] * qty:,} روب پوینت",
+                f"خرید {p['points'] * qty:,} روب پوینت برای حساب خودت", f"rpt:{oid}", stars_n,
+            )
+        except Exception:
+            logger.exception("send_invoice (points) failed")
+            await q.message.reply_text("⚠️ ساخت فاکتور استارزی ناموفق بود؛ چند لحظه بعد دوباره امتحان کن یا کارت‌به‌کارت بزن.")
+            return
+        await q.message.reply_text("⭐ فاکتور بالا رو با دکمه‌ی «پرداخت» تایید کن؛ بعد از پرداخت روب پوینت‌ها بلافاصله به حسابت اضافه می‌شن.")
         return
     await q.answer()
 
@@ -17761,6 +18142,11 @@ def main():
     app.add_handler(CommandHandler("admin",admin_command))
     app.add_handler(CommandHandler("givestars",givestars_command,filters=filters.User(user_id=list(ADMIN_IDS))))
     app.add_handler(CommandHandler("transfer",transfer_command))
+    # پرداخت با استارز تلگرام: پیش‌تایید + تحویل بعد از پرداخت (قبل از همه‌ی گیت‌ها، تا پولِ کاربر هیچ‌وقت گیر نکنه)
+    app.add_handler(PreCheckoutQueryHandler(stars_precheckout))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, stars_successful_payment), group=-11)
+    app.add_handler(CommandHandler("paysupport", paysupport_command))
+    app.add_handler(CommandHandler("refundstars", refundstars_command, filters=filters.User(user_id=list(ADMIN_IDS))))
     app.add_handler(CommandHandler("hunt",hunt_command))
     app.add_handler(CommandHandler("fox",fox_command))
     app.add_handler(CommandHandler(["pet","pets"],pet_command))
@@ -17837,9 +18223,9 @@ def main():
     app.add_handler(CallbackQueryHandler(vip_button,pattern=r"^vip:[a-z]+(?::[a-z]+){0,3}$"))
     app.add_handler(CallbackQueryHandler(pet_button,pattern=r"^pet:[a-z]+(?::[a-z0-9]+){0,2}$"))
     app.add_handler(CallbackQueryHandler(points_admin_button,pattern=r"^pts:(?:approve|reject):\d+$"))
-    app.add_handler(CallbackQueryHandler(flvl_button,pattern=r"^flvl:(?:shop|pick|cancel):[^:]+$"))
+    app.add_handler(CallbackQueryHandler(flvl_button,pattern=r"^flvl:(?:shop|pick|card|stars|cancel):[^:]+$"))
     app.add_handler(CallbackQueryHandler(flvl_admin_button,pattern=r"^flvlad:(?:approve|reject):\d+$"))
-    app.add_handler(CallbackQueryHandler(rpts_button,pattern=r"^rpts:(?:shop|pick|inc|dec|ok|cancel|noop):[^:]+$"))
+    app.add_handler(CallbackQueryHandler(rpts_button,pattern=r"^rpts:(?:shop|pick|inc|dec|ok|card|stars|cancel|noop):[^:]+$"))
     app.add_handler(CallbackQueryHandler(rpts_admin_button,pattern=r"^rptsad:(?:approve|reject):\d+$"))
     app.add_handler(CallbackQueryHandler(fake_receipt_ban_button,pattern=r"^fakeban:\d+$"))
     app.add_handler(CallbackQueryHandler(transfer_button,pattern=r"^transfer:(yes|no):\d+:\d+:\d+$"))

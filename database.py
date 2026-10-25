@@ -581,6 +581,9 @@ class LevelPurchase(Base):
     price = Column(Integer, nullable=False)              # تومان
     receipt_file_id = Column(String, nullable=True)
     status = Column(String, nullable=False, default='pending')  # pending | approved | rejected
+    payment_method = Column(String, nullable=False, default='card')   # card | stars
+    stars_amount = Column(Integer, nullable=True)                      # تعداد استارز تلگرام (فقط برای پرداخت استارزی)
+    charge_id = Column(String, nullable=True)                          # telegram_payment_charge_id (برای ریفاند)
     started_at = Column(DateTime(timezone=True), nullable=True)
     decided_at = Column(DateTime(timezone=True), nullable=True)
     decided_by = Column(BigInteger, nullable=True)
@@ -600,6 +603,9 @@ class PointsShopOrder(Base):
     price = Column(BigInteger, nullable=False)           # تومان
     receipt_file_id = Column(String, nullable=True)
     status = Column(String, nullable=False, default='pending')  # pending | approved | rejected
+    payment_method = Column(String, nullable=False, default='card')   # card | stars
+    stars_amount = Column(Integer, nullable=True)                      # تعداد استارز تلگرام (فقط برای پرداخت استارزی)
+    charge_id = Column(String, nullable=True)                          # telegram_payment_charge_id (برای ریفاند)
     started_at = Column(DateTime(timezone=True), nullable=True)
     decided_at = Column(DateTime(timezone=True), nullable=True)
     decided_by = Column(BigInteger, nullable=True)
@@ -1023,6 +1029,35 @@ def init_db():
             gwe_cols = {c['name'] for c in inspector.get_columns('giveaway_entries')}
             if 'repeat_blocked_by' not in gwe_cols:
                 conn.execute(text('ALTER TABLE giveaway_entries ADD COLUMN repeat_blocked_by BIGINT'))
+
+
+def _add_stars_columns():
+    """ستون‌های پرداخت استارزی برای level_purchases و points_shop_orders (روی دیتابیس موجود)."""
+    try:
+        insp = inspect(engine)
+        names = set(insp.get_table_names())
+        for tbl in ('level_purchases', 'points_shop_orders'):
+            if tbl not in names:
+                continue
+            cols = {c['name'] for c in insp.get_columns(tbl)}
+            for name, definition in (
+                ('payment_method', "VARCHAR NOT NULL DEFAULT 'card'"),
+                ('stars_amount', 'INTEGER'),
+                ('charge_id', 'VARCHAR'),
+            ):
+                if name not in cols:
+                    with engine.begin() as conn:
+                        conn.execute(text(f'ALTER TABLE {tbl} ADD COLUMN {name} {definition}'))
+    except Exception as e:  # noqa: BLE001
+        print(f'[db] stars columns migration failed: {e}')
+
+
+_init_db_original = init_db
+
+
+def init_db():  # noqa: F811
+    _init_db_original()
+    _add_stars_columns()
 
 
 def get_session():
