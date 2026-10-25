@@ -4,11 +4,11 @@
 
 - پشتیبانی از پنل مدیریت (🤖 سلف) با آیدی عددی کاربر، سلف رو برای اون کاربر فعال/غیرفعال می‌کنه.
 - کاربرِ فعال‌شده با /self (یا نوشتن «سلف») اکانتش رو وصل می‌کنه و تا ۳ کلمه تنظیم می‌کنه:
-  هر کلمه = (کلمه، تایمر، اسم دکمه‌ی ربات).
-- وقتی کاربر از اکانت خودش دقیقاً اون کلمه رو بفرسته، بعد از تایمر، سلف روی آخرین پیام همین ربات
-  (یا پیامی که روش ریپلای کرده) دکمه‌ی انتخاب‌شده رو می‌زنه.
+  هر کلمه = (کلمه، گپ، تایمر، جای دکمه: چپ/وسط/راست/خالی).
+- وقتی کاربر از اکانت خودش دقیقاً اون کلمه رو توی همون گپ بفرسته، بعد از تایمر، سلف روی دکمه‌ی انتخاب‌شده‌ی
+  پیام ربات (ریپلای یا آخرین پیام دکمه‌دار ربات‌های دیگه) کلیک می‌کنه. روی ربات روباهیو هیچ‌وقت کلیک نمی‌کنه.
 
-امنیت: سشن‌ها رمزنگاری‌شده ذخیره می‌شن (Fernet)، سلف فقط روی پیام‌های همین ربات کلیک می‌کنه،
+امنیت: سشن‌ها رمزنگاری‌شده ذخیره می‌شن (Fernet)، سلف هیچ‌وقت روی ربات روباهیو کلیک نمی‌کنه،
 محدودیت سرعت داره و کاربر هر لحظه می‌تونه اتصال رو قطع کنه (خروج کامل از سشن).
 
 متغیرهای Railway: SELF_API_ID و SELF_API_HASH (از my.telegram.org)، اختیاری: SELF_KEY.
@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 MAX_SLOTS = 3
 MAX_DELAY = 3600
+POS = {"l": "⬅️ چپ", "m": "⏺ وسط", "r": "➡️ راست", "n": "⬜ خالی"}
 API_ID = int(os.environ.get("SELF_API_ID", "0") or 0)
 API_HASH = os.environ.get("SELF_API_HASH", "").strip()
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
@@ -191,7 +192,7 @@ async def _on_out(uid, ev):
     if not txt:
         return
     for i, s in enumerate(_slots.get(uid, [])):
-        if s and s.get("word") and norm(s["word"]) == txt:
+        if s and s.get("word") and s.get("chat") and s.get("pos", "n") != "n" and ev.chat_id == s["chat"] and ev.chat_id != _bot_id[0] and norm(s["word"]) == txt:
             now = time.time()
             if now - _last.get((uid, i), 0) < 2:
                 continue
@@ -204,35 +205,48 @@ async def _on_out(uid, ev):
             asyncio.create_task(_fire(uid, ev, s))
 
 
-def _find_button(msg, label):
-    want = norm(label)
-    for row in (msg.buttons or []):
-        for b in row:
-            if want and want in norm(b.text):
-                return b
-    return None
+def _pick_button(msg, pos):
+    rows = [r for r in (msg.buttons or []) if r]
+    if not rows or pos == "n":
+        return None
+    row = rows[0]
+    if pos == "l":
+        return row[0]
+    if pos == "r":
+        return row[-1]
+    if len(row) == 1:
+        return row[0]
+    return row[len(row) // 2] if len(row) % 2 == 1 else None
+
+
+async def _usable(m):
+    """پیام دکمه‌دار از یک ربات؛ هیچ‌وقت ربات روباهیو."""
+    if not m.buttons or m.sender_id == _bot_id[0]:
+        return False
+    snd = await m.get_sender()
+    return bool(snd and getattr(snd, "bot", False))
 
 
 async def _fire(uid, ev, s):
     try:
         await asyncio.sleep(max(0, int(s.get("delay", 0))))
         client = _clients.get(uid)
-        if not client or _paused.get(uid):
+        if not client or _paused.get(uid) or ev.chat_id == _bot_id[0]:
             return
-        label = s.get("btn", "")
+        pos = s.get("pos", "n")
         target = None
         if ev.is_reply:
             m = await ev.get_reply_message()
-            if m and m.sender_id == _bot_id[0] and m.buttons and _find_button(m, label):
+            if m and await _usable(m):
                 target = m
         if not target:
             async for m in client.iter_messages(ev.chat_id, limit=15):
-                if m.sender_id == _bot_id[0] and m.buttons and _find_button(m, label):
+                if m.buttons and await _usable(m):
                     target = m
                     break
-        if not target:
-            return
-        await _find_button(target, label).click()
+        btn = _pick_button(target, pos) if target else None
+        if btn:
+            await btn.click()
     except Exception as e:  # noqa: BLE001
         logger.info("self fire failed %s: %s", uid, e)
 
@@ -258,6 +272,21 @@ async def start_all(app):
     asyncio.create_task(_go())
 
 
+async def _dialogs(client):
+    out = []
+    try:
+        async for d in client.iter_dialogs(limit=300):
+            if d.id == _bot_id[0]:
+                continue
+            if d.is_group:
+                out.append((d.id, d.name or str(d.id), True))
+            elif d.is_user and getattr(d.entity, "bot", False):
+                out.append((d.id, d.name or str(d.id), False))
+    except Exception as e:  # noqa: BLE001
+        logger.info("dialogs failed: %s", e)
+    return out
+
+
 # ---------- پنل کاربر ----------
 def _panel(uid):
     row = get_row(uid)
@@ -266,12 +295,12 @@ def _panel(uid):
     lines = ["🤖 <b>سلف روبی</b>\n",
              f"🔌 اتصال: {'✅ وصل' if on else '❌ قطع'}",
              f"⚙️ وضعیت: {'⏸ متوقف' if row.paused else '▶️ فعال'}\n",
-             "کلمه‌ای رو از اکانت خودت بفرست؛ بعد از تایمر، دکمه‌ی انتخابی از آخرین پیام ربات زده می‌شه.\n"]
+             "کلمه رو توی گپ انتخابی از اکانت خودت بفرست؛ بعد از تایمر، دکمه‌ی انتخابی (چپ/وسط/راست) زده می‌شه.\n"]
     kb = []
     for i in range(MAX_SLOTS):
         s = sl[i] if i < len(sl) else None
         if s and s.get("word"):
-            t = f"{i + 1}️⃣ «{s['word']}» ⏱{fmt_delay(s.get('delay', 0))} 🔘{s.get('btn') or '—'}"
+            t = f"{i + 1}️⃣ «{s['word']}» {(s.get('title') or '💬؟')[:12]} {POS[s.get('pos', 'n')]}"
         else:
             t = f"{i + 1}️⃣ ➕ تنظیم کلمه"
         kb.append([B(t[:60], callback_data=f"self:s:{i}")])
@@ -285,9 +314,10 @@ def _slot_panel(uid, i):
     sl = slots_of(row)
     s = sl[i] if i < len(sl) else {}
     t = (f"{i + 1}️⃣ <b>کلمه‌ی {i + 1}</b>\n\n📝 کلمه: {s.get('word') or '—'}\n"
-         f"⏱ تایمر: {fmt_delay(s.get('delay', 0)) if s.get('word') else '—'}\n🔘 دکمه‌ی ربات: {s.get('btn') or '—'}")
-    kb = KB([[B("📝 کلمه", callback_data=f"self:e:{i}:word"), B("⏱ تایمر", callback_data=f"self:e:{i}:delay")],
-             [B("🔘 دکمه‌ی ربات", callback_data=f"self:e:{i}:btn")],
+         f"💬 گپ: {s.get('title') or '—'}\n"
+         f"⏱ تایمر: {fmt_delay(s.get('delay', 0)) if s.get('word') else '—'}\n🎯 دکمه: {POS[s.get('pos', 'n')]}")
+    kb = KB([[B("📝 کلمه", callback_data=f"self:e:{i}:word"), B("💬 گپ", callback_data=f"self:cp:{i}:0")],
+             [B("⏱ تایمر", callback_data=f"self:e:{i}:delay"), B("🎯 دکمه", callback_data=f"self:pm:{i}")],
              [B("🗑 حذف", callback_data=f"self:d:{i}"), B("🔙 بازگشت", callback_data="self:home")]])
     return t, kb
 
@@ -315,12 +345,9 @@ def _allowed(uid):
 async def cmd_self(update, context):
     u = update.effective_user
     if update.effective_chat.type != "private":
-        await update.effective_message.reply_text("🤖 سلف فقط داخل پی‌وی ربات تنظیم می‌شه.")
         return
     if not _allowed(u.id):
-        await update.effective_message.reply_text(
-            f"⛔ سلف برای شما فعال نیست.\nاز پشتیبانی بخواه با آیدی عددی‌ت فعالش کنه:\n<code>{u.id}</code>", parse_mode="HTML")
-        return
+        raise ApplicationHandlerStop   # برای کسی که سلف نداره هیچ پیامی نمی‌آد
     t, kb = _panel(u.id)
     await update.effective_message.reply_text(t, reply_markup=kb, parse_mode="HTML")
 
@@ -329,7 +356,7 @@ async def cb_user(update, context):
     q = update.callback_query
     uid = q.from_user.id
     if not _allowed(uid):
-        await q.answer("سلف برای شما فعال نیست.", show_alert=True)
+        await q.answer()
         return
     p = q.data.split(":")
     a = p[1]
@@ -358,8 +385,56 @@ async def cb_user(update, context):
         ud["self_st"] = {"step": f, "slot": i}
         ask = {"word": "📝 کلمه رو بفرست (دقیقاً همونی که می‌خوای از اکانتت بگی):",
                "delay": "⏱ تایمر رو بفرست؛ مثلاً <code>30</code> (ثانیه) یا <code>5 دقیقه</code> (حداکثر ۶۰ دقیقه):",
-               "btn": "🔘 اسم دکمه‌ی ربات رو بفرست؛ مثلاً <code>برداشت</code> (همون متنی که روی دکمه‌ست):"}[f]
+               }[f]
         await q.message.edit_text(ask, parse_mode="HTML", reply_markup=KB([[B("🔙 بازگشت", callback_data=f"self:s:{i}")]]))
+    elif a == "pm":
+        i = int(p[2])
+        await q.message.edit_text("🎯 کدوم دکمه‌ی پیام ربات زده بشه؟\n(⬜ خالی = هیچ دکمه‌ای زده نشه)", reply_markup=KB([
+            [B(POS["l"], callback_data=f"self:p:{i}:l"), B(POS["m"], callback_data=f"self:p:{i}:m"), B(POS["r"], callback_data=f"self:p:{i}:r")],
+            [B(POS["n"], callback_data=f"self:p:{i}:n")], [B("🔙 بازگشت", callback_data=f"self:s:{i}")]]))
+    elif a == "p":
+        i, v = int(p[2]), p[3]
+        if v in POS:
+            sl = _get_slots(uid)
+            sl[i]["pos"] = v
+            sl[i].setdefault("delay", 0)
+            _put_slots(uid, sl)
+        t, kb = _slot_panel(uid, i)
+        await q.message.edit_text(t, reply_markup=kb, parse_mode="HTML")
+    elif a == "cp":
+        i, pg = int(p[2]), int(p[3])
+        c = _clients.get(uid)
+        if not c:
+            await q.answer("اول اکانتت رو وصل کن.", show_alert=True)
+            return
+        if pg == 0 or "self_dl" not in ud:
+            ud["self_dl"] = await _dialogs(c)
+        pg = max(0, pg - 1)   # مقدار callback = شماره‌ی صفحه + ۱ (۰ یعنی تازه‌سازی)
+        dl = ud["self_dl"]
+        per = 8
+        pg = max(0, min(pg, max(0, (len(dl) - 1) // per)))
+        kb = [[B(("👥 " if g else "🤖 ") + n[:28], callback_data=f"self:cs:{i}:{pg * per + k}")] for k, (cid, n, g) in enumerate(dl[pg * per:(pg + 1) * per])]
+        nav = []
+        if pg > 0:
+            nav.append(B("◀️", callback_data=f"self:cp:{i}:{pg}"))
+        if (pg + 1) * per < len(dl):
+            nav.append(B("▶️", callback_data=f"self:cp:{i}:{pg + 2}"))
+        if nav:
+            kb.append(nav)
+        kb.append([B("🔙 بازگشت", callback_data=f"self:s:{i}")])
+        await q.message.edit_text("💬 کلمه توی کدوم گپ گفته بشه؟ (گروه‌ها و چت ربات‌های دیگه)" if dl else "گپی پیدا نشد.", reply_markup=KB(kb))
+    elif a == "cs":
+        i, k = int(p[2]), int(p[3])
+        dl = ud.get("self_dl") or []
+        if k >= len(dl):
+            await q.answer("لیست قدیمی شده؛ دوباره باز کن.", show_alert=True)
+            return
+        sl = _get_slots(uid)
+        sl[i]["chat"], sl[i]["title"] = dl[k][0], dl[k][1][:40]
+        sl[i].setdefault("delay", 0)
+        _put_slots(uid, sl)
+        t, kb = _slot_panel(uid, i)
+        await q.message.edit_text("✅ گپ انتخاب شد.\n\n" + t, reply_markup=kb, parse_mode="HTML")
     elif a == "d":
         i = int(p[2])
         sl = _get_slots(uid)
@@ -408,7 +483,7 @@ async def user_text(update, context):
         await _admin_input(update, context, aa, text)
         raise ApplicationHandlerStop
     if text == "سلف":
-        await cmd_self(update, context)
+        await cmd_self(update, context)   # برای کاربر بدون سلف ساکت است
         raise ApplicationHandlerStop
     st = ud.get("self_st")
     if not st:
@@ -423,7 +498,7 @@ async def user_text(update, context):
             ud.pop("self_st", None)
             await _drop_login(uid)
             await msg.reply_text("لغو شد.")
-        elif st["step"] in ("word", "delay", "btn"):
+        elif st["step"] in ("word", "delay"):
             i, f = st["slot"], st["step"]
             sl = _get_slots(uid)
             if f == "delay":
