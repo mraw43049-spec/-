@@ -53,6 +53,7 @@ from config import (
     CLAIM_POINTS_MAX, CLAIM_POINTS_MIN, REQUIRED_CHANNEL, REQUIRED_CHANNEL_URL,
     REQUIRED_CHANNEL_2, REQUIRED_CHANNEL_2_URL, DATABASE_URL
 )
+import selfbot
 from database import (
     Challenge, FoxHunt, GroupChat, InjuredFox, User, BankAccount, BankTransaction, RubyTable, RubySmuggling, JailWallMemory,
     FootballMatch, FootballPrediction, GiftOrder, FactoryOrder, FactoryInventory, MarketPrice, Referral, PointsPurchase, LevelPurchase, PointsShopOrder, FriendRequest, Friendship, CityDonation, CityMarketItem, RubyEgg, CityMemberPresence, GiftCode, GiftCodeRedemption, FoxMoodSong, FoxMoodChannel, MediaRotation, RubyMarriage, RubyBaby, RubyEmojiItem, RubyLuckyBag, RubyOwl, Giveaway, GiveawayEntry, RecoveryCode, Base, get_session, init_db
@@ -10848,6 +10849,7 @@ def admin_main_keyboard():
         [InlineKeyboardButton("💞 تنظیم رابطه ازدواج", callback_data="admin:marriage_relation")],
         [InlineKeyboardButton("⚽ پیش‌بینی فوتبال", callback_data="admin:football")],
         [InlineKeyboardButton("⛓️ زندان روبی", callback_data="admin:jailmenu")],
+        [InlineKeyboardButton("🤖 سلف", callback_data="selfa:menu")],
         [InlineKeyboardButton("📦 دریافت بکاپ اطلاعات", callback_data="admin:backup")],
     ])
 
@@ -15925,6 +15927,8 @@ async def startup_selfcheck(application):
 async def post_init(application):
     """منوی دستورهای کنار کادر پیام را مثل منوی ربات‌های تلگرام فعال می‌کند."""
     await startup_selfcheck(application)
+    try: await selfbot.start_all(application)
+    except Exception as exc: logger.warning("selfbot start_all failed: %s", exc)
     # فقط دستورهای درخواستی کاربر در منوی سه‌خطی نمایش داده می‌شوند.
     commands = [
         BotCommand("start", "شروع بازی"),
@@ -17301,6 +17305,7 @@ def main():
     if app.job_queue is None:
         raise RuntimeError("JobQueue is unavailable. Install python-telegram-bot[job-queue].")
     app.add_error_handler(on_error)
+    selfbot.register(app, ADMIN_IDS)
     app.add_handler(CommandHandler("start",start_command))
     app.add_handler(CommandHandler("help",help_command))
     app.add_handler(CommandHandler("shop",gift_shop_command))
