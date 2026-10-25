@@ -9351,8 +9351,8 @@ async def points_admin_button(update, context):
 # ---------- خرید سطح (لول کل) 🦊 ----------
 
 LEVEL_PACKAGES = {
-    "10": {"level": 10, "price": 800000},
-    "20": {"level": 20, "price": 1300000},
+    "10": {"level": 10, "price": 500000},
+    "20": {"level": 20, "price": 850000},
 }
 FLVL_CARD_NUMBER = GIFT_CARD_NUMBER          # همان شماره کارت خرید گیفت
 FLVL_CARD_OWNER = GIFT_CARD_OWNER

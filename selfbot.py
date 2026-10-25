@@ -136,6 +136,7 @@ _login = {}
 _bot_id = [0]
 _capture = {}
 _botref = [None]
+_own = {}   # (uid, chat, کلمه) -> زمان؛ پیام‌هایی که خود سلف می‌فرسته و نباید دوباره تریگر بشن
 
 
 def _load_runtime(uid, row):
@@ -210,8 +211,10 @@ async def _on_out(uid, ev):
     txt = norm(ev.raw_text or "")
     if not txt:
         return
+    if _own.pop((uid, ev.chat_id, txt), 0) > time.time():
+        return   # پیامی که خود سلف فرستاده؛ دوباره تریگر نشه
     for i, s in enumerate(_slots.get(uid, [])):
-        if s and s.get("word") and s.get("chat") and s.get("pos", "n") != "n" and ev.chat_id == s["chat"] and ev.chat_id != _bot_id[0] and norm(s["word"]) == txt:
+        if s and s.get("word") and s.get("chat") and ev.chat_id == s["chat"] and ev.chat_id != _bot_id[0] and norm(s["word"]) == txt:
             now = time.time()
             if now - _last.get((uid, i), 0) < 2:
                 continue
@@ -253,6 +256,13 @@ async def _fire(uid, ev, s):
         if not client or _paused.get(uid) or ev.chat_id == _bot_id[0]:
             return
         pos = s.get("pos", "n")
+        # سر تایمر کلمه رو توی همون گپ می‌گه (ریپلای هم باشه، ریپلای می‌کنه)
+        word = (s.get("word") or "").strip()
+        if word:
+            _own[(uid, ev.chat_id, norm(word))] = time.time() + 15
+            await client.send_message(ev.chat_id, word, reply_to=ev.reply_to_msg_id if ev.is_reply else None)
+        if pos == "n":
+            return
         target = None
         if ev.is_reply:
             m = await ev.get_reply_message()
