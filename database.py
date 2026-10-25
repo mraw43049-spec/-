@@ -564,6 +564,22 @@ class PointsPurchase(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class FoxLevelPurchase(Base):
+    """سفارش خرید سطح (لول) روباهیو با کارت‌به‌کارت؛ بعد از تایید پشتیبانی لول روباه کاربر تنظیم می‌شود."""
+    __tablename__ = 'fox_level_purchases'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey('users.telegram_id'), nullable=False)
+    package_key = Column(String, nullable=False)         # '10' | '20'
+    target_level = Column(Integer, nullable=False)
+    price = Column(Integer, nullable=False)              # تومان
+    receipt_file_id = Column(String, nullable=True)
+    status = Column(String, nullable=False, default='pending')  # pending | approved | rejected
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    decided_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class FactoryOrder(Base):
     __tablename__ = 'factory_orders'
     id = Column(Integer, primary_key=True, autoincrement=True)
