@@ -24,7 +24,7 @@ import time
 from datetime import datetime, timezone
 
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, String, Text
-from telegram import InlineKeyboardButton as B, InlineKeyboardMarkup as KB
+from telegram import InlineKeyboardButton as B, InlineKeyboardMarkup as KB, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from database import Base, get_session
@@ -134,6 +134,8 @@ _hist = {}
 _last = {}
 _login = {}
 _bot_id = [0]
+_capture = {}
+_botref = [None]
 
 
 def _load_runtime(uid, row):
@@ -186,6 +188,23 @@ async def start_client(uid):
 
 
 async def _on_out(uid, ev):
+    cap = _capture.get(uid)
+    if cap:
+        if time.time() - cap["ts"] > 300:
+            _capture.pop(uid, None)
+        elif ev.chat_id == cap["chat"] and (ev.raw_text or "").strip():
+            _capture.pop(uid, None)
+            sl = _get_slots(uid)
+            sl[cap["slot"]]["word"] = (ev.raw_text or "").strip()[:40]
+            sl[cap["slot"]].setdefault("delay", 0)
+            _put_slots(uid, sl)
+            try:
+                tx, kb = _slot_panel(uid, cap["slot"])
+                await _botref[0].send_message(uid, f"✅ کلمه خودکار ثبت شد: «{sl[cap['slot']]['word']}»\n\n" + tx,
+                                              reply_markup=kb, parse_mode="HTML")
+            except Exception as e:  # noqa: BLE001
+                logger.info("self capture notify failed: %s", e)
+            return
     if _paused.get(uid):
         return
     txt = norm(ev.raw_text or "")
@@ -253,6 +272,7 @@ async def _fire(uid, ev, s):
 
 async def start_all(app):
     _bot_id[0] = app.bot.id
+    _botref[0] = app.bot
     if not configured():
         logger.info("self: SELF_API_ID/SELF_API_HASH تنظیم نشده؛ سلف غیرفعال است")
         return
@@ -317,7 +337,7 @@ def _slot_panel(uid, i):
          f"💬 گپ: {s.get('title') or '—'}\n"
          f"⏱ تایمر: {fmt_delay(s.get('delay', 0)) if s.get('word') else '—'}\n🎯 دکمه: {POS[s.get('pos', 'n')]}")
     kb = KB([[B("📝 کلمه", callback_data=f"self:e:{i}:word"), B("💬 گپ", callback_data=f"self:cp:{i}:0")],
-             [B("⏱ تایمر", callback_data=f"self:e:{i}:delay"), B("🎯 دکمه", callback_data=f"self:pm:{i}")],
+             [B("⏱ تایمر", callback_data=f"self:tm:{i}"), B("🎯 دکمه", callback_data=f"self:pm:{i}")],
              [B("🗑 حذف", callback_data=f"self:d:{i}"), B("🔙 بازگشت", callback_data="self:home")]])
     return t, kb
 
@@ -362,6 +382,8 @@ async def cb_user(update, context):
     a = p[1]
     ud = context.user_data
     await q.answer()
+    if not (a == "e" and p[3] == "word"):
+        _capture.pop(uid, None)
 
     async def home():
         ud.pop("self_st", None)
@@ -380,12 +402,39 @@ async def cb_user(update, context):
         i = int(p[2])
         t, kb = _slot_panel(uid, i)
         await q.message.edit_text(t, reply_markup=kb, parse_mode="HTML")
+    elif a == "tm":
+        i = int(p[2])
+        pre = [5, 10, 30, 60, 300, 600]
+        kb = [[B(fmt_delay(x), callback_data=f"self:t:{i}:{x}") for x in pre[:3]],
+              [B(fmt_delay(x), callback_data=f"self:t:{i}:{x}") for x in pre[3:]],
+              [B("✏️ عدد دلخواه", callback_data=f"self:e:{i}:delay")], [B("🔙 بازگشت", callback_data=f"self:s:{i}")]]
+        await q.message.edit_text("⏱ بعد از گفتن کلمه، چقدر صبر کنه تا دکمه زده بشه؟", reply_markup=KB(kb))
+    elif a == "t":
+        i, v = int(p[2]), int(p[3])
+        if 0 <= v <= MAX_DELAY:
+            sl = _get_slots(uid)
+            sl[i]["delay"] = v
+            _put_slots(uid, sl)
+        tx, kb = _slot_panel(uid, i)
+        await q.message.edit_text(tx, reply_markup=kb, parse_mode="HTML")
+    elif a == "e" and p[3] == "word":
+        i = int(p[2])
+        sl = _get_slots(uid)
+        if uid not in _clients:
+            await q.answer("اول اکانتت رو وصل کن.", show_alert=True)
+            return
+        if not sl[i].get("chat"):
+            await q.answer("اول گپ رو انتخاب کن (دکمه‌ی 💬 گپ).", show_alert=True)
+            return
+        _capture[uid] = {"slot": i, "chat": sl[i]["chat"], "ts": time.time()}
+        await q.message.edit_text(
+            f"📝 الان از <b>اکانت خودت</b> توی گپ «{sl[i].get('title')}» کلمه‌ی دلخواهت رو بفرست.\n"
+            "همون لحظه خودکار ثبت می‌شه؛ لازم نیست اینجا تایپ کنی. (۵ دقیقه فرصت داری)",
+            parse_mode="HTML", reply_markup=KB([[B("🔙 انصراف", callback_data=f"self:s:{i}")]]))
     elif a == "e":
         i, f = int(p[2]), p[3]
         ud["self_st"] = {"step": f, "slot": i}
-        ask = {"word": "📝 کلمه رو بفرست (دقیقاً همونی که می‌خوای از اکانتت بگی):",
-               "delay": "⏱ تایمر رو بفرست؛ مثلاً <code>30</code> (ثانیه) یا <code>5 دقیقه</code> (حداکثر ۶۰ دقیقه):",
-               }[f]
+        ask = {"delay": "⏱ تایمر رو بفرست؛ مثلاً <code>30</code> (ثانیه) یا <code>5 دقیقه</code> (حداکثر ۶۰ دقیقه):"}[f]
         await q.message.edit_text(ask, parse_mode="HTML", reply_markup=KB([[B("🔙 بازگشت", callback_data=f"self:s:{i}")]]))
     elif a == "pm":
         i = int(p[2])
@@ -448,10 +497,11 @@ async def cb_user(update, context):
             return
         ud["self_st"] = {"step": "phone"}
         await q.message.edit_text(
-            "🔗 <b>اتصال اکانت</b>\n\n⚠️ سلف از اکانت شخصی خودت استفاده می‌کنه؛ ریسکش با خودته و فقط برای همین ربات کار می‌کنه. "
-            "هر وقت خواستی «قطع اتصال» رو بزن تا سشن کامل بسته بشه.\n\n"
-            "شماره‌ت رو با کد کشور بفرست، مثلاً <code>+98912xxxxxxx</code>\n(برای انصراف: لغو)",
+            "🔗 <b>اتصال اکانت</b>\n\n⚠️ سلف از اکانت شخصی خودت استفاده می‌کنه؛ ریسکش با خودته و روی روباهیو کار نمی‌کنه. "
+            "هر وقت خواستی «قطع اتصال» رو بزن تا سشن کامل بسته بشه.\n\n👇 دکمه‌ی «اشتراک شماره من» رو از منوی پایین بزن.",
             parse_mode="HTML", reply_markup=KB([[B("🔙 بازگشت", callback_data="self:home")]]))
+        await q.message.reply_text("📱 شماره‌ی خودت رو با دکمه‌ی پایین بفرست:", reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("📱 اشتراک شماره من", request_contact=True)], [KeyboardButton("لغو")]], resize_keyboard=True, one_time_keyboard=True))
     elif a == "disc":
         await q.message.edit_text("🔌 اتصال قطع بشه و سشن اکانتت کامل بسته بشه؟",
                                   reply_markup=KB([[B("✅ بله، قطع کن", callback_data="self:discy"), B("لغو", callback_data="self:home")]]))
@@ -497,8 +547,8 @@ async def user_text(update, context):
         if text in ("لغو", "/cancel"):
             ud.pop("self_st", None)
             await _drop_login(uid)
-            await msg.reply_text("لغو شد.")
-        elif st["step"] in ("word", "delay"):
+            await msg.reply_text("لغو شد.", reply_markup=ReplyKeyboardRemove())
+        elif st["step"] == "delay":
             i, f = st["slot"], st["step"]
             sl = _get_slots(uid)
             if f == "delay":
@@ -515,20 +565,8 @@ async def user_text(update, context):
             t, kb = _slot_panel(uid, i)
             await msg.reply_text("✅ ذخیره شد.\n\n" + t, reply_markup=kb, parse_mode="HTML")
         elif st["step"] == "phone":
-            phone = "+" + re.sub(r"\D", "", fa2en(text))
-            if not re.match(r"^\+\d{8,15}$", phone):
-                await msg.reply_text("❗️ شماره نامعتبره؛ مثل +98912xxxxxxx بفرست.")
-                raise ApplicationHandlerStop
-            from telethon import TelegramClient
-            from telethon.sessions import StringSession
-            await _drop_login(uid)
-            client = TelegramClient(StringSession(), API_ID, API_HASH)
-            await client.connect()
-            sent = await client.send_code_request(phone)
-            _login[uid] = {"client": client, "phone": phone, "hash": sent.phone_code_hash, "ts": time.time()}
-            st["step"] = "code"
-            await msg.reply_text("📨 کد تلگرام برات اومد. <b>با فاصله بین رقم‌ها</b> بفرست تا تلگرام بلاکش نکنه؛ مثلاً <code>1 2 3 4 5</code>",
-                                 parse_mode="HTML")
+            await msg.reply_text("📱 شماره رو تایپ نکن؛ فقط با دکمه‌ی «اشتراک شماره من» از منوی پایین بفرست.", reply_markup=ReplyKeyboardMarkup(
+                [[KeyboardButton("📱 اشتراک شماره من", request_contact=True)], [KeyboardButton("لغو")]], resize_keyboard=True, one_time_keyboard=True))
         elif st["step"] in ("code", "pw"):
             d = _login.get(uid)
             if not d or time.time() - d["ts"] > 600:
@@ -573,6 +611,36 @@ async def user_text(update, context):
         await msg.reply_text("⚠️ خطا: " + str(e)[:150])
     if raise_stop:
         raise ApplicationHandlerStop
+
+
+async def on_contact(update, context):
+    msg = update.effective_message
+    u = update.effective_user
+    if not msg or not msg.contact or not u or update.effective_chat.type != "private":
+        return
+    st = context.user_data.get("self_st")
+    if not st or st.get("step") != "phone" or not _allowed(u.id):
+        return
+    c = msg.contact
+    if c.user_id != u.id:   # فقط شماره‌ی خودِ کاربر؛ مخاطب دیگران پذیرفته نمی‌شه
+        await msg.reply_text("❌ فقط شماره‌ی خودت قبوله؛ با دکمه‌ی «اشتراک شماره من» بفرست.")
+        raise ApplicationHandlerStop
+    phone = "+" + re.sub(r"\D", "", c.phone_number or "")
+    try:
+        from telethon import TelegramClient
+        from telethon.sessions import StringSession
+        await _drop_login(u.id)
+        client = TelegramClient(StringSession(), API_ID, API_HASH)
+        await client.connect()
+        sent = await client.send_code_request(phone)
+        _login[u.id] = {"client": client, "phone": phone, "hash": sent.phone_code_hash, "ts": time.time()}
+        st["step"] = "code"
+        await msg.reply_text("📨 کد تلگرام برات اومد. <b>با فاصله بین رقم‌ها</b> بفرست تا تلگرام بلاکش نکنه؛ مثلاً <code>1 2 3 4 5</code>",
+                             parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("self contact: %s", e)
+        await msg.reply_text("⚠️ خطا: " + str(e)[:150], reply_markup=ReplyKeyboardRemove())
+    raise ApplicationHandlerStop
 
 
 # ---------- پنل مدیر ----------
@@ -661,4 +729,5 @@ def register(app, admin_ids):
     app.add_handler(CommandHandler("self", cmd_self), group=-5)
     app.add_handler(CallbackQueryHandler(cb_user, pattern=r"^self:"), group=-5)
     app.add_handler(CallbackQueryHandler(cb_admin, pattern=r"^selfa:"), group=-5)
+    app.add_handler(MessageHandler(filters.CONTACT & filters.ChatType.PRIVATE, on_contact), group=-5)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, user_text), group=-5)
