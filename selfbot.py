@@ -502,6 +502,31 @@ async def cb_user(update, context):
             parse_mode="HTML", reply_markup=KB([[B("🔙 بازگشت", callback_data="self:home")]]))
         await q.message.reply_text("📱 شماره‌ی خودت رو با دکمه‌ی پایین بفرست:", reply_markup=ReplyKeyboardMarkup(
             [[KeyboardButton("📱 اشتراک شماره من", request_contact=True)], [KeyboardButton("لغو")]], resize_keyboard=True, one_time_keyboard=True))
+    elif a in ("k", "kx", "ky", "kc"):
+        st = ud.get("self_st")
+        if not st or st.get("step") != "code":
+            return
+        code = ud.get("self_code", "")
+        if a == "kc":
+            ud.pop("self_st", None)
+            ud.pop("self_code", None)
+            await _drop_login(uid)
+            await q.message.edit_text("لغو شد.")
+            return
+        if a == "k" and len(code) < 8:
+            code += p[2]
+        elif a == "kx":
+            code = code[:-1]
+        elif a == "ky":
+            if len(code) < 5:
+                await context.bot.send_message(uid, "❗️ کد حداقل ۵ رقمه.")
+                return
+            await q.message.edit_text("⏳ در حال بررسی کد...")
+            ud["self_code"] = ""
+            await _sign_in(uid, context, code=code)
+            return
+        ud["self_code"] = code
+        await _send_keypad(context.bot, uid, context, edit_msg=q.message)
     elif a == "disc":
         await q.message.edit_text("🔌 اتصال قطع بشه و سشن اکانتت کامل بسته بشه؟",
                                   reply_markup=KB([[B("✅ بله، قطع کن", callback_data="self:discy"), B("لغو", callback_data="self:home")]]))
@@ -518,6 +543,72 @@ async def _drop_login(uid):
             await d["client"].disconnect()
         except Exception:
             pass
+
+
+
+def _keypad_kb(n):
+    rows = [[B(str(d), callback_data=f"self:k:{d}") for d in r] for r in ("123", "456", "789")]
+    rows.append([B("⌫", callback_data="self:kx"), B("0", callback_data="self:k:0"), B("✅ تأیید", callback_data="self:ky")])
+    rows.append([B("❌ انصراف", callback_data="self:kc")])
+    return KB(rows)
+
+
+async def _send_keypad(bot, uid, context, edit_msg=None):
+    code = context.user_data.get("self_code", "")
+    dots = " ".join(["●"] * len(code) + ["○"] * max(0, 5 - len(code)))
+    tx = f"🔢 کد تلگرامی که برات اومد رو با دکمه‌های زیر وارد کن (کد رو داخل چت تایپ نکن):\n\n<b>{dots}</b>"
+    if edit_msg:
+        await edit_msg.edit_text(tx, parse_mode="HTML", reply_markup=_keypad_kb(len(code)))
+    else:
+        await bot.send_message(uid, tx, parse_mode="HTML", reply_markup=_keypad_kb(len(code)))
+
+
+async def _sign_in(uid, context, code=None, password=None):
+    ud = context.user_data
+    bot = context.bot
+    d = _login.get(uid)
+    if not d or time.time() - d["ts"] > 600:
+        ud.pop("self_st", None)
+        ud.pop("self_code", None)
+        await _drop_login(uid)
+        await bot.send_message(uid, "⌛ زمان اتصال تموم شد؛ دوباره از /self اتصال بزن.")
+        return
+    from telethon import errors
+    try:
+        if password is None:
+            await d["client"].sign_in(d["phone"], code, phone_code_hash=d["hash"])
+        else:
+            await d["client"].sign_in(password=password)
+    except errors.SessionPasswordNeededError:
+        ud["self_st"] = {"step": "pw"}
+        await bot.send_message(uid, "🔐 تأیید دومرحله‌ای داری؛ رمزش رو بفرست (پیامت بعد از خوندن پاک می‌شه).")
+        return
+    except (errors.PhoneCodeInvalidError, errors.PasswordHashInvalidError):
+        if password is None:
+            ud["self_code"] = ""
+            await bot.send_message(uid, "❌ کد اشتباهه؛ دوباره وارد کن.")
+            await _send_keypad(bot, uid, context)
+        else:
+            await bot.send_message(uid, "❌ رمز اشتباهه؛ دوباره بفرست (یا لغو).")
+        return
+    except errors.PhoneCodeExpiredError:
+        ud.pop("self_st", None)
+        ud.pop("self_code", None)
+        await _drop_login(uid)
+        await bot.send_message(uid, "⌛ کد منقضی شد؛ از /self دوباره اتصال بزن و کد جدید رو سریع با شماره‌گیر وارد کن.")
+        return
+    except Exception as e:  # noqa: BLE001
+        logger.warning("self sign_in: %s", e)
+        await bot.send_message(uid, "⚠️ خطا: " + str(e)[:150])
+        return
+    save_row(uid, session_enc=enc(d["client"].session.save()), phone=d["phone"])
+    await _drop_login(uid)
+    ud.pop("self_st", None)
+    ud.pop("self_code", None)
+    ok = await start_client(uid)
+    tx, kb = _panel(uid)
+    await bot.send_message(uid, ("✅ اکانت وصل شد!\n\n" if ok else "⚠️ ذخیره شد ولی اتصال بالا نیومد.\n\n") + tx,
+                           reply_markup=kb, parse_mode="HTML")
 
 
 async def user_text(update, context):
@@ -567,43 +658,19 @@ async def user_text(update, context):
         elif st["step"] == "phone":
             await msg.reply_text("📱 شماره رو تایپ نکن؛ فقط با دکمه‌ی «اشتراک شماره من» از منوی پایین بفرست.", reply_markup=ReplyKeyboardMarkup(
                 [[KeyboardButton("📱 اشتراک شماره من", request_contact=True)], [KeyboardButton("لغو")]], resize_keyboard=True, one_time_keyboard=True))
-        elif st["step"] in ("code", "pw"):
-            d = _login.get(uid)
-            if not d or time.time() - d["ts"] > 600:
-                ud.pop("self_st", None)
-                await _drop_login(uid)
-                await msg.reply_text("⌛ زمان اتصال تموم شد؛ دوباره از /self شروع کن.")
-                raise ApplicationHandlerStop
-            from telethon import errors
+        elif st["step"] == "code":
             try:
-                if st["step"] == "code":
-                    await d["client"].sign_in(d["phone"], re.sub(r"\D", "", fa2en(text)), phone_code_hash=d["hash"])
-                else:
-                    await d["client"].sign_in(password=text)
-                    try:
-                        await msg.delete()
-                    except Exception:
-                        pass
-            except errors.SessionPasswordNeededError:
-                st["step"] = "pw"
-                await msg.reply_text("🔐 تأیید دومرحله‌ای داری؛ رمزش رو بفرست (پیامت بعد از خوندن پاک می‌شه).")
-                raise ApplicationHandlerStop
-            except (errors.PhoneCodeInvalidError, errors.PasswordHashInvalidError):
-                await msg.reply_text("❌ اشتباهه؛ دوباره بفرست (یا لغو).")
-                raise ApplicationHandlerStop
-            except errors.PhoneCodeExpiredError:
-                ud.pop("self_st", None)
-                await _drop_login(uid)
-                await msg.reply_text("⌛ کد منقضی شد؛ دوباره از /self اتصال بزن.")
-                raise ApplicationHandlerStop
-            sess = d["client"].session.save()
-            save_row(uid, session_enc=enc(sess), phone=d["phone"])
-            await _drop_login(uid)
-            ud.pop("self_st", None)
-            ok = await start_client(uid)
-            t, kb = _panel(uid)
-            await msg.reply_text(("✅ اکانت وصل شد!\n\n" if ok else "⚠️ ذخیره شد ولی اتصال بالا نیومد.\n\n") + t,
-                                 reply_markup=kb, parse_mode="HTML")
+                await msg.delete()   # اگه کد رو تایپ کرد، فوراً پاک می‌شه
+            except Exception:
+                pass
+            await msg.reply_text("🔢 کد رو تایپ نکن (تلگرام باطلش می‌کنه)؛ با شماره‌گیر زیر وارد کن 👇")
+            await _send_keypad(context.bot, uid, context)
+        elif st["step"] == "pw":
+            await _sign_in(uid, context, password=text)
+            try:
+                await msg.delete()
+            except Exception:
+                pass
     except ApplicationHandlerStop:
         raise
     except Exception as e:  # noqa: BLE001
@@ -635,8 +702,9 @@ async def on_contact(update, context):
         sent = await client.send_code_request(phone)
         _login[u.id] = {"client": client, "phone": phone, "hash": sent.phone_code_hash, "ts": time.time()}
         st["step"] = "code"
-        await msg.reply_text("📨 کد تلگرام برات اومد. <b>با فاصله بین رقم‌ها</b> بفرست تا تلگرام بلاکش نکنه؛ مثلاً <code>1 2 3 4 5</code>",
-                             parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+        context.user_data["self_code"] = ""
+        await msg.reply_text("📨 کد تلگرام برات اومد (توی اپ تلگرام، چت «Telegram»).", reply_markup=ReplyKeyboardRemove())
+        await _send_keypad(context.bot, u.id, context)
     except Exception as e:  # noqa: BLE001
         logger.warning("self contact: %s", e)
         await msg.reply_text("⚠️ خطا: " + str(e)[:150], reply_markup=ReplyKeyboardRemove())
