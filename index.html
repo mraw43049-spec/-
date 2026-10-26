@@ -837,6 +837,9 @@ body:not([data-view="fox"]) #themeModal{display:none!important}
 /* اسکلتون لودینگ: فقط تا اولین داده‌ی واقعی (یا کش) */
 @keyframes skMove{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .sk-on .ch-num,.sk-on .ch-name,.sk-on .ch-rank,.sk-on .ch-lvl,.sk-on .ch-xp,.sk-on #chShiftT,.sk-on #chShiftS,.sk-on #bbTxt{color:transparent!important;text-shadow:none!important;border-radius:8px;background:linear-gradient(90deg,#ffffff0d,#ffffff2b,#ffffff0d)!important;background-size:200% 100%;animation:skMove 1.3s linear infinite}
+/* ===== بدون پس‌زمینه‌ی طرح‌دار/درخشش؛ فقط رنگ تم ===== */
+body::before,body::after{display:none!important;content:none!important;animation:none!important}
+.tprev{background-image:none!important}
 /* ===== لابی بازی‌ها (کارت‌های پرجزئیات SVG/CSS؛ بدون انیمیشن بی‌نهایت و بدون فایل بیرونی) ===== */
 #gamesLobby{display:block;direction:rtl}
 .gl-banner{position:relative;overflow:hidden;border-radius:24px;padding:18px 16px;margin-bottom:16px;min-height:122px;display:flex;flex-direction:column;justify-content:center;background:radial-gradient(90% 140% at 100% 0,#ff7ac0 0,transparent 60%),linear-gradient(135deg,#4b2bd9,#8f2bd9 60%,#ff5fa2);color:#fff;box-shadow:0 10px 24px #0007,inset 0 1px 0 #ffffff55}
@@ -1409,14 +1412,14 @@ html.paused *{animation-play-state:paused!important}
 <div id="themeModal" class="modal"><div class="tsheet">
   <div class="tgrip"></div>
   <h3>🎨 ظاهر روبی</h3>
-  <div class="tsub">رنگ و پس‌زمینه‌ی مینی‌اپ رو هر وقت خواستی عوض کن</div>
+  <div class="tsub">رنگ تم مینی‌اپ رو هر وقت خواستی عوض کن</div>
   <div class="tprev"><div class="bub"><b>روباهیو 🦊</b><br>این یه پیش‌نمایش از ظاهر انتخابی توئه.<br><span class="btn">دکمه‌ی نمونه</span></div></div>
   <div class="tlbl">رنگ تم</div>
   <div class="tcolors" id="tColors"></div>
-  <div class="tlbl">پس‌زمینه</div>
+  <div style="display:none"><div class="tlbl">پس‌زمینه</div>
   <div class="tpats" id="tPats"></div>
   <div class="trow"><span>حرکت آرام پس‌زمینه</span><button class="tsw" id="tAnim" type="button"></button></div>
-  <div class="trow" style="display:block"><div style="margin-bottom:6px">شدت طرح پس‌زمینه</div><input class="trange" id="tOp" type="range" min="0" max="45" value="20"></div>
+  <div class="trow" style="display:block"><div style="margin-bottom:6px">شدت طرح پس‌زمینه</div><input class="trange" id="tOp" type="range" min="0" max="45" value="20"></div></div>
   <div class="tbtns"><button class="rs" id="tReset" type="button">پیش‌فرض</button><button class="ok" id="tDone" type="button">✅ تمام</button></div>
 </div></div>
 
@@ -1478,8 +1481,8 @@ function apply(){
   var bg=T.b===undefined?'#0e271d':conv('0e271dff','g',T).slice(0,7), cd=T.b===undefined?'#143a2b':conv('143a2bff','g',T).slice(0,7);
   st2.setProperty('--ts-bg',bg);st2.setProperty('--ts-card',cd);
   st2.setProperty('--glow',a2+'44');st2.setProperty('--glow2',a1+'2a');
-  st2.setProperty('--pat',tile(P,T.id));st2.setProperty('--pat-op',String((st.o||0)/100));
-  document.body.classList.toggle('pat-anim',!!st.a&&P.set.length>0);
+  st2.setProperty('--pat','none');st2.setProperty('--pat-op','0');
+  document.body.classList.remove('pat-anim');
   var nb=T.b===undefined?'#0d0f1e':conv('0d0f1eff','n',T).slice(0,7);
   var m=document.querySelector('meta[name=theme-color]');if(m)m.setAttribute('content',nb);
   try{var tg=window.Telegram&&window.Telegram.WebApp;if(tg){tg.setHeaderColor(nb);tg.setBackgroundColor(nb);tg.setBottomBarColor&&tg.setBottomBarColor(nb);}}catch(e){}
@@ -1489,9 +1492,6 @@ function build(){
   var cw=document.getElementById('tColors'),pw=document.getElementById('tPats');cw.innerHTML='';pw.innerHTML='';
   THEMES.forEach(function(t){var w=document.createElement('div');w.className='tcol';var b=document.createElement('button');b.type='button';b.className='tdot'+(t.id==st.c?' on':'');b.style.setProperty('--d',t.d);
     b.onclick=function(){st.c=t.id;save();apply();build();};var n=document.createElement('div');n.className='tdn';n.textContent=t.n;w.appendChild(b);w.appendChild(n);cw.appendChild(w);});
-  PATS.forEach(function(p){var b=document.createElement('button');b.type='button';b.className='tpat'+(p.id==st.p?' on':'');
-    b.style.backgroundImage=tile(p,'prev');b.innerHTML='<span class="big">'+p.e+'</span><span class="nm">'+p.n+'</span>';
-    b.onclick=function(){st.p=p.id;save();apply();build();};pw.appendChild(b);});
   document.getElementById('tAnim').classList.toggle('on',!!st.a);document.getElementById('tOp').value=st.o;
 }
 var modal=document.getElementById('themeModal');
@@ -2840,6 +2840,7 @@ function __rubyMain(){
   var bomb = null, bombBusy = false, bombMode = "lobby", bombCdAt = 0, bombTick = null;
   function bombCd(){ return bomb ? Math.max(0, bomb.cooldown_left - Math.floor((Date.now() - bombCdAt) / 1000)) : 0; }
   function setBombMode(m){
+    setTimeout(updateBack, 30);
     bombMode = m;
     var lobby = m === "lobby";
     $("gamesLobby").style.display = lobby ? "" : "none";
@@ -3419,6 +3420,7 @@ function __rubyMain(){
       : "امروز هم اومدی؟ آفرین، همین‌جوری ادامه بده.";
   }
   function foxSub(name){
+    setTimeout(updateBack, 30);
     $("foxHome").classList.toggle("hide", name !== "home");
     $("foxPanel").classList.toggle("open", name === "fox");
     $("petScreen").classList.toggle("open", name === "pet");
@@ -3460,6 +3462,7 @@ function __rubyMain(){
   var view = "fox";
   var prevView = null;
   function show(v){
+    setTimeout(updateBack, 30);
     prevView = view;
     if (v !== view) { try { window.scrollTo(0, 0); } catch(e){} }
     view = v; try { document.body.setAttribute("data-view", v); } catch(e){}
@@ -3570,6 +3573,39 @@ function __rubyMain(){
       api("/api/leaderboard?category=points").then(function(d){ if (!lbCache.points) lbCache.points = d; }).catch(function(){});
     }, 1200);
   }
+
+  // ---------- دکمه‌ی بازگشت تلگرام (به‌جای «بستن» بالای صفحه) ----------
+  // ریشه‌ی اپ (خانه) = «بستن» تلگرام؛ هر جای دیگه (تب‌های دیگه، پنل روباه/پت، بازی داخل لابی، بانک، پنجره‌ها) = «بازگشت»
+  var BACK_SEL = "#bkmNo,#renameNo,#genderNo,#rkCfNo,#storeCancel,#tDone,#rkLbClose,#lbClose";
+  function backAction(){
+    var mo = document.querySelector(".modal.open");
+    if (mo) return function(){ var b = mo.querySelector(BACK_SEL); if (b) b.click(); else mo.classList.remove("open"); };
+    var lbx = $("lightbox");
+    if (lbx && lbx.classList.contains("open")) return function(){ var b = $("lbClose"); if (b) b.click(); else lbx.classList.remove("open"); };
+    if (view === "fox") {
+      if ($("foxPanel").classList.contains("open") || $("petScreen").classList.contains("open")) return function(){ foxSub("home"); };
+      return null;
+    }
+    if (view === "wheel" && bombMode !== "lobby") return function(){ setBombMode("lobby"); };
+    return function(){ show("fox"); };
+  }
+  function updateBack(){
+    try {
+      if (!tg || !tg.BackButton) return;
+      if (backAction()) tg.BackButton.show(); else tg.BackButton.hide();
+    } catch(e){}
+  }
+  try {
+    if (tg && tg.BackButton && (!tg.isVersionAtLeast || tg.isVersionAtLeast("6.1"))) {
+      tg.BackButton.onClick(function(){
+        var a = backAction();
+        if (a) { try { a(); } catch(e){} }
+        setTimeout(updateBack, 60);
+      });
+      document.addEventListener("click", function(){ setTimeout(updateBack, 80); }, true);   // باز/بسته‌شدن پنجره‌ها
+      setTimeout(updateBack, 300);
+    }
+  } catch(e){}
 
   paintCachedSkinInstant();
   // لینک قدیمی درس به فروشگاه هدایت می‌شود.
