@@ -10,6 +10,9 @@
 - (حالت دستی قدیمی، فقط اگه تایمر صفر باشه) وقتی کاربر از اکانت خودش دقیقاً اون کلمه رو توی همون گپ بفرسته، بعد از تایمر، سلف روی دکمه‌ی انتخاب‌شده‌ی
   پیام ربات (ریپلای یا آخرین پیام دکمه‌دار ربات‌های دیگه) کلیک می‌کنه. روی ربات روباهیو هیچ‌وقت کلیک نمی‌کنه.
 
+- ساعت زنده کنار اسم: .ساعت (روشن) | .ساعت 3 (انتخاب فونت) | .ساعت فونت (لیست) | .غیرفعال ساعت
+- کپی پروفایل: روی پیام یه کاربر ریپلای کن و بنویس .کپی  (اسم، بیو، عکس) | برگشت: .غیرفعال کپی
+
 امنیت: سشن‌ها رمزنگاری‌شده ذخیره می‌شن (Fernet)، سلف هیچ‌وقت روی ربات روباهیو کلیک نمی‌کنه،
 محدودیت سرعت داره و کاربر هر لحظه می‌تونه اتصال رو قطع کنه (خروج کامل از سشن).
 
@@ -51,6 +54,13 @@ class SelfAccess(Base):
     session_enc = Column(Text, nullable=True)
     slots = Column(Text, default="[]")
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class SelfProfile(Base):
+    """وضعیت ساعت و کپی پروفایل هر کاربر (JSON)."""
+    __tablename__ = "self_profile"
+    user_id = Column(BigInteger, primary_key=True)
+    data = Column(Text, default="{}")
 
 
 # ---------- ابزارها ----------
@@ -148,10 +158,16 @@ def _load_runtime(uid, row):
     _sync_auto(uid)
 
 
-async def stop_client(uid, logout=False):
+async def stop_client(uid, logout=False, restore=False):
     c = _clients.pop(uid, None)
     _cancel_auto(uid)
+    _cancel_clock(uid)
     _slots.pop(uid, None)
+    if c and restore:
+        try:
+            await _reset_profile(uid, c)
+        except Exception as e:  # noqa: BLE001
+            logger.info("self reset profile %s: %s", uid, e)
     if c:
         try:
             if logout:
@@ -191,6 +207,7 @@ async def start_client(uid):
     client.add_event_handler(_h, events.NewMessage(outgoing=True))
     _clients[uid] = client
     _sync_auto(uid)
+    _sync_clock(uid)
     return True
 
 
@@ -421,6 +438,329 @@ async def _dialogs(client):
     return out
 
 
+# ---------- ساعت زنده کنار اسم + کپی پروفایل ----------
+# هر فونت: (اسم، ۱۰ رقم از 0 تا 9، علامت دونقطه)
+CLOCK_FONTS = [
+    ("عادی", "0123456789", ":"),
+    ("بولد", "𝟎𝟏𝟐𝟑𝟒𝟓𝟔𝟕𝟖𝟗", ":"),
+    ("دابل", "𝟘𝟙𝟚𝟛𝟜𝟝𝟞𝟟𝟠𝟡", ":"),
+    ("مونو", "𝟶𝟷𝟸𝟹𝟺𝟻𝟼𝟽𝟾𝟿", ":"),
+    ("سنس بولد", "𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵", ":"),
+    ("سنس", "𝟢𝟣𝟤𝟥𝟦𝟧𝟨𝟩𝟪𝟫", ":"),
+    ("دایره‌ای", "⓪①②③④⑤⑥⑦⑧⑨", ":"),
+    ("فول‌وید", "０１２３４５６７８９", "："),
+    ("فارسی", "۰۱۲۳۴۵۶۷۸۹", ":"),
+    ("بالانویس", "⁰¹²³⁴⁵⁶⁷⁸⁹", ":"),
+]
+CLOCK_TZ = os.environ.get("SELF_TZ", "Asia/Tehran").strip() or "Asia/Tehran"
+_clock_tasks = {}
+
+
+def _tz():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(CLOCK_TZ)
+    except Exception:
+        from datetime import timedelta
+        return timezone(timedelta(hours=3, minutes=30))   # ایران (بدون ساعت تابستانی)
+
+
+def fmt_clock(font=1, now=None):
+    font = font if isinstance(font, int) and 1 <= font <= len(CLOCK_FONTS) else 1
+    _, digits, colon = CLOCK_FONTS[font - 1]
+    t = (now or datetime.now(_tz())).strftime("%H:%M")
+    return "".join(colon if ch == ":" else digits[int(ch)] for ch in t)
+
+
+def _u16(s):
+    return len(s.encode("utf-16-le")) // 2
+
+
+def build_first_name(base_first, clock_txt=None, limit=64):
+    """اسم + ساعت؛ اگه اسم بلند بود اسم کوتاه می‌شه تا ساعت جا بشه."""
+    base_first = (base_first or "").strip()
+    if not clock_txt:
+        return base_first[:limit] or "."
+    room = limit - _u16(clock_txt) - 1
+    if room <= 0 or not base_first:
+        return clock_txt
+    while base_first and _u16(base_first) > room:
+        base_first = base_first[:-1]
+    return (base_first.rstrip() + " " + clock_txt) if base_first else clock_txt
+
+
+def _pget(uid):
+    s = get_session()
+    try:
+        r = s.get(SelfProfile, uid)
+        return json.loads(r.data or "{}") if r else {}
+    except Exception:
+        return {}
+    finally:
+        s.close()
+
+
+def _pput(uid, d):
+    s = get_session()
+    try:
+        r = s.get(SelfProfile, uid)
+        if not r:
+            r = SelfProfile(user_id=uid)
+            s.add(r)
+        r.data = json.dumps(d, ensure_ascii=False)
+        s.commit()
+    finally:
+        s.close()
+
+
+async def _ensure_orig(uid, client):
+    """پروفایل اصلی کاربر (قبل از ساعت/کپی) یک‌بار ذخیره می‌شه تا برگردوندنش ممکن باشه."""
+    d = _pget(uid)
+    if "orig_first" in d:
+        return d
+    from telethon.tl.functions.users import GetFullUserRequest
+    me = await client.get_me()
+    full = await client(GetFullUserRequest(me))
+    d["orig_first"] = me.first_name or ""
+    d["orig_last"] = me.last_name or ""
+    d["orig_about"] = getattr(full.full_user, "about", None) or ""
+    _pput(uid, d)
+    return d
+
+
+def _maybe_clear(uid):
+    d = _pget(uid)
+    if not d.get("clock_on") and not d.get("copy_on"):
+        _pput(uid, {"font": d.get("font", 1)})
+
+
+async def _apply_name(uid, client, about=None):
+    from telethon.tl.functions.account import UpdateProfileRequest
+    d = _pget(uid)
+    if d.get("copy_on"):
+        bf, bl = d.get("copy_first", ""), d.get("copy_last", "")
+    else:
+        bf, bl = d.get("orig_first", ""), d.get("orig_last", "")
+    clk = fmt_clock(d.get("font", 1)) if d.get("clock_on") else None
+    first = build_first_name(bf, clk)
+    await client(UpdateProfileRequest(first_name=first, last_name=(bl or "")[:64], about=about))
+    d["last_clock"] = clk
+    _pput(uid, d)
+
+
+def _cancel_clock(uid):
+    t = _clock_tasks.pop(uid, None)
+    if t:
+        try:
+            t.cancel()
+        except Exception:
+            pass
+
+
+def _sync_clock(uid):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    t = _clock_tasks.get(uid)
+    if t and not t.done():
+        return
+    if uid in _clients and _pget(uid).get("clock_on"):
+        _clock_tasks[uid] = loop.create_task(_clock_loop(uid))
+
+
+async def _clock_loop(uid):
+    from telethon import errors
+    last = None
+    try:
+        while True:
+            client = _clients.get(uid)
+            d = _pget(uid)
+            if not client or not d.get("clock_on"):
+                return
+            cur = fmt_clock(d.get("font", 1))
+            wait = 0
+            if cur != last:
+                try:
+                    await _apply_name(uid, client)
+                    last = cur
+                except errors.FloodWaitError as e:
+                    wait = min(int(getattr(e, "seconds", 60)) + 2, 3600)
+                except Exception as e:  # noqa: BLE001
+                    logger.info("self clock %s: %s", uid, e)
+                    wait = 30
+            if not wait:
+                wait = 60 - (time.time() % 60) + 0.7
+            await asyncio.sleep(wait)
+    except asyncio.CancelledError:
+        raise
+    finally:
+        if _clock_tasks.get(uid) is asyncio.current_task():
+            _clock_tasks.pop(uid, None)
+
+
+def clock_fonts_text(uid):
+    d = _pget(uid)
+    cur = d.get("font", 1)
+    lines = [f"🕒 ساعت: {'✅ روشن' if d.get('clock_on') else '❌ خاموش'}   فونت فعلی: {cur}", ""]
+    for i, (name, _, _) in enumerate(CLOCK_FONTS, 1):
+        lines.append(f"{i}) {fmt_clock(i)}   {name}" + ("  ✔️" if i == cur else ""))
+    lines += ["", "انتخاب: .ساعت 3   |   خاموش: .غیرفعال ساعت"]
+    return "\n".join(lines)
+
+
+async def clock_set(uid, on=None, font=None):
+    client = _clients.get(uid)
+    if not client:
+        return "❌ اول اکانتت رو وصل کن (/self)."
+    d = _pget(uid)
+    if font is not None:
+        d["font"] = font
+    try:
+        if on is False:
+            if not d.get("clock_on"):
+                return "🕒 ساعت از قبل خاموشه."
+            d["clock_on"] = False
+            _pput(uid, d)
+            _cancel_clock(uid)
+            await _apply_name(uid, client)
+            _maybe_clear(uid)
+            return "✅ ساعت خاموش شد و اسمت برگشت."
+        d = await _ensure_orig(uid, client) if not d.get("clock_on") else d
+        if font is not None:
+            d["font"] = font
+        d["clock_on"] = True
+        _pput(uid, d)
+        await _apply_name(uid, client)
+        _sync_clock(uid)
+        return f"✅ ساعت زنده روشن شد: {fmt_clock(d.get('font', 1))}  (فونت {d.get('font', 1)})\nتغییر فونت: .ساعت 2   |   لیست: .ساعت فونت"
+    except Exception as e:  # noqa: BLE001
+        logger.info("self clock_set %s: %s", uid, e)
+        return "⚠️ خطا: " + str(e)[:120]
+
+
+async def _delete_copy_photo(client, d):
+    pid = d.pop("copy_photo", None)
+    if not pid:
+        return
+    from telethon import utils
+    from telethon.tl.functions.photos import DeletePhotosRequest
+    async for ph in client.iter_profile_photos("me", limit=10):
+        if ph.id == pid:
+            await client(DeletePhotosRequest([utils.get_input_photo(ph)]))
+            break
+
+
+async def copy_on(uid, ev):
+    client = _clients.get(uid)
+    if not client:
+        return "❌ اول اکانتت رو وصل کن (/self)."
+    if not ev.is_reply:
+        return "↩️ روی پیام اون کاربر ریپلای کن و بنویس: .کپی"
+    try:
+        import io
+        from telethon.tl.types import User as TUser
+        from telethon.tl.functions.users import GetFullUserRequest
+        from telethon.tl.functions.photos import UploadProfilePhotoRequest
+        msg = await ev.get_reply_message()
+        target = await msg.get_sender() if msg else None
+        if not isinstance(target, TUser):
+            return "❌ فقط روی پیام یه کاربر می‌شه کپی کرد (نه کانال/ادمین ناشناس)."
+        me = await client.get_me()
+        if target.id == me.id:
+            return "😅 این خودتی!"
+        d = await _ensure_orig(uid, client)
+        full = await client(GetFullUserRequest(target))
+        about = getattr(full.full_user, "about", None) or ""
+        about = about[: (140 if getattr(me, "premium", False) else 70)]
+        first = (target.first_name or "").strip() or (target.username or "") or "."
+        last = (target.last_name or "").strip()
+        photo_bytes = None
+        try:
+            photo_bytes = await client.download_profile_photo(target, file=bytes)
+        except Exception as e:  # noqa: BLE001
+            logger.info("self copy photo dl: %s", e)
+        await _delete_copy_photo(client, d)    # اگه قبلاً کپی دیگه‌ای فعال بود، عکسش پاک بشه
+        new_pid = None
+        if photo_bytes:
+            bio = io.BytesIO(photo_bytes)
+            bio.name = "photo.jpg"
+            up = await client.upload_file(bio)
+            res = await client(UploadProfilePhotoRequest(file=up))
+            new_pid = getattr(getattr(res, "photo", None), "id", None)
+        d["copy_on"] = True
+        d["copy_first"], d["copy_last"] = first[:64], last[:64]
+        d["copy_photo"] = new_pid
+        d["copy_about"] = about
+        _pput(uid, d)
+        try:
+            await _apply_name(uid, client, about=about)
+        except Exception:
+            await _apply_name(uid, client, about=about[:70])
+        _sync_clock(uid)
+        extra = "" if photo_bytes else "\n(عکس نداشت یا مخفیه؛ عکس خودت دست نخورد.)"
+        return f"✅ پروفایل «{first}» کپی شد (اسم، بیو" + ("، عکس" if photo_bytes else "") + ")." + extra + "\nبرگشت: .غیرفعال کپی"
+    except Exception as e:  # noqa: BLE001
+        logger.info("self copy %s: %s", uid, e)
+        return "⚠️ کپی نشد: " + str(e)[:120]
+
+
+async def copy_off(uid):
+    client = _clients.get(uid)
+    if not client:
+        return "❌ اول اکانتت رو وصل کن (/self)."
+    d = _pget(uid)
+    if not d.get("copy_on"):
+        return "ℹ️ کپی فعال نیست."
+    try:
+        await _delete_copy_photo(client, d)
+        for k in ("copy_on", "copy_first", "copy_last", "copy_about"):
+            d.pop(k, None)
+        _pput(uid, d)
+        await _apply_name(uid, client, about=d.get("orig_about", ""))
+        _maybe_clear(uid)
+        return "✅ کپی غیرفعال شد؛ اسم، بیو و عکس خودت برگشت."
+    except Exception as e:  # noqa: BLE001
+        logger.info("self copy_off %s: %s", uid, e)
+        return "⚠️ خطا: " + str(e)[:120]
+
+
+async def _reset_profile(uid, client):
+    """موقع قطع اتصال/غیرفعال‌سازی: ساعت و کپی برداشته می‌شن و پروفایل اصلی برمی‌گرده."""
+    d = _pget(uid)
+    if not d.get("clock_on") and not d.get("copy_on"):
+        return
+    had_copy = bool(d.get("copy_on"))
+    if had_copy:
+        await _delete_copy_photo(client, d)
+    for k in ("copy_on", "copy_first", "copy_last", "copy_about"):
+        d.pop(k, None)
+    d["clock_on"] = False
+    _pput(uid, d)
+    await _apply_name(uid, client, about=d.get("orig_about", "") if had_copy else None)
+    _maybe_clear(uid)
+
+
+def _clock_panel(uid):
+    d = _pget(uid)
+    on = bool(d.get("clock_on"))
+    cur = d.get("font", 1)
+    tx = (f"🕒 <b>ساعت زنده</b>\n\nوضعیت: {'✅ روشن' if on else '❌ خاموش'}\n"
+          f"نمونه: {fmt_clock(cur)}\n\nساعت کنار اسم اکانتت (به وقت ایران) هر دقیقه به‌روز می‌شه. فونت دلخواهت رو انتخاب کن:\n"
+          "⚠️ تا ساعت روشنه اسمت رو دستی عوض نکن؛ اول ساعت رو خاموش کن.")
+    kb = [[B("⏹ خاموش کردن" if on else "▶️ روشن کردن", callback_data="self:clkt")]]
+    row = []
+    for i in range(1, len(CLOCK_FONTS) + 1):
+        row.append(B(f"{'✔️ ' if i == cur else ''}{fmt_clock(i)}", callback_data=f"self:clkf:{i}"))
+        if len(row) == 2:
+            kb.append(row)
+            row = []
+    if row:
+        kb.append(row)
+    kb.append([B("🔙 بازگشت", callback_data="self:home")])
+    return tx, KB(kb)
+
+
 # ---------- دستورهای نقطه‌ای داخل چت (.پنل / .کلمه / .زمان / .دکمه / .گپ) ----------
 # کاربرِ فعال‌شده از خود اکانتش (هر چتی؛ بهترین جا: Saved Messages) این دستورها رو می‌نویسه.
 #   .پنل            → پنل تنظیمات بالا میاد
@@ -433,7 +773,10 @@ _CMD = {"پنل": "panel", "panel": "panel", "منو": "panel",
         "کلمه": "word", "word": "word",
         "زمان": "time", "تایمر": "time", "time": "time",
         "دکمه": "btn", "button": "btn",
-        "گپ": "chat", "گروه": "chat", "chat": "chat"}
+        "گپ": "chat", "گروه": "chat", "chat": "chat",
+        "ساعت": "clock", "clock": "clock",
+        "کپی": "copy", "copy": "copy",
+        "غیرفعال": "off", "خاموش": "off", "off": "off", "غیر": "off"}
 _POSW = {"چپ": "l", "left": "l", "l": "l", "وسط": "m", "میانه": "m", "mid": "m", "middle": "m", "m": "m",
          "راست": "r", "right": "r", "r": "r", "خالی": "n", "هیچ": "n", "none": "n", "n": "n"}
 _AR2FA = str.maketrans("يك", "یک")
@@ -504,6 +847,8 @@ def _panel_text(uid):
               ".زمان فلان — هر چند ثانیه خودکار بگه (حداقل 5؛ مثل 30 یا 2 دقیقه)",
               ".دکمه فلان — چپ | وسط | راست | خالی",
               ".گپ — همین گپ؛ یا .گپ اسم گروه",
+              ".ساعت — ساعت زنده کنار اسم | .ساعت 3 فونت | .غیرفعال ساعت",
+              ".کپی (ریپلای روی کاربر) — کپی اسم/بیو/عکس | .غیرفعال کپی",
               "", "بعد از تنظیم کلمه + گپ + زمان، سلف خودش هر چند ثانیه کلمه رو می‌گه و دکمه رو می‌زنه؛ لازم نیست خودت چیزی بفرستی."]
     return "\n".join(lines)
 
@@ -578,6 +923,42 @@ async def _handle_dot(uid, ev):
                     pass
                 tx, kb = _panel(uid)
                 await _botref[0].send_message(uid, _panel_text(uid), reply_markup=kb)
+            return True
+        if cmd == "off":
+            what = norm(re.sub(r"^فعال\s*", "", arg or ""))
+            if what in ("کپی", "copy"):
+                await _say(uid, ev, await copy_off(uid))
+            elif what in ("ساعت", "clock"):
+                await _say(uid, ev, await clock_set(uid, on=False))
+            else:
+                await _say(uid, ev, "❓ مثل: .غیرفعال کپی   یا   .غیرفعال ساعت")
+            return True
+        if cmd == "copy":
+            if norm(arg) in ("خاموش", "off", "غیرفعال"):
+                await _say(uid, ev, await copy_off(uid))
+            else:
+                await _say(uid, ev, await copy_on(uid, ev))
+            return True
+        if cmd == "clock":
+            a = norm(arg)
+            if a in ("خاموش", "off", "غیرفعال"):
+                await _say(uid, ev, await clock_set(uid, on=False))
+            elif a in ("فونت", "فونت ها", "فونتها", "fonts", "font", "لیست"):
+                await _say(uid, ev, clock_fonts_text(uid), keep=True)
+            elif fa2en(a).isdigit():
+                n = int(fa2en(a))
+                if 1 <= n <= len(CLOCK_FONTS):
+                    await _say(uid, ev, await clock_set(uid, on=True, font=n))
+                else:
+                    await _say(uid, ev, clock_fonts_text(uid), keep=True)
+            elif a == "":
+                d = _pget(uid)
+                if d.get("clock_on"):
+                    await _say(uid, ev, clock_fonts_text(uid), keep=True)
+                else:
+                    await _say(uid, ev, await clock_set(uid, on=True))
+            else:
+                await _say(uid, ev, "🕒 مثل: .ساعت   |   .ساعت 3   |   .ساعت فونت   |   .غیرفعال ساعت")
             return True
         explicit, rest = split_slot(arg)
         sl = _get_slots(uid)
@@ -654,7 +1035,8 @@ def _panel(uid):
              f"🔌 اتصال: {'✅ وصل' if on else '❌ قطع'}",
              f"⚙️ وضعیت: {'⏸ متوقف' if row.paused else '▶️ فعال'}\n",
              "هر اسلات: کلمه رو هر چند ثانیه (تایمر) خودش توی گپ انتخابی می‌گه و بعدش دکمه‌ی انتخابی (چپ/وسط/راست) رو می‌زنه؛ لازم نیست چیزی بفرستی.",
-             "💡 از داخل چت هم می‌تونی تنظیم کنی (مثلاً توی Saved Messages): <code>.پنل</code> ، <code>.کلمه فلان</code> ، <code>.زمان 5</code> ، <code>.دکمه وسط</code> ، <code>.گپ</code>\n"]
+             "💡 از داخل چت هم می‌تونی تنظیم کنی (مثلاً توی Saved Messages): <code>.پنل</code> ، <code>.کلمه فلان</code> ، <code>.زمان 5</code> ، <code>.دکمه وسط</code> ، <code>.گپ</code>\n",
+             "🕒 ساعت زنده کنار اسم: دکمه‌ی «ساعت» یا <code>.ساعت</code> — 🪞 کپی پروفایل: روی پیام کاربر ریپلای کن <code>.کپی</code> و برای برگشت <code>.غیرفعال کپی</code>\n"]
     kb = []
     for i in range(MAX_SLOTS):
         s = sl[i] if i < len(sl) else None
@@ -663,6 +1045,7 @@ def _panel(uid):
         else:
             t = f"{i + 1}️⃣ ➕ تنظیم کلمه"
         kb.append([B(t[:60], callback_data=f"self:s:{i}")])
+    kb.append([B("🕒 ساعت" + (" ✅" if _pget(uid).get("clock_on") else ""), callback_data="self:clk")])
     kb.append([B("🔌 قطع اتصال" if on else "🔗 اتصال اکانت", callback_data="self:disc" if on else "self:conn")])
     kb.append([B("▶️ فعال‌سازی" if row.paused else "⏸ توقف موقت", callback_data="self:tog")])
     return "\n".join(lines), KB(kb)
@@ -741,6 +1124,24 @@ async def cb_user(update, context):
         i = int(p[2])
         t, kb = _slot_panel(uid, i)
         await q.message.edit_text(t, reply_markup=kb, parse_mode="HTML")
+    elif a == "clk":
+        tx, kb = _clock_panel(uid)
+        await q.message.edit_text(tx, reply_markup=kb, parse_mode="HTML")
+    elif a in ("clkt", "clkf"):
+        if uid not in _clients:
+            await q.answer("اول اکانتت رو وصل کن.", show_alert=True)
+            return
+        if a == "clkt":
+            res = await clock_set(uid, on=not _pget(uid).get("clock_on"))
+        else:
+            res = await clock_set(uid, on=True, font=int(p[2]))
+        if res.startswith(("⚠️", "❌")):
+            await q.answer(res[:180], show_alert=True)
+        tx, kb = _clock_panel(uid)
+        try:
+            await q.message.edit_text(tx, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            pass
     elif a == "tm":
         i = int(p[2])
         pre = [5, 10, 30, 60, 300, 600]
@@ -870,7 +1271,7 @@ async def cb_user(update, context):
         await q.message.edit_text("🔌 اتصال قطع بشه و سشن اکانتت کامل بسته بشه؟",
                                   reply_markup=KB([[B("✅ بله، قطع کن", callback_data="self:discy"), B("لغو", callback_data="self:home")]]))
     elif a == "discy":
-        await stop_client(uid, logout=True)
+        await stop_client(uid, logout=True, restore=True)
         save_row(uid, session_enc=None, phone=None)
         await home()
 
@@ -1111,20 +1512,23 @@ async def _admin_input(update, context, action, text):
             await update.message.reply_text("❌ این کاربر سلف نداره.", reply_markup=admin_menu_kb())
             return
         save_row(uid, enabled=False)
-        await stop_client(uid)
+        await stop_client(uid, restore=True)
         await update.message.reply_text(f"⏹ سلف {uid} غیرفعال شد.", reply_markup=admin_menu_kb())
     else:
         r = get_row(uid)
         if not r:
             await update.message.reply_text("❌ این کاربر سلف نداره.", reply_markup=admin_menu_kb())
             return
-        await stop_client(uid, logout=True)
+        await stop_client(uid, logout=True, restore=True)
         s = get_session()
         try:
             x = s.get(SelfAccess, uid)
             if x:
                 s.delete(x)
-                s.commit()
+            y = s.get(SelfProfile, uid)
+            if y:
+                s.delete(y)
+            s.commit()
         finally:
             s.close()
         await update.message.reply_text(f"🗑 سلف {uid} کامل حذف شد.", reply_markup=admin_menu_kb())
