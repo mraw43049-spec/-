@@ -823,6 +823,20 @@ body:not([data-view="fox"]) #themeModal{display:none!important}
 .lite .spin-btn,.lite body.pat-anim::before{animation:none!important}
 @media (prefers-reduced-motion:reduce){.spin-btn,body.pat-anim::before{animation:none!important}.rp{display:none}}
 
+/* ===== گزینه‌های صفحه‌ی اصلی: مشکی نوک‌مدادی (گرافیت) ===== */
+.ch-tiles{grid-template-columns:repeat(5,1fr);gap:7px}
+.ch-tiles .ch-t{position:relative;overflow:hidden;color:#eceef4;border:1px solid #4b4e58;padding:11px 2px 10px;font-size:12px;background:linear-gradient(150deg,#3d3f47 0%,#212329 38%,#0c0d10 100%);box-shadow:0 6px 14px #000c,inset 0 1px 0 #ffffff38,inset 0 -2px 0 #000c}
+.ch-tiles .ch-t::before{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 34%,#ffffff1f 48%,transparent 62%);pointer-events:none}
+.ch-tiles .ch-t::after{content:"";position:absolute;left:28%;right:28%;bottom:0;height:3px;border-radius:3px 3px 0 0;background:var(--tc,#9aa0b5);box-shadow:0 0 8px var(--tc,#9aa0b5)}
+.ch-tiles .ch-t i{filter:drop-shadow(0 2px 3px #000d)}
+.ch-tiles .ch-t span{text-shadow:0 1px 2px #000}
+.ch-tiles .ch-t:active{background:linear-gradient(150deg,#2f3137,#131418 45%,#050506)}
+.t1{--tc:#3fe08a}.t2{--tc:#5aa2ff}.t3{--tc:#ff9a3d}.t4{--tc:#b77bff}.t5{--tc:#ff6fa8}
+#petScreen{display:none}
+#petScreen.open{display:block}
+/* اسکلتون لودینگ: فقط تا اولین داده‌ی واقعی (یا کش) */
+@keyframes skMove{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.sk-on .ch-num,.sk-on .ch-name,.sk-on .ch-rank,.sk-on .ch-lvl,.sk-on .ch-xp,.sk-on #chShiftT,.sk-on #chShiftS,.sk-on #bbTxt{color:transparent!important;text-shadow:none!important;border-radius:8px;background:linear-gradient(90deg,#ffffff0d,#ffffff2b,#ffffff0d)!important;background-size:200% 100%;animation:skMove 1.3s linear infinite}
 /* ===== لابی بازی‌ها (کارت‌های پرجزئیات SVG/CSS؛ بدون انیمیشن بی‌نهایت و بدون فایل بیرونی) ===== */
 #gamesLobby{display:block;direction:rtl}
 .gl-banner{position:relative;overflow:hidden;border-radius:24px;padding:18px 16px;margin-bottom:16px;min-height:122px;display:flex;flex-direction:column;justify-content:center;background:radial-gradient(90% 140% at 100% 0,#ff7ac0 0,transparent 60%),linear-gradient(135deg,#4b2bd9,#8f2bd9 60%,#ff5fa2);color:#fff;box-shadow:0 10px 24px #0007,inset 0 1px 0 #ffffff55}
@@ -860,7 +874,7 @@ body:not([data-view="fox"]) #themeModal{display:none!important}
 html.paused *{animation-play-state:paused!important}
 </style>
 </head>
-<body>
+<body class="sk-on">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="tonSym" viewBox="0 0 56 56"><circle cx="28" cy="28" r="28" fill="#0098EA"/><path d="M37.5603 15.6277H18.4386C14.9228 15.6277 12.6944 19.4202 14.4632 22.4861L26.2644 42.9409C27.0345 44.2765 28.9644 44.2765 29.7345 42.9409L41.5381 22.4861C43.3045 19.4251 41.0761 15.6277 37.5627 15.6277H37.5603ZM26.2548 36.8068L23.6847 31.8327L17.4833 20.7414C17.0742 20.0315 17.5795 19.1218 18.4362 19.1218H26.2524V36.8092L26.2548 36.8068ZM38.5108 20.739L32.3118 31.8351L29.7417 36.8068V19.1194H37.5579C38.4146 19.1194 38.9199 20.0291 38.5108 20.739Z" fill="#fff"/></symbol></defs></svg>
 
 <svg class="sprite" aria-hidden="true" focusable="false"><defs>
@@ -1001,6 +1015,7 @@ html.paused *{animation-play-state:paused!important}
       <button class="ch-t t2" id="cSend" type="button"><i>💸</i><span>انتقال</span></button>
       <button class="ch-t t3" id="cFox" type="button"><i>🦊</i><span>روباه</span></button>
       <button class="ch-t t4" id="cUp" type="button"><i>⭐</i><span>ارتقا</span></button>
+      <button class="ch-t t5" id="cPet" type="button"><i>🐾</i><span>پت</span></button>
     </div>
 
     <div class="ch-bubble">
@@ -1050,12 +1065,6 @@ html.paused *{animation-play-state:paused!important}
     </div>
   </div>
 
-  <div class="card" id="petsCard">
-    <div class="section-title">🐾 پت من</div>
-    <div class="pet-hint muted">پت‌های خریداری‌شده‌ات اینجا نمایش داده می‌شن؛ می‌تونی بینشون جابه‌جا بشی.</div>
-    <div id="petPanel"></div>
-  </div>
-
   <div class="card">
     <div class="section-title">🦊 دکمه‌های روباه</div>
     <div class="buttons">
@@ -1076,6 +1085,15 @@ html.paused *{animation-play-state:paused!important}
     </div>
     <div class="stat" style="margin-top:8px">📦 انبار روباه<b id="storage">—</b><div class="bar"><i id="storageBar"></i></div></div>
     <div id="upgradeInfo" class="muted" style="text-align:center;margin-top:10px"></div>
+  </div>
+  </div>
+
+  <div id="petScreen">
+    <button class="ch-back" id="petBack" type="button">› برگشت</button>
+  <div class="card" id="petsCard">
+    <div class="section-title">🐾 پت من</div>
+    <div class="pet-hint muted">پت‌های خریداری‌شده‌ات اینجا نمایش داده می‌شن؛ می‌تونی بینشون جابه‌جا بشی.</div>
+    <div id="petPanel"></div>
   </div>
   </div>
 </section>
@@ -1554,6 +1572,15 @@ function __rubyMain(){
     $("updated").textContent = "آخرین بروزرسانی: " + n.toLocaleTimeString("fa-IR", {hour:"2-digit", minute:"2-digit", second:"2-digit"});
   }
 
+  // ---- کش ماندگار روی گوشی: صفحه فوراً با داده‌ی دفعه‌ی قبل باز می‌شه و بعد با داده‌ی تازه آپدیت می‌شه ----
+  var CK = "rb1:" + ((tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) || "0") + ":";
+  function ckGet(k){
+    try { var s = localStorage.getItem(CK + k); if (!s) return null; var o = JSON.parse(s); return (o && Date.now() - o.t < 259200000) ? o.d : null; } catch(e){ return null; }
+  }
+  function ckSet(k, d){ try { localStorage.setItem(CK + k, JSON.stringify({ t: Date.now(), d: d })); } catch(e){} }
+  function skOff(){ try { document.body.classList.remove("sk-on"); } catch(e){} }
+  setTimeout(skOff, 7000);
+
   function api(path, method, body){
     if (!initData) return Promise.reject(new Error("این صفحه باید از داخل تلگرام (دکمه‌ی منوی بات) باز بشه."));
     var opts = { method: method || "GET", headers: { "X-Init-Data": initData } };
@@ -1913,9 +1940,12 @@ function __rubyMain(){
     } catch(e){}
   }
 
+  var profileShown = false;
   function loadProfile(silent){
-    return api("/api/profile").then(function(d){ render(d); stamp(); prefetchOnce(); }).catch(function(e){
-      if (silent || e.gate) return;
+    if (!profileShown) { var cp = ckGet("profile"); if (cp) { try { render(cp); profileShown = true; skOff(); } catch(e){} } }
+    return api("/api/profile").then(function(d){ render(d); profileShown = true; ckSet("profile", d); skOff(); stamp(); prefetchOnce(); }).catch(function(e){
+      skOff();
+      if (silent || e.gate || profileShown) return;
       $("foxName").textContent = "خطا";
       banner("نتونستم اطلاعات روباه رو بگیرم: " + e.message, false);
     });
@@ -1988,12 +2018,14 @@ function __rubyMain(){
     list.appendChild(lf);
   }
   function loadLeader(){
-    var key = cat, cached = lbCache[key], msg = $("msg");
+    var key = cat, msg = $("msg");
+    if (!lbCache[key]) { var cl = ckGet("lb_" + key); if (cl) lbCache[key] = cl; }
+    var cached = lbCache[key];
     if (cached) renderLeader(cached, key);               // فوری از حافظه نشون بده (بدون چشمک)
     else { $("list").innerHTML = ""; $("podium").innerHTML = ""; msg.style.display = "block"; msg.textContent = "🦊 در حال بارگذاری..."; }
     return api("/api/leaderboard?category=" + encodeURIComponent(key)).then(function(data){
       stamp();
-      lbCache[key] = data;
+      lbCache[key] = data; ckSet("lb_" + key, data);
       if (key !== cat) return;                            // کاربر تو این فاصله دسته رو عوض کرده
       if (cached && lbSig[key] === JSON.stringify(data.entries || [])) return;   // تغییری نکرده → دوباره نکش
       renderLeader(data, key);
@@ -2011,7 +2043,8 @@ function __rubyMain(){
   var bank = null, bankAt = 0, bankTickT = null, bankBusy = false;
   function bkLeft(sec){ return Math.max(0, (sec || 0) - Math.floor((Date.now() - bankAt) / 1000)); }
   function loadBank(){
-    return api("/api/bank").then(function(d){ setBank(d); stamp(); })
+    if (!bank) { var cb = ckGet("bank"); if (cb) { try { setBank(cb); } catch(e){} } }
+    return api("/api/bank").then(function(d){ setBank(d); ckSet("bank", d); stamp(); })
       .catch(function(e){ if (!e.gate) toast(e.message, false); });
   }
   function setBank(d){ bank = d; bankAt = Date.now(); drawBank(); }
@@ -3386,11 +3419,14 @@ function __rubyMain(){
       : "امروز هم اومدی؟ آفرین، همین‌جوری ادامه بده.";
   }
   function foxSub(name){
-    $("foxHome").classList.toggle("hide", name === "fox");
+    $("foxHome").classList.toggle("hide", name !== "home");
     $("foxPanel").classList.toggle("open", name === "fox");
+    $("petScreen").classList.toggle("open", name === "pet");
     try { window.scrollTo(0, 0); } catch(e){}
   }
   $("cFox").onclick = function(){ foxSub("fox"); };
+  $("cPet").onclick = function(){ foxSub("pet"); };
+  $("petBack").onclick = function(){ foxSub("home"); };
   $("foxBack").onclick = function(){ foxSub("home"); };
   $("chShift").onclick = function(){ if (!this.classList.contains("off")) $("btnCollect").click(); };
   $("cUp").onclick = function(){ $("btnUpgrade").click(); };

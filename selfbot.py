@@ -5,6 +5,7 @@
 - پشتیبانی از پنل مدیریت (🤖 سلف) با آیدی عددی کاربر، سلف رو برای اون کاربر فعال/غیرفعال می‌کنه.
 - کاربرِ فعال‌شده با /self (یا نوشتن «سلف») اکانتش رو وصل می‌کنه و تا ۳ کلمه تنظیم می‌کنه:
   هر کلمه = (کلمه، گپ، تایمر، جای دکمه: چپ/وسط/راست/خالی).
+- دستورهای نقطه‌ای داخل چت از اکانت کاربر: .پنل  .کلمه فلان  .زمان فلان  .دکمه فلان  .گپ [اسم گروه]
 - وقتی کاربر از اکانت خودش دقیقاً اون کلمه رو توی همون گپ بفرسته، بعد از تایمر، سلف روی دکمه‌ی انتخاب‌شده‌ی
   پیام ربات (ریپلای یا آخرین پیام دکمه‌دار ربات‌های دیگه) کلیک می‌کنه. روی ربات روباهیو هیچ‌وقت کلیک نمی‌کنه.
 
@@ -206,6 +207,8 @@ async def _on_out(uid, ev):
             except Exception as e:  # noqa: BLE001
                 logger.info("self capture notify failed: %s", e)
             return
+    if await _handle_dot(uid, ev):
+        return
     if _paused.get(uid):
         return
     txt = norm(ev.raw_text or "")
@@ -317,6 +320,228 @@ async def _dialogs(client):
     return out
 
 
+# ---------- دستورهای نقطه‌ای داخل چت (.پنل / .کلمه / .زمان / .دکمه / .گپ) ----------
+# کاربرِ فعال‌شده از خود اکانتش (هر چتی؛ بهترین جا: Saved Messages) این دستورها رو می‌نویسه.
+#   .پنل            → پنل تنظیمات بالا میاد
+#   .کلمه فلان      → کلمه‌ی اسلات فعلی (اگه عدد اسلات بذاری: .کلمه 2 فلان)
+#   .زمان فلان      → تایمر: 5 یا 10s یا 2 دقیقه
+#   .دکمه فلان      → چپ | وسط | راست | خالی
+#   .گپ             → همین گپی که توش می‌نویسی؛ یا .گپ اسم گروه
+# بعد از تنظیم (کلمه + گپ + دکمه) سلف خودش کار می‌کنه.
+_CMD = {"پنل": "panel", "panel": "panel", "منو": "panel",
+        "کلمه": "word", "word": "word",
+        "زمان": "time", "تایمر": "time", "time": "time",
+        "دکمه": "btn", "button": "btn",
+        "گپ": "chat", "گروه": "chat", "chat": "chat"}
+_POSW = {"چپ": "l", "left": "l", "l": "l", "وسط": "m", "میانه": "m", "mid": "m", "middle": "m", "m": "m",
+         "راست": "r", "right": "r", "r": "r", "خالی": "n", "هیچ": "n", "none": "n", "n": "n"}
+_AR2FA = str.maketrans("يك", "یک")
+_cur = {}          # uid -> اسلاتی که آخر دست زدیم (دستورهای بدون شماره روی همین اعمال می‌شن)
+_cmd_hist = {}
+
+
+def parse_dot(raw):
+    """'.کلمه سلام' → ('word', 'سلام'). اگه دستور شناخته‌شده نبود None."""
+    t = (raw or "").strip().translate(_AR2FA)
+    if not t.startswith("."):
+        return None
+    m = re.match(r"^\.\s*(\S+)\s*(.*)$", t, re.S)
+    if not m:
+        return None
+    cmd = _CMD.get(m.group(1).replace("\u200c", "").lower())
+    return (cmd, m.group(2).strip()) if cmd else None
+
+
+def split_slot(arg):
+    """'2 سلام' → (1, 'سلام'). بدون عدد اسلات → (None, arg)."""
+    m = re.match(r"^([1-3\u06f1-\u06f3])\s+(\S.*)$", arg or "", re.S)
+    if m:
+        return int(fa2en(m.group(1))) - 1, m.group(2).strip()
+    return None, (arg or "").strip()
+
+
+def _slot_line(i, s):
+    if not s or not s.get("word"):
+        return f"{i + 1}️⃣ ➕ خالی"
+    parts = [f"{i + 1}️⃣ «{s['word']}»", f"💬 {(s.get('title') or 'گپ؟')[:22]}",
+             f"⏱ {fmt_delay(s.get('delay', 0))}", f"🎯 {POS[s.get('pos', 'n')]}"]
+    return " | ".join(parts) + ("  ✅" if s.get("chat") else "  ⚠️ گپ تنظیم نشده")
+
+
+def _missing(s):
+    miss = []
+    if not s.get("word"):
+        miss.append(".کلمه فلان")
+    if not s.get("chat"):
+        miss.append(".گپ")
+    if s.get("pos", "n") == "n":
+        miss.append(".دکمه چپ|وسط|راست (بدون اون فقط کلمه تکرار می‌شه و دکمه‌ای زده نمی‌شه)")
+    return miss
+
+
+def _ready_text(s):
+    miss = _missing(s)
+    if s.get("word") and s.get("chat") and s.get("pos", "n") != "n":
+        return (f"🚀 آماده‌ست و از همین الان کار می‌کنه: «{s['word']}» رو توی «{s.get('title') or 'گپ'}» بفرست "
+                f"و بعد از {fmt_delay(s.get('delay', 0))} دکمه زده می‌شه.")
+    return "📌 مونده: " + " | ".join(miss) if miss else ""
+
+
+def _panel_text(uid):
+    row = get_row(uid)
+    sl = slots_of(row) if row else []
+    on = uid in _clients
+    lines = ["🤖 سلف روبی", "",
+             f"🔌 اتصال: {'✅ وصل' if on else '❌ قطع'}   ⚙️ وضعیت: {'⏸ متوقف' if row and row.paused else '▶️ فعال'}", ""]
+    for i in range(MAX_SLOTS):
+        lines.append(_slot_line(i, sl[i] if i < len(sl) else {}))
+    lines += ["",
+              "دستورها (روی اسلات فعلی؛ برای اسلات دیگه عدد بذار: .کلمه 2 سلام):",
+              ".کلمه فلان — کلمه‌ای که می‌فرستی",
+              ".زمان فلان — مثل 5 یا 10s یا 2 دقیقه",
+              ".دکمه فلان — چپ | وسط | راست | خالی",
+              ".گپ — همین گپ؛ یا .گپ اسم گروه",
+              "", "بعد از تنظیم کلمه + گپ + دکمه، سلف خودش کار می‌کنه."]
+    return "\n".join(lines)
+
+
+async def _del_later(m, sec):
+    try:
+        await asyncio.sleep(sec)
+        await m.delete()
+    except Exception:
+        pass
+
+
+async def _say(uid, ev, text, keep=False):
+    """جواب رو همون‌جا (با ادیت پیام دستور) می‌ده و بعد چند ثانیه پاکش می‌کنه."""
+    try:
+        m = await ev.edit(text, parse_mode=None)
+    except Exception:
+        try:
+            await _botref[0].send_message(uid, text)
+        except Exception:
+            pass
+        return
+    if not keep:
+        asyncio.create_task(_del_later(m, 10))
+
+
+def _pick_slot(uid, sl, explicit, word=None):
+    if explicit is not None:
+        return explicit
+    if word:
+        w = norm(word)
+        for i, s in enumerate(sl):
+            if s.get("word") and norm(s["word"]) == w:
+                return i
+        for i, s in enumerate(sl):
+            if not s.get("word"):
+                return i
+    return min(max(_cur.get(uid, 0), 0), MAX_SLOTS - 1)
+
+
+async def _find_chat(client, name):
+    q = norm(name)
+    ds = await _dialogs(client)
+    exact = [d for d in ds if norm(d[1]) == q]
+    if len(exact) == 1:
+        return [exact[0]]
+    return [d for d in ds if q in norm(d[1])]
+
+
+async def _handle_dot(uid, ev):
+    raw = ev.raw_text or ""
+    if not raw.lstrip().startswith("."):
+        return False
+    pc = parse_dot(raw)
+    if not pc:
+        return False
+    cmd, arg = pc
+    now = time.time()
+    h = [t for t in _cmd_hist.get(uid, []) if now - t < 60]
+    if len(h) >= 40:
+        return True
+    h.append(now)
+    _cmd_hist[uid] = h
+    try:
+        if cmd == "panel":
+            if ev.chat_id == uid:      # Saved Messages: پنل همون‌جا بالا میاد
+                await ev.edit(_panel_text(uid), parse_mode=None)
+            else:                      # گپ عمومی: پیام دستور پاک می‌شه و پنل می‌ره توی چت ربات
+                try:
+                    await ev.delete()
+                except Exception:
+                    pass
+                tx, kb = _panel(uid)
+                await _botref[0].send_message(uid, _panel_text(uid), reply_markup=kb)
+            return True
+        explicit, rest = split_slot(arg)
+        sl = _get_slots(uid)
+        if cmd == "word":
+            if not rest:
+                await _say(uid, ev, "✏️ مثل: .کلمه سلام   (یا اسلات مشخص: .کلمه 2 سلام)")
+                return True
+            i = _pick_slot(uid, sl, explicit, rest)
+            sl[i]["word"] = rest[:40]
+            sl[i].setdefault("delay", 0)
+            _put_slots(uid, sl)
+            _cur[uid] = i
+            await _say(uid, ev, f"✅ کلمه‌ی اسلات {i + 1}: «{sl[i]['word']}»\n" + _ready_text(sl[i]))
+        elif cmd == "time":
+            d = parse_delay(rest)
+            if d is None:
+                await _say(uid, ev, "⏱ مثل: .زمان 5   یا   .زمان 10s   یا   .زمان 2 دقیقه   (تا ۶۰ دقیقه)")
+                return True
+            i = _pick_slot(uid, sl, explicit)
+            sl[i]["delay"] = d
+            _put_slots(uid, sl)
+            _cur[uid] = i
+            await _say(uid, ev, f"✅ زمان اسلات {i + 1}: {fmt_delay(d)}\n" + _ready_text(sl[i]))
+        elif cmd == "btn":
+            pos = _POSW.get(norm(rest))
+            if not pos:
+                await _say(uid, ev, "🎯 مثل: .دکمه چپ   یا   .دکمه وسط   یا   .دکمه راست   یا   .دکمه خالی")
+                return True
+            i = _pick_slot(uid, sl, explicit)
+            sl[i]["pos"] = pos
+            _put_slots(uid, sl)
+            _cur[uid] = i
+            await _say(uid, ev, f"✅ دکمه‌ی اسلات {i + 1}: {POS[pos]}\n" + _ready_text(sl[i]))
+        elif cmd == "chat":
+            client = _clients.get(uid)
+            slot_only = re.fullmatch(r"[1-3\u06f1-\u06f3]", arg or "")
+            if slot_only:
+                explicit, rest = int(fa2en(arg)) - 1, ""
+            if not rest:      # همین گپ
+                chat = await ev.get_chat()
+                is_bot = bool(ev.is_private and getattr(chat, "bot", False))
+                if ev.chat_id in (uid, _bot_id[0]) or not (ev.is_group or is_bot):
+                    await _say(uid, ev, "💬 این دستور رو داخل گپِ هدف (گروه یا چت ربات) بنویس، یا بنویس: .گپ اسم گروه")
+                    return True
+                cid = ev.chat_id
+                title = getattr(chat, "title", None) or getattr(chat, "first_name", None) or str(cid)
+            else:
+                found = await _find_chat(client, rest) if client else []
+                if not found:
+                    await _say(uid, ev, f"❌ گپی با اسم «{rest[:30]}» پیدا نشد (فقط گروه‌ها و چت رباتا).")
+                    return True
+                if len(found) > 1:
+                    names = "\n".join(f"• {d[1][:30]}" for d in found[:6])
+                    await _say(uid, ev, "🔎 چند تا پیدا شد؛ اسم دقیق‌تر بنویس:\n" + names)
+                    return True
+                cid, title = found[0][0], found[0][1]
+            i = _pick_slot(uid, sl, explicit)
+            sl[i]["chat"] = cid
+            sl[i]["title"] = str(title)[:40]
+            _put_slots(uid, sl)
+            _cur[uid] = i
+            await _say(uid, ev, f"✅ گپ اسلات {i + 1}: «{sl[i]['title']}»\n" + _ready_text(sl[i]))
+    except Exception as e:  # noqa: BLE001
+        logger.info("self dot-cmd failed %s: %s", uid, e)
+    return True
+
+
 # ---------- پنل کاربر ----------
 def _panel(uid):
     row = get_row(uid)
@@ -325,7 +550,8 @@ def _panel(uid):
     lines = ["🤖 <b>سلف روبی</b>\n",
              f"🔌 اتصال: {'✅ وصل' if on else '❌ قطع'}",
              f"⚙️ وضعیت: {'⏸ متوقف' if row.paused else '▶️ فعال'}\n",
-             "کلمه رو توی گپ انتخابی از اکانت خودت بفرست؛ بعد از تایمر، دکمه‌ی انتخابی (چپ/وسط/راست) زده می‌شه.\n"]
+             "کلمه رو توی گپ انتخابی از اکانت خودت بفرست؛ بعد از تایمر، دکمه‌ی انتخابی (چپ/وسط/راست) زده می‌شه.",
+             "💡 از داخل چت هم می‌تونی تنظیم کنی (مثلاً توی Saved Messages): <code>.پنل</code> ، <code>.کلمه فلان</code> ، <code>.زمان 5</code> ، <code>.دکمه وسط</code> ، <code>.گپ</code>\n"]
     kb = []
     for i in range(MAX_SLOTS):
         s = sl[i] if i < len(sl) else None
