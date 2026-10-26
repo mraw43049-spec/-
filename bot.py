@@ -7451,6 +7451,23 @@ async def post_injured_fox_job(context):
             session.close()
     except Exception as e:
         logger.warning("post injured fox failed in %s: %s", chat_id, e)
+        # گروهی که ربات ازش حذف شده/پاک شده: غیرفعالش کن و جابش رو بردار تا هر ۲ ساعت خطا نده.
+        _msg = str(e).lower()
+        if isinstance(e, Forbidden) or "chat not found" in _msg or "bot was kicked" in _msg or "bot is not a member" in _msg:
+            try:
+                for _j in context.application.job_queue.get_jobs_by_name(f"injured-fox-{chat_id}"):
+                    _j.schedule_removal()
+                _s = get_session()
+                try:
+                    _gc = _s.get(GroupChat, chat_id)
+                    if _gc:
+                        _gc.active = 0
+                    _s.commit()
+                finally:
+                    _s.close()
+                logger.info("chat %s deactivated (bot removed)", chat_id)
+            except Exception:
+                logger.exception("deactivate chat %s failed", chat_id)
 
 
 # ---------- جغد روبی: هر ۲ ساعت (۱۲۰ دقیقه) یک جغد مرموز می‌آید؛ اولی که رمز را ریپلای کند می‌بردش ----------
