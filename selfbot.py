@@ -774,19 +774,56 @@ async def send_premium(client, chat, text, reply_to=None):
     return True
 
 
+def _u16(t):
+    return len(t.encode("utf-16-le")) // 2
+
+
 async def emoji_send(uid, ev, arg):
+    """ایموجی پریمیوم مستقیم از خود اکانت (بدون ربات واسطه).
+    دو حالت: ۱) ایموجی پریمیوم رو از کیبوردت توی متن بذار  ۲) {آیدی عددی ایموجی} بنویس.
+    اکانت باید پریمیوم باشه."""
+    import copy
+    from telethon.tl.types import MessageEntityCustomEmoji
     client = _clients.get(uid)
     if not client:
         return "❌ اول اکانتت رو وصل کن (/self)."
     if not arg:
-        return "✨ مثل: .ایموجی سلام [کد ایموجی]\n(همون متنی که بعد از @" + EMOJI_BOT + " می‌نویسی)"
+        return "✨ مثل: .ایموجی سلام 😎(ایموجی پریمیوم)\nیا با آیدی: .ایموجی سلام {5368324170671202286}"
     try:
-        ok = await send_premium(client, ev.chat_id, arg, reply_to=ev.reply_to_msg_id if ev.is_reply else None)
+        me = await client.get_me()
+        if not getattr(me, "premium", False):
+            return "❌ اکانتی که وصل کردی پریمیوم نیست؛ ایموجی پریمیوم فقط از اکانت پریمیوم ارسال می‌شه."
+        raw = ev.raw_text or ""
+        end = len(raw.rstrip())
+        start = end - len(arg)
+        start16 = _u16(raw[:start])
+        ents = []
+        for e in (ev.message.entities or []):
+            if e.offset >= start16:
+                e2 = copy.copy(e)
+                e2.offset -= start16
+                ents.append(e2)
+        text = arg
+        # جایگزینی {آیدی} با ایموجی پریمیوم
+        while True:
+            m = re.search(r"\{(\d{6,})\}", text)
+            if not m:
+                break
+            pos16 = _u16(text[:m.start()])
+            old16 = _u16(m.group(0))
+            for e in ents:
+                if e.offset >= pos16 + old16:
+                    e.offset -= old16 - 1
+            ents.append(MessageEntityCustomEmoji(offset=pos16, length=1, document_id=int(m.group(1))))
+            text = text[:m.start()] + "⭐" + text[m.end():]
+        if not any(isinstance(e, MessageEntityCustomEmoji) for e in ents):
+            return "❌ توی متن ایموجی پریمیوم پیدا نشد؛ از کیبوردت بذار یا {آیدی} بنویس."
+        ents.sort(key=lambda e: e.offset)
+        await client.send_message(ev.chat_id, text, formatting_entities=ents, parse_mode=None,
+                                  reply_to=ev.reply_to_msg_id if ev.is_reply else None)
     except Exception as e:  # noqa: BLE001
         logger.info("self emoji %s: %s", uid, e)
         return "⚠️ ارسال نشد: " + str(e)[:120]
-    if not ok:
-        return f"❌ @{EMOJI_BOT} جوابی نداد؛ متن و کد رو چک کن."
     try:
         await ev.delete()      # پیام دستور پاک می‌شه و فقط پیام ایموجی می‌مونه
     except Exception:
@@ -1296,289 +1333,4 @@ async def cb_user(update, context):
         if a == "k" and len(code) < 8:
             code += p[2]
         elif a == "kx":
-            code = code[:-1]
-        elif a == "ky":
-            if len(code) < 5:
-                await context.bot.send_message(uid, "❗️ کد حداقل ۵ رقمه.")
-                return
-            await q.message.edit_text("⏳ در حال بررسی کد...")
-            ud["self_code"] = ""
-            await _sign_in(uid, context, code=code)
-            return
-        ud["self_code"] = code
-        await _send_keypad(context.bot, uid, context, edit_msg=q.message)
-    elif a == "disc":
-        await q.message.edit_text("🔌 اتصال قطع بشه و سشن اکانتت کامل بسته بشه؟",
-                                  reply_markup=KB([[B("✅ بله، قطع کن", callback_data="self:discy"), B("لغو", callback_data="self:home")]]))
-    elif a == "discy":
-        await stop_client(uid, logout=True, restore=True)
-        save_row(uid, session_enc=None, phone=None)
-        await home()
-
-
-async def _drop_login(uid):
-    d = _login.pop(uid, None)
-    if d:
-        try:
-            await d["client"].disconnect()
-        except Exception:
-            pass
-
-
-
-def _keypad_kb(n):
-    rows = [[B(str(d), callback_data=f"self:k:{d}") for d in r] for r in ("123", "456", "789")]
-    rows.append([B("⌫", callback_data="self:kx"), B("0", callback_data="self:k:0"), B("✅ تأیید", callback_data="self:ky")])
-    rows.append([B("❌ انصراف", callback_data="self:kc")])
-    return KB(rows)
-
-
-async def _send_keypad(bot, uid, context, edit_msg=None):
-    code = context.user_data.get("self_code", "")
-    dots = " ".join(["●"] * len(code) + ["○"] * max(0, 5 - len(code)))
-    tx = f"🔢 کد تلگرامی که برات اومد رو با دکمه‌های زیر وارد کن (کد رو داخل چت تایپ نکن):\n\n<b>{dots}</b>"
-    if edit_msg:
-        await edit_msg.edit_text(tx, parse_mode="HTML", reply_markup=_keypad_kb(len(code)))
-    else:
-        await bot.send_message(uid, tx, parse_mode="HTML", reply_markup=_keypad_kb(len(code)))
-
-
-async def _sign_in(uid, context, code=None, password=None):
-    ud = context.user_data
-    bot = context.bot
-    d = _login.get(uid)
-    if not d or time.time() - d["ts"] > 600:
-        ud.pop("self_st", None)
-        ud.pop("self_code", None)
-        await _drop_login(uid)
-        await bot.send_message(uid, "⌛ زمان اتصال تموم شد؛ دوباره از /self اتصال بزن.")
-        return
-    from telethon import errors
-    try:
-        if password is None:
-            await d["client"].sign_in(d["phone"], code, phone_code_hash=d["hash"])
-        else:
-            await d["client"].sign_in(password=password)
-    except errors.SessionPasswordNeededError:
-        ud["self_st"] = {"step": "pw"}
-        await bot.send_message(uid, "🔐 تأیید دومرحله‌ای داری؛ رمزش رو بفرست (پیامت بعد از خوندن پاک می‌شه).")
-        return
-    except (errors.PhoneCodeInvalidError, errors.PasswordHashInvalidError):
-        if password is None:
-            ud["self_code"] = ""
-            await bot.send_message(uid, "❌ کد اشتباهه؛ دوباره وارد کن.")
-            await _send_keypad(bot, uid, context)
-        else:
-            await bot.send_message(uid, "❌ رمز اشتباهه؛ دوباره بفرست (یا لغو).")
-        return
-    except errors.PhoneCodeExpiredError:
-        ud.pop("self_st", None)
-        ud.pop("self_code", None)
-        await _drop_login(uid)
-        await bot.send_message(uid, "⌛ کد منقضی شد؛ از /self دوباره اتصال بزن و کد جدید رو سریع با شماره‌گیر وارد کن.")
-        return
-    except Exception as e:  # noqa: BLE001
-        logger.warning("self sign_in: %s", e)
-        await bot.send_message(uid, "⚠️ خطا: " + str(e)[:150])
-        return
-    save_row(uid, session_enc=enc(d["client"].session.save()), phone=d["phone"])
-    await _drop_login(uid)
-    ud.pop("self_st", None)
-    ud.pop("self_code", None)
-    ok = await start_client(uid)
-    tx, kb = _panel(uid)
-    await bot.send_message(uid, ("✅ اکانت وصل شد!\n\n" if ok else "⚠️ ذخیره شد ولی اتصال بالا نیومد.\n\n") + tx,
-                           reply_markup=kb, parse_mode="HTML")
-
-
-async def user_text(update, context):
-    msg = update.effective_message
-    u = update.effective_user
-    if not msg or not u or update.effective_chat.type != "private" or not msg.text:
-        return
-    text = msg.text.strip()
-    ud = context.user_data
-    # --- ورودی‌های مدیر ---
-    aa = ud.get("admin_action")
-    if isinstance(aa, str) and aa.startswith("self_") and u.id in ADMIN_IDS:
-        await _admin_input(update, context, aa, text)
-        raise ApplicationHandlerStop
-    if text == "سلف":
-        await cmd_self(update, context)   # برای کاربر بدون سلف ساکت است
-        raise ApplicationHandlerStop
-    st = ud.get("self_st")
-    if not st:
-        return
-    uid = u.id
-    if not _allowed(uid):
-        ud.pop("self_st", None)
-        return
-    raise_stop = True
-    try:
-        if text in ("لغو", "/cancel"):
-            ud.pop("self_st", None)
-            await _drop_login(uid)
-            await msg.reply_text("لغو شد.", reply_markup=ReplyKeyboardRemove())
-        elif st["step"] == "delay":
-            i, f = st["slot"], st["step"]
-            sl = _get_slots(uid)
-            if f == "delay":
-                v = parse_delay(text)
-                if v is None or 0 < v < MIN_AUTO:
-                    await msg.reply_text("❗️ عدد درست بفرست؛ مثلاً 30 یا 5 دقیقه (حداقل ۵ ثانیه، حداکثر ۶۰ دقیقه).")
-                    raise ApplicationHandlerStop
-            else:
-                v = text[:40]
-            sl[i][f] = v
-            sl[i].setdefault("delay", 0)
-            _put_slots(uid, sl)
-            ud.pop("self_st", None)
-            t, kb = _slot_panel(uid, i)
-            await msg.reply_text("✅ ذخیره شد.\n\n" + t, reply_markup=kb, parse_mode="HTML")
-        elif st["step"] == "phone":
-            await msg.reply_text("📱 شماره رو تایپ نکن؛ فقط با دکمه‌ی «اشتراک شماره من» از منوی پایین بفرست.", reply_markup=ReplyKeyboardMarkup(
-                [[KeyboardButton("📱 اشتراک شماره من", request_contact=True)], [KeyboardButton("لغو")]], resize_keyboard=True, one_time_keyboard=True))
-        elif st["step"] == "code":
-            try:
-                await msg.delete()   # اگه کد رو تایپ کرد، فوراً پاک می‌شه
-            except Exception:
-                pass
-            await msg.reply_text("🔢 کد رو تایپ نکن (تلگرام باطلش می‌کنه)؛ با شماره‌گیر زیر وارد کن 👇")
-            await _send_keypad(context.bot, uid, context)
-        elif st["step"] == "pw":
-            await _sign_in(uid, context, password=text)
-            try:
-                await msg.delete()
-            except Exception:
-                pass
-    except ApplicationHandlerStop:
-        raise
-    except Exception as e:  # noqa: BLE001
-        logger.warning("self user_text: %s", e)
-        await msg.reply_text("⚠️ خطا: " + str(e)[:150])
-    if raise_stop:
-        raise ApplicationHandlerStop
-
-
-async def on_contact(update, context):
-    msg = update.effective_message
-    u = update.effective_user
-    if not msg or not msg.contact or not u or update.effective_chat.type != "private":
-        return
-    st = context.user_data.get("self_st")
-    if not st or st.get("step") != "phone" or not _allowed(u.id):
-        return
-    c = msg.contact
-    if c.user_id != u.id:   # فقط شماره‌ی خودِ کاربر؛ مخاطب دیگران پذیرفته نمی‌شه
-        await msg.reply_text("❌ فقط شماره‌ی خودت قبوله؛ با دکمه‌ی «اشتراک شماره من» بفرست.")
-        raise ApplicationHandlerStop
-    phone = "+" + re.sub(r"\D", "", c.phone_number or "")
-    try:
-        from telethon import TelegramClient
-        from telethon.sessions import StringSession
-        await _drop_login(u.id)
-        client = TelegramClient(StringSession(), API_ID, API_HASH)
-        await client.connect()
-        sent = await client.send_code_request(phone)
-        _login[u.id] = {"client": client, "phone": phone, "hash": sent.phone_code_hash, "ts": time.time()}
-        st["step"] = "code"
-        context.user_data["self_code"] = ""
-        await msg.reply_text("📨 کد تلگرام برات اومد (توی اپ تلگرام، چت «Telegram»).", reply_markup=ReplyKeyboardRemove())
-        await _send_keypad(context.bot, u.id, context)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("self contact: %s", e)
-        await msg.reply_text("⚠️ خطا: " + str(e)[:150], reply_markup=ReplyKeyboardRemove())
-    raise ApplicationHandlerStop
-
-
-# ---------- پنل مدیر ----------
-ADMIN_IDS = set()
-
-
-def admin_menu_kb():
-    return KB([[B("➕ فعال‌سازی برای کاربر", callback_data="selfa:on")],
-               [B("⏹ غیرفعال‌سازی کاربر", callback_data="selfa:off")],
-               [B("🗑 حذف کامل (خروج از سشن)", callback_data="selfa:del")],
-               [B("📋 لیست کاربران سلف", callback_data="selfa:list")],
-               [B("🔙 بازگشت", callback_data="admin:back")]])
-
-
-async def cb_admin(update, context):
-    q = update.callback_query
-    if q.from_user.id not in ADMIN_IDS:
-        await q.answer("دسترسی نداری.", show_alert=True)
-        return
-    a = q.data.split(":")[1]
-    await q.answer()
-    if a == "menu":
-        context.user_data.pop("admin_action", None)
-        await q.message.reply_text("🤖 مدیریت سلف" + ("" if configured() else "\n\n⚠️ SELF_API_ID / SELF_API_HASH تنظیم نشده."),
-                                   reply_markup=admin_menu_kb())
-    elif a in ("on", "off", "del"):
-        context.user_data["admin_action"] = "self_" + a
-        await q.message.reply_text("🆔 آیدی عددی کاربر رو بفرست:")
-    elif a == "list":
-        s = get_session()
-        try:
-            rows = s.query(SelfAccess).all()
-            lines = [f"{'✅' if r.enabled else '⏹'} <code>{r.user_id}</code> {'🔗' if r.user_id in _clients else '—'}" for r in rows]
-        finally:
-            s.close()
-        await q.message.reply_text("📋 کاربران سلف (✅ مجاز | 🔗 وصل):\n\n" + ("\n".join(lines) if lines else "خالیه."),
-                                   parse_mode="HTML", reply_markup=admin_menu_kb())
-
-
-async def _admin_input(update, context, action, text):
-    context.user_data.pop("admin_action", None)
-    context.user_data["ai_skip_msg"] = update.message.message_id
-    t = fa2en(text).strip()
-    if not t.isdigit():
-        context.user_data["admin_action"] = action
-        await update.message.reply_text("❗️ فقط آیدی عددی بفرست.")
-        return
-    uid = int(t)
-    bot = context.bot
-    if action == "self_on":
-        save_row(uid, enabled=True)
-        if get_row(uid).session_enc:
-            await start_client(uid)
-        await update.message.reply_text(f"✅ سلف برای {uid} فعال شد.", reply_markup=admin_menu_kb())
-        try:
-            await bot.send_message(uid, "✅ پشتیبانی «سلف» رو برات فعال کرد.\nبرای تنظیم، /self رو بزن یا بنویس «سلف».")
-        except Exception:
-            pass
-    elif action == "self_off":
-        if not get_row(uid):
-            await update.message.reply_text("❌ این کاربر سلف نداره.", reply_markup=admin_menu_kb())
-            return
-        save_row(uid, enabled=False)
-        await stop_client(uid, restore=True)
-        await update.message.reply_text(f"⏹ سلف {uid} غیرفعال شد.", reply_markup=admin_menu_kb())
-    else:
-        r = get_row(uid)
-        if not r:
-            await update.message.reply_text("❌ این کاربر سلف نداره.", reply_markup=admin_menu_kb())
-            return
-        await stop_client(uid, logout=True, restore=True)
-        s = get_session()
-        try:
-            x = s.get(SelfAccess, uid)
-            if x:
-                s.delete(x)
-            y = s.get(SelfProfile, uid)
-            if y:
-                s.delete(y)
-            s.commit()
-        finally:
-            s.close()
-        await update.message.reply_text(f"🗑 سلف {uid} کامل حذف شد.", reply_markup=admin_menu_kb())
-
-
-def register(app, admin_ids):
-    ADMIN_IDS.clear()
-    ADMIN_IDS.update(admin_ids)
-    app.add_handler(CommandHandler("self", cmd_self), group=-5)
-    app.add_handler(CallbackQueryHandler(cb_user, pattern=r"^self:"), group=-5)
-    app.add_handler(CallbackQueryHandler(cb_admin, pattern=r"^selfa:"), group=-5)
-    app.add_handler(MessageHandler(filters.CONTACT & filters.ChatType.PRIVATE, on_contact), group=-5)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, user_text), group=-5)
+         
