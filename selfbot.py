@@ -6,7 +6,8 @@
 - کاربرِ فعال‌شده با /self (یا نوشتن «سلف») اکانتش رو وصل می‌کنه و تا ۳ کلمه تنظیم می‌کنه:
   هر کلمه = (کلمه، گپ، تایمر، جای دکمه: چپ/وسط/راست/خالی).
 - دستورهای نقطه‌ای داخل چت از اکانت کاربر: .پنل  .کلمه فلان  .زمان فلان  .دکمه فلان  .گپ [اسم گروه]
-- وقتی کاربر از اکانت خودش دقیقاً اون کلمه رو توی همون گپ بفرسته، بعد از تایمر، سلف روی دکمه‌ی انتخاب‌شده‌ی
+- حالت خودکار: اسلاتی که کلمه + گپ + تایمر (>= ۵ ثانیه) داره، هر تایمر ثانیه خودش کلمه رو توی گپ می‌گه و دکمه‌ی انتخابی رو می‌زنه.
+- (حالت دستی قدیمی، فقط اگه تایمر صفر باشه) وقتی کاربر از اکانت خودش دقیقاً اون کلمه رو توی همون گپ بفرسته، بعد از تایمر، سلف روی دکمه‌ی انتخاب‌شده‌ی
   پیام ربات (ریپلای یا آخرین پیام دکمه‌دار ربات‌های دیگه) کلیک می‌کنه. روی ربات روباهیو هیچ‌وقت کلیک نمی‌کنه.
 
 امنیت: سشن‌ها رمزنگاری‌شده ذخیره می‌شن (Fernet)، سلف هیچ‌وقت روی ربات روباهیو کلیک نمی‌کنه،
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 MAX_SLOTS = 3
 MAX_DELAY = 3600
+MIN_AUTO = 5      # تایمر >= این مقدار یعنی حالت خودکار: هر N ثانیه کلمه رو خودش توی گپ می‌گه
 POS = {"l": "⬅️ چپ", "m": "⏺ وسط", "r": "➡️ راست", "n": "⬜ خالی"}
 API_ID = int(os.environ.get("SELF_API_ID", "0") or 0)
 API_HASH = os.environ.get("SELF_API_HASH", "").strip()
@@ -143,10 +145,12 @@ _own = {}   # (uid, chat, کلمه) -> زمان؛ پیام‌هایی که خو�
 def _load_runtime(uid, row):
     _slots[uid] = slots_of(row)
     _paused[uid] = bool(row.paused)
+    _sync_auto(uid)
 
 
 async def stop_client(uid, logout=False):
     c = _clients.pop(uid, None)
+    _cancel_auto(uid)
     _slots.pop(uid, None)
     if c:
         try:
@@ -186,6 +190,7 @@ async def start_client(uid):
         await _on_out(_uid, ev)
     client.add_event_handler(_h, events.NewMessage(outgoing=True))
     _clients[uid] = client
+    _sync_auto(uid)
     return True
 
 
@@ -217,7 +222,7 @@ async def _on_out(uid, ev):
     if _own.pop((uid, ev.chat_id, txt), 0) > time.time():
         return   # پیامی که خود سلف فرستاده؛ دوباره تریگر نشه
     for i, s in enumerate(_slots.get(uid, [])):
-        if s and s.get("word") and s.get("chat") and ev.chat_id == s["chat"] and ev.chat_id != _bot_id[0] and norm(s["word"]) == txt:
+        if s and s.get("word") and s.get("chat") and ev.chat_id == s["chat"] and ev.chat_id != _bot_id[0] and norm(s["word"]) == txt and int(s.get("delay", 0) or 0) < MIN_AUTO:
             now = time.time()
             if now - _last.get((uid, i), 0) < 2:
                 continue
@@ -281,6 +286,102 @@ async def _fire(uid, ev, s):
             await btn.click()
     except Exception as e:  # noqa: BLE001
         logger.info("self fire failed %s: %s", uid, e)
+
+
+# ---------- حالت خودکار: هر N ثانیه کلمه رو خودش توی گپ می‌گه و دکمه رو می‌زنه ----------
+_auto = {}   # (uid, اسلات) -> (امضا، تسک)
+
+
+def _auto_sig(s):
+    return (s.get("word"), s.get("chat"), int(s.get("delay", 0) or 0), s.get("pos", "n"))
+
+
+def _cancel_auto(uid):
+    for k in [k for k in _auto if k[0] == uid]:
+        try:
+            _auto.pop(k)[1].cancel()
+        except Exception:
+            pass
+
+
+def _sync_auto(uid):
+    """تسک‌های خودکار رو با تنظیمات فعلی هماهنگ می‌کنه (تغییر تنظیمات = ری‌استارت همون اسلات)."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    sl = _slots.get(uid, []) if uid in _clients else []
+    want = {}
+    for i, s in enumerate(sl):
+        if s and s.get("word") and s.get("chat") and int(s.get("delay", 0) or 0) >= MIN_AUTO:
+            want[(uid, i)] = _auto_sig(s)
+    for k in [k for k in _auto if k[0] == uid and (k not in want or _auto[k][0] != want[k])]:
+        _auto.pop(k)[1].cancel()
+    for k, sig in want.items():
+        if k not in _auto:
+            _auto[k] = (sig, loop.create_task(_auto_loop(uid, k[1], sig)))
+
+
+async def _auto_loop(uid, i, sig):
+    delay = sig[2]
+    try:
+        while True:
+            await asyncio.sleep(delay)
+            client = _clients.get(uid)
+            sl = _slots.get(uid, [])
+            cur = sl[i] if i < len(sl) else None
+            if not client or not cur or _auto_sig(cur) != sig:
+                return
+            if _paused.get(uid):
+                continue
+            now = time.time()
+            h = [t for t in _hist.get(uid, []) if now - t < 60]
+            if len(h) >= 20:
+                continue
+            h.append(now)
+            _hist[uid] = h
+            try:
+                await _auto_fire(uid, client, cur)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                logger.info("self auto fire %s/%s: %s", uid, i, e)
+                wait = getattr(e, "seconds", None)
+                if isinstance(wait, int) and wait > 0:
+                    await asyncio.sleep(min(wait, 300))
+    except asyncio.CancelledError:
+        raise
+
+
+async def _auto_fire(uid, client, s):
+    chat = s["chat"]
+    word = (s.get("word") or "").strip()
+    if not word or chat == _bot_id[0]:
+        return
+    _own[(uid, chat, norm(word))] = time.time() + 15
+    sent = await client.send_message(chat, word)
+    pos = s.get("pos", "n")
+    if pos == "n":
+        return
+    target = None
+    for _ in range(4):                      # جواب ربات رو چند ثانیه صبر می‌کنه
+        await asyncio.sleep(1.5)
+        async for m in client.iter_messages(chat, limit=10):
+            if m.id <= sent.id:
+                break
+            if m.buttons and await _usable(m):
+                target = m
+                break
+        if target:
+            break
+    if not target:                          # جواب تازه نیومد؛ آخرین پیام دکمه‌دار رباتا
+        async for m in client.iter_messages(chat, limit=15):
+            if m.buttons and await _usable(m):
+                target = m
+                break
+    btn = _pick_button(target, pos) if target else None
+    if btn:
+        await btn.click()
 
 
 async def start_all(app):
@@ -364,7 +465,8 @@ def _slot_line(i, s):
     if not s or not s.get("word"):
         return f"{i + 1}️⃣ ➕ خالی"
     parts = [f"{i + 1}️⃣ «{s['word']}»", f"💬 {(s.get('title') or 'گپ؟')[:22]}",
-             f"⏱ {fmt_delay(s.get('delay', 0))}", f"🎯 {POS[s.get('pos', 'n')]}"]
+             (f"🔁 هر {fmt_delay(s.get('delay', 0))}" if int(s.get('delay', 0) or 0) >= MIN_AUTO else "🔁 خاموش"),
+             f"🎯 {POS[s.get('pos', 'n')]}"]
     return " | ".join(parts) + ("  ✅" if s.get("chat") else "  ⚠️ گپ تنظیم نشده")
 
 
@@ -374,17 +476,18 @@ def _missing(s):
         miss.append(".کلمه فلان")
     if not s.get("chat"):
         miss.append(".گپ")
-    if s.get("pos", "n") == "n":
-        miss.append(".دکمه چپ|وسط|راست (بدون اون فقط کلمه تکرار می‌شه و دکمه‌ای زده نمی‌شه)")
+    if int(s.get("delay", 0) or 0) < MIN_AUTO:
+        miss.append(".زمان 30 (هر چند ثانیه خودکار بگه؛ حداقل 5)")
     return miss
 
 
 def _ready_text(s):
     miss = _missing(s)
-    if s.get("word") and s.get("chat") and s.get("pos", "n") != "n":
-        return (f"🚀 آماده‌ست و از همین الان کار می‌کنه: «{s['word']}» رو توی «{s.get('title') or 'گپ'}» بفرست "
-                f"و بعد از {fmt_delay(s.get('delay', 0))} دکمه زده می‌شه.")
-    return "📌 مونده: " + " | ".join(miss) if miss else ""
+    if not miss:
+        tail = (f" و بعدش دکمه‌ی {POS[s.get('pos')]} رو می‌زنه." if s.get("pos", "n") != "n"
+                else " (دکمه‌ای زده نمی‌شه؛ اگه می‌خوای: .دکمه چپ|وسط|راست).")
+        return (f"🚀 فعاله! هر {fmt_delay(s.get('delay', 0))} خودش «{s['word']}» رو توی «{s.get('title') or 'گپ'}» می‌گه" + tail)
+    return "📌 مونده: " + " | ".join(miss)
 
 
 def _panel_text(uid):
@@ -398,10 +501,10 @@ def _panel_text(uid):
     lines += ["",
               "دستورها (روی اسلات فعلی؛ برای اسلات دیگه عدد بذار: .کلمه 2 سلام):",
               ".کلمه فلان — کلمه‌ای که می‌فرستی",
-              ".زمان فلان — مثل 5 یا 10s یا 2 دقیقه",
+              ".زمان فلان — هر چند ثانیه خودکار بگه (حداقل 5؛ مثل 30 یا 2 دقیقه)",
               ".دکمه فلان — چپ | وسط | راست | خالی",
               ".گپ — همین گپ؛ یا .گپ اسم گروه",
-              "", "بعد از تنظیم کلمه + گپ + دکمه، سلف خودش کار می‌کنه."]
+              "", "بعد از تنظیم کلمه + گپ + زمان، سلف خودش هر چند ثانیه کلمه رو می‌گه و دکمه رو می‌زنه؛ لازم نیست خودت چیزی بفرستی."]
     return "\n".join(lines)
 
 
@@ -490,14 +593,14 @@ async def _handle_dot(uid, ev):
             await _say(uid, ev, f"✅ کلمه‌ی اسلات {i + 1}: «{sl[i]['word']}»\n" + _ready_text(sl[i]))
         elif cmd == "time":
             d = parse_delay(rest)
-            if d is None:
-                await _say(uid, ev, "⏱ مثل: .زمان 5   یا   .زمان 10s   یا   .زمان 2 دقیقه   (تا ۶۰ دقیقه)")
+            if d is None or 0 < d < MIN_AUTO:
+                await _say(uid, ev, "⏱ هر چند ثانیه خودکار بگه؟ مثل: .زمان 30   یا   .زمان 2 دقیقه\n(حداقل 5 ثانیه، حداکثر ۶۰ دقیقه؛ .زمان 0 = خودکار خاموش)")
                 return True
             i = _pick_slot(uid, sl, explicit)
             sl[i]["delay"] = d
             _put_slots(uid, sl)
             _cur[uid] = i
-            await _say(uid, ev, f"✅ زمان اسلات {i + 1}: {fmt_delay(d)}\n" + _ready_text(sl[i]))
+            await _say(uid, ev, (f"✅ زمان اسلات {i + 1}: هر {fmt_delay(d)}\n" if d else f"✅ حالت خودکار اسلات {i + 1} خاموش شد.\n") + _ready_text(sl[i]))
         elif cmd == "btn":
             pos = _POSW.get(norm(rest))
             if not pos:
@@ -550,7 +653,7 @@ def _panel(uid):
     lines = ["🤖 <b>سلف روبی</b>\n",
              f"🔌 اتصال: {'✅ وصل' if on else '❌ قطع'}",
              f"⚙️ وضعیت: {'⏸ متوقف' if row.paused else '▶️ فعال'}\n",
-             "کلمه رو توی گپ انتخابی از اکانت خودت بفرست؛ بعد از تایمر، دکمه‌ی انتخابی (چپ/وسط/راست) زده می‌شه.",
+             "هر اسلات: کلمه رو هر چند ثانیه (تایمر) خودش توی گپ انتخابی می‌گه و بعدش دکمه‌ی انتخابی (چپ/وسط/راست) رو می‌زنه؛ لازم نیست چیزی بفرستی.",
              "💡 از داخل چت هم می‌تونی تنظیم کنی (مثلاً توی Saved Messages): <code>.پنل</code> ، <code>.کلمه فلان</code> ، <code>.زمان 5</code> ، <code>.دکمه وسط</code> ، <code>.گپ</code>\n"]
     kb = []
     for i in range(MAX_SLOTS):
@@ -571,7 +674,7 @@ def _slot_panel(uid, i):
     s = sl[i] if i < len(sl) else {}
     t = (f"{i + 1}️⃣ <b>کلمه‌ی {i + 1}</b>\n\n📝 کلمه: {s.get('word') or '—'}\n"
          f"💬 گپ: {s.get('title') or '—'}\n"
-         f"⏱ تایمر: {fmt_delay(s.get('delay', 0)) if s.get('word') else '—'}\n🎯 دکمه: {POS[s.get('pos', 'n')]}")
+         f"🔁 تکرار خودکار: {('هر ' + fmt_delay(s.get('delay', 0))) if s.get('word') and int(s.get('delay', 0) or 0) >= MIN_AUTO else '—'}\n🎯 دکمه: {POS[s.get('pos', 'n')]}")
     kb = KB([[B("📝 کلمه", callback_data=f"self:e:{i}:word"), B("💬 گپ", callback_data=f"self:cp:{i}:0")],
              [B("⏱ تایمر", callback_data=f"self:tm:{i}"), B("🎯 دکمه", callback_data=f"self:pm:{i}")],
              [B("🗑 حذف", callback_data=f"self:d:{i}"), B("🔙 بازگشت", callback_data="self:home")]])
@@ -644,7 +747,7 @@ async def cb_user(update, context):
         kb = [[B(fmt_delay(x), callback_data=f"self:t:{i}:{x}") for x in pre[:3]],
               [B(fmt_delay(x), callback_data=f"self:t:{i}:{x}") for x in pre[3:]],
               [B("✏️ عدد دلخواه", callback_data=f"self:e:{i}:delay")], [B("🔙 بازگشت", callback_data=f"self:s:{i}")]]
-        await q.message.edit_text("⏱ بعد از گفتن کلمه، چقدر صبر کنه تا دکمه زده بشه؟", reply_markup=KB(kb))
+        await q.message.edit_text("⏱ هر چند ثانیه خودش کلمه رو بگه و دکمه رو بزنه؟", reply_markup=KB(kb))
     elif a == "t":
         i, v = int(p[2]), int(p[3])
         if 0 <= v <= MAX_DELAY:
@@ -670,7 +773,7 @@ async def cb_user(update, context):
     elif a == "e":
         i, f = int(p[2]), p[3]
         ud["self_st"] = {"step": f, "slot": i}
-        ask = {"delay": "⏱ تایمر رو بفرست؛ مثلاً <code>30</code> (ثانیه) یا <code>5 دقیقه</code> (حداکثر ۶۰ دقیقه):"}[f]
+        ask = {"delay": "⏱ هر چند ثانیه خودکار بگه؟ مثلاً <code>30</code> (ثانیه) یا <code>5 دقیقه</code> (حداقل ۵ ثانیه، حداکثر ۶۰ دقیقه):"}[f]
         await q.message.edit_text(ask, parse_mode="HTML", reply_markup=KB([[B("🔙 بازگشت", callback_data=f"self:s:{i}")]]))
     elif a == "pm":
         i = int(p[2])
@@ -880,8 +983,8 @@ async def user_text(update, context):
             sl = _get_slots(uid)
             if f == "delay":
                 v = parse_delay(text)
-                if v is None:
-                    await msg.reply_text("❗️ عدد درست بفرست؛ مثلاً 30 یا 5 دقیقه (حداکثر ۶۰ دقیقه).")
+                if v is None or 0 < v < MIN_AUTO:
+                    await msg.reply_text("❗️ عدد درست بفرست؛ مثلاً 30 یا 5 دقیقه (حداقل ۵ ثانیه، حداکثر ۶۰ دقیقه).")
                     raise ApplicationHandlerStop
             else:
                 v = text[:40]
