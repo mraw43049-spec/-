@@ -12,6 +12,7 @@
 
 - ساعت زنده کنار اسم: .ساعت (روشن) | .ساعت 3 (انتخاب فونت) | .ساعت فونت (لیست) | .غیرفعال ساعت
 - ایموجی پریمیوم (بدون اکانت پریمیوم، از طریق ربات اینلاین): .ایموجی متن [کد ایموجی]
+- ریاکشن: روی پیام کاربر ریپلای کن و بنویس .ریاکشن 🔥❤👍  یا  /reykt  (اکانت پریمیوم تا ۳ ریاکشن روی همون پیام)
 - کپی پروفایل: روی پیام یه کاربر ریپلای کن و بنویس .کپی  (اسم، بیو، عکس) | برگشت: .غیرفعال کپی
 
 امنیت: سشن‌ها رمزنگاری‌شده ذخیره می‌شن (Fernet)، سلف هیچ‌وقت روی ربات روباهیو کلیک نمی‌کنه،
@@ -30,10 +31,47 @@ import time
 from datetime import datetime, timezone
 
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, String, Text
-from telegram import InlineKeyboardButton as B, InlineKeyboardMarkup as KB, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram import InlineKeyboardButton as _IKB, InlineKeyboardMarkup as KB, KeyboardButton as _KB, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import InlineQueryResultArticle, InlineQueryResultCachedPhoto, InlineQueryResultPhoto, InputTextMessageContent
+from telegram.ext import ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, InlineQueryHandler, MessageHandler, filters
 
 from database import Base, get_session
+
+
+# ---------- دکمه‌های رنگی (بدون ایموجی) ----------
+# Bot API 9.4: style = primary (آبی) | success (سبز) | danger (قرمز). روی تلگرام قدیمی بدون رنگ دیده می‌شه.
+_EMO = re.compile("[\U0001F000-\U0001FFFF\u2190-\u21FF\u2300-\u23FF\u25A0-\u25FF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D\u20E3]")
+_BTN_MAP = {"⌫": "حذف", "◀️": "قبلی", "▶️": "بعدی", "🔙": "بازگشت", "✔️ ": "» "}
+
+
+def _clean(t):
+    t = t or ""
+    if t in _BTN_MAP:
+        return _BTN_MAP[t]
+    t = t.replace("✔️ ", "» ")
+    t = _EMO.sub("", t)
+    return re.sub(r"\s+", " ", t).strip() or "•"
+
+
+def _style_for(text, cd):
+    cd = cd or ""
+    t = text or ""
+    if cd in ("self:disc", "self:kc", "selfa:off", "selfa:del", "self:discy") or cd.startswith("self:d:") \
+            or any(w in t for w in ("لغو", "انصراف", "قطع", "توقف", "خاموش", "حذف")) and cd != "self:kx":
+        return "danger"
+    if cd in ("self:ky", "self:conn", "selfa:on", "self:tog", "self:clkt") or any(w in t for w in ("فعال", "روشن", "تأیید", "اتصال")):
+        return "success"
+    return "primary"
+
+
+def B(text, callback_data=None, style=None, **kw):
+    txt = _clean(text)
+    return _IKB(txt, callback_data=callback_data, api_kwargs={"style": style or _style_for(text, callback_data)}, **kw)
+
+
+def KeyboardButton(text, **kw):
+    return _KB(_clean(text), api_kwargs={"style": "danger" if "لغو" in text else "primary"}, **kw)
+
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +189,8 @@ _bot_id = [0]
 _capture = {}
 _botref = [None]
 _own = {}   # (uid, chat, کلمه) -> زمان؛ پیام‌هایی که خود سلف می‌فرسته و نباید دوباره تریگر بشن
+_feature_tasks = {}  # uid -> asyncio tasks for presence/typing helpers
+_typing_emit_at = {}
 
 
 def _load_runtime(uid, row):
@@ -163,6 +203,14 @@ async def stop_client(uid, logout=False, restore=False):
     c = _clients.pop(uid, None)
     _cancel_auto(uid)
     _cancel_clock(uid)
+    for task in _feature_tasks.pop(uid, []):
+        task.cancel()
+    _typing_emit_at.pop(uid, None)
+    try:
+        import extras
+        extras.cleanup(uid)
+    except Exception:  # noqa: BLE001
+        pass
     _slots.pop(uid, None)
     if c and restore:
         try:
@@ -206,9 +254,18 @@ async def start_client(uid):
     async def _h(ev, _uid=uid):
         await _on_out(_uid, ev)
     client.add_event_handler(_h, events.NewMessage(outgoing=True))
+    async def _raw_typing(update, _uid=uid, _client=client):
+        await _mirror_typing(_uid, _client, update)
+    client.add_event_handler(_raw_typing, events.Raw)
+    try:
+        import extras
+        extras.attach(uid, client)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("extras attach %s: %s", uid, e)
     _clients[uid] = client
     _sync_auto(uid)
     _sync_clock(uid)
+    _sync_presence(uid)
     return True
 
 
@@ -232,6 +289,28 @@ async def _on_out(uid, ev):
             return
     if await _handle_dot(uid, ev):
         return
+    # Apply selected Unicode font to ordinary text messages. Commands remain untouched.
+    dfont = _pget(uid)
+    mode = dfont.get("font_mode", "ساده")
+    fmap = _FONT_MAPS.get(mode)
+    original = (ev.raw_text or "")
+    if fmap and original and not original.lstrip().startswith((".", "/")) and not ev.media:
+        try:
+            changed = original.translate(fmap)
+            # Unicode styled alphabets cover Latin letters but not Persian. Use Telegram
+            # formatting entities for Persian text, while retaining styled Latin letters.
+            if mode in ("بولد", "ایتالیک", "مونو") and re.search(r"[\u0600-\u06FF]", original):
+                import html as _html
+                tag = {"بولد": "b", "ایتالیک": "i", "مونو": "code"}[mode]
+                if mode == "بولد":
+                    changed = original.translate(fmap) if fmap else original
+                # Escape text before wrapping so user input cannot inject markup.
+                safe = _html.escape(changed, quote=False)
+                await ev.edit(f"<{tag}>{safe}</{tag}>", parse_mode="html")
+            elif changed != original:
+                await ev.edit(changed, parse_mode=None)
+        except Exception as e:
+            logger.debug("font transform skipped %s: %s", uid, e)
     if _paused.get(uid):
         return
     txt = norm(ev.raw_text or "")
@@ -405,6 +484,7 @@ async def _auto_fire(uid, client, s):
 async def start_all(app):
     _bot_id[0] = app.bot.id
     _botref[0] = app.bot
+    asyncio.create_task(prepare_banner(app))
     if not configured():
         logger.info("self: SELF_API_ID/SELF_API_HASH تنظیم نشده؛ سلف غیرفعال است")
         return
@@ -432,7 +512,7 @@ async def _dialogs(client):
                 continue
             if d.is_group:
                 out.append((d.id, d.name or str(d.id), True))
-            elif d.is_user and getattr(d.entity, "bot", False):
+            elif d.is_user and not getattr(d.entity, "bot", False):
                 out.append((d.id, d.name or str(d.id), False))
     except Exception as e:  # noqa: BLE001
         logger.info("dialogs failed: %s", e)
@@ -774,6 +854,46 @@ async def send_premium(client, chat, text, reply_to=None):
     return True
 
 
+REACT_DEFAULT = ["❤", "🔥", "👍"]
+_EMO_RE = re.compile("(?:[\\U0001F1E6-\\U0001F1FF]{2}|[\\u2600-\\u27BF\\u2B00-\\u2BFF\\U0001F000-\\U0001F1E5\\U0001F200-\\U0001FAFF]\\ufe0f?[\\U0001F3FB-\\U0001F3FF]?(?:\\u200d[\\u2600-\\u27BF\\u2B00-\\u2BFF\\U0001F000-\\U0001F1E5\\U0001F200-\\U0001FAFF]\\ufe0f?)*)")
+
+
+async def react_start(uid, ev, arg):
+    """.ریاکشن [ایموجی‌ها] روی پیام کاربر ریپلای کن؛ همون پیام ریاکشن می‌خوره.
+    اکانت پریمیوم تا ۳ ریاکشن هم‌زمان، اکانت عادی ۱ تا. مثل: .ریاکشن 🔥❤👍  یا  /reykt 🔥❤👍"""
+    from telethon import errors
+    from telethon.tl.functions.messages import SendReactionRequest
+    from telethon.tl.types import ReactionEmoji
+    client = _clients.get(uid)
+    if not client:
+        return "❌ اول اکانتت رو وصل کن (/self)."
+    if not ev.is_reply:
+        return "↩️ روی پیام اون کاربر ریپلای کن و بنویس:\n.ریاکشن 🔥❤👍   یا   /reykt"
+    try:
+        me = await client.get_me()
+        limit = 3 if getattr(me, "premium", False) else 1
+        emos = []
+        for e in _EMO_RE.findall(arg or ""):
+            e = e.replace("\ufe0f", "")
+            if e and e not in emos:
+                emos.append(e)
+        emos = (emos or REACT_DEFAULT)[:limit]
+        await client(SendReactionRequest(peer=ev.chat_id, msg_id=ev.reply_to_msg_id,
+                                         reaction=[ReactionEmoji(emoticon=e) for e in emos]))
+    except errors.ReactionInvalidError:
+        return "❌ یکی از ایموجی‌ها به‌عنوان ریاکشن مجاز نیست."
+    except errors.FloodWaitError as e:
+        return f"⏳ تلگرام محدود کرد؛ {e.seconds} ثانیه صبر کن."
+    except Exception as e:  # noqa: BLE001
+        logger.info("self react %s: %s", uid, e)
+        return "⚠️ ارسال نشد: " + str(e)[:120]
+    try:
+        await ev.delete()      # پیام دستور پاک می‌شه
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def _u16(t):
     return len(t.encode("utf-16-le")) // 2
 
@@ -840,14 +960,20 @@ async def emoji_send(uid, ev, arg):
 #   .گپ             → همین گپی که توش می‌نویسی؛ یا .گپ اسم گروه
 # بعد از تنظیم (کلمه + گپ + دکمه) سلف خودش کار می‌کنه.
 _CMD = {"پنل": "panel", "panel": "panel", "منو": "panel",
-        "کلمه": "word", "word": "word",
-        "زمان": "time", "تایمر": "time", "time": "time",
-        "دکمه": "btn", "button": "btn",
-        "گپ": "chat", "گروه": "chat", "chat": "chat",
-        "ساعت": "clock", "clock": "clock",
-        "کپی": "copy", "copy": "copy",
-        "ایموجی": "emoji", "emoji": "emoji", "پرمیوم": "emoji", "پریمیوم": "emoji", "premium": "emoji",
-        "غیرفعال": "off", "خاموش": "off", "off": "off", "غیر": "off"}
+        "ترجمه": "translate", "translate": "translate",
+        "تگ": "tag", "tag": "tag", "ریاکشن": "react", "واکنش": "react",
+        "react": "react", "reykt": "react", "reaction": "react",
+        "ذخیره": "save", "save": "save",
+        "ایموجی": "emoji", "emoji": "emoji", "ساعت": "clock", "clock": "clock",
+        "کپی": "copy", "copy": "copy", "غیرفعال": "off", "غیر‌فعال": "off", "off": "off",
+        # --- ابزارها و سکوت/بلاک (پیاده‌سازی در extras.py) ---
+        "سکوت": "mute", "mute": "mute", "رفعسکوت": "unmute", "unmute": "unmute",
+        "بلاک": "block", "block": "block", "آنبلاک": "unblock", "unblock": "unblock", "رفع": "undo",
+        "حساب": "calc", "محاسبه": "calc", "ماشینحساب": "calc", "calc": "calc",
+        "قیمت": "price", "price": "price", "تاریخ": "date", "date": "date",
+        "اذان": "prayer", "اوقات": "prayer", "azan": "prayer", "prayer": "prayer",
+        "کوتاه": "short", "کوتاهکن": "short", "short": "short", "shorten": "short",
+        "استوری": "story", "story": "story"}
 _POSW = {"چپ": "l", "left": "l", "l": "l", "وسط": "m", "میانه": "m", "mid": "m", "middle": "m", "m": "m",
          "راست": "r", "right": "r", "r": "r", "خالی": "n", "هیچ": "n", "none": "n", "n": "n"}
 _AR2FA = str.maketrans("يك", "یک")
@@ -858,12 +984,14 @@ _cmd_hist = {}
 def parse_dot(raw):
     """'.کلمه سلام' → ('word', 'سلام'). اگه دستور شناخته‌شده نبود None."""
     t = (raw or "").strip().translate(_AR2FA)
-    if not t.startswith("."):
+    if not (t.startswith(".") or t.startswith("/")):
         return None
-    m = re.match(r"^\.\s*(\S+)\s*(.*)$", t, re.S)
+    m = re.match(r"^[./]\s*(\S+)\s*(.*)$", t, re.S)
     if not m:
         return None
     cmd = _CMD.get(m.group(1).replace("\u200c", "").lower())
+    if cmd and t.startswith("/") and cmd != "react":
+        return None      # با / فقط دستور ریاکشن کار می‌کنه
     return (cmd, m.group(2).strip()) if cmd else None
 
 
@@ -913,15 +1041,9 @@ def _panel_text(uid):
     for i in range(MAX_SLOTS):
         lines.append(_slot_line(i, sl[i] if i < len(sl) else {}))
     lines += ["",
-              "دستورها (روی اسلات فعلی؛ برای اسلات دیگه عدد بذار: .کلمه 2 سلام):",
-              ".کلمه فلان — کلمه‌ای که می‌فرستی",
-              ".زمان فلان — هر چند ثانیه خودکار بگه (حداقل 5؛ مثل 30 یا 2 دقیقه)",
-              ".دکمه فلان — چپ | وسط | راست | خالی",
-              ".گپ — همین گپ؛ یا .گپ اسم گروه",
-              ".ساعت — ساعت زنده کنار اسم | .ساعت 3 فونت | .غیرفعال ساعت",
-              ".ایموجی متن [کد] — ارسال ایموجی پریمیوم با ربات @AS_EmojiBot",
-              ".کپی (ریپلای روی کاربر) — کپی اسم/بیو/عکس | .غیرفعال کپی",
-              "", "بعد از تنظیم کلمه + گپ + زمان، سلف خودش هر چند ثانیه کلمه رو می‌گه و دکمه رو می‌زنه؛ لازم نیست خودت چیزی بفرستی."]
+              "تمام تنظیمات سلف از همین پنل انجام می‌شود؛ فرمان‌های تنظیم پراکنده غیرفعال شده‌اند.",
+              "ترجمه: روی متن ریپلای کن و .ترجمه را بفرست. تگ محدود اعضا: .تگ اعضا.",
+              "بعد از ذخیره تنظیمات در پنل، قابلیت‌های انتخاب‌شده اجرا می‌شوند."]
     return "\n".join(lines)
 
 
@@ -972,12 +1094,67 @@ async def _find_chat(client, name):
 
 async def _handle_dot(uid, ev):
     raw = ev.raw_text or ""
-    if not raw.lstrip().startswith("."):
+    if raw.strip() == "پنل":
+        raw = ".پنل"
+    if not raw.lstrip().startswith((".", "/")):
         return False
     pc = parse_dot(raw)
     if not pc:
         return False
     cmd, arg = pc
+    if cmd == "translate":
+        if not ev.is_reply:
+            await _say(uid, ev, "روی متن موردنظر ریپلای کن و بعد .ترجمه را بفرست.")
+            return True
+        try:
+            reply = await ev.get_reply_message()
+            source = (reply.raw_text or "").strip()
+            if not source:
+                await _say(uid, ev, "پیام ریپلای‌شده متن قابل ترجمه ندارد.")
+            else:
+                result = await _translate_text(source)
+                await ev.reply("ترجمه:\n" + result, parse_mode=None)
+                try: await ev.delete()
+                except Exception: pass
+        except Exception as e:
+            await _say(uid, ev, "ترجمه انجام نشد؛ اتصال اینترنت سرور را بررسی کن. " + str(e)[:80])
+        return True
+    if cmd == "tag" and norm(arg) in ("اعضا", "members", "members all", "") :
+        try:
+            if not ev.is_group and not ev.is_channel:
+                await _say(uid, ev, "این دستور فقط در گروه قابل استفاده است.")
+                return True
+            from telethon.tl.types import User
+            mentions = []
+            async for participant in _clients[uid].iter_participants(ev.chat_id, limit=10):
+                if isinstance(participant, User) and not getattr(participant, "bot", False):
+                    label = (participant.first_name or "عضو").replace("[", "").replace("]", "")
+                    mentions.append(f"[{label}](tg://user?id={participant.id})")
+            if mentions:
+                await ev.reply("اعضای گروه (حداکثر ۱۰ نفر):\n" + " ".join(mentions), parse_mode="md")
+            else:
+                await _say(uid, ev, "عضوی برای منشن در دسترس نبود.")
+            try: await ev.delete()
+            except Exception: pass
+        except Exception as e:
+            await _say(uid, ev, "تگ اعضا انجام نشد؛ ممکن است تلگرام دسترسی اعضا را محدود کرده باشد. " + str(e)[:70])
+        return True
+    if cmd == "save":
+        import extras
+        await _say(uid, ev, await extras.save_replied(uid, ev))
+        return True
+    import extras
+    if cmd in extras.CMD_WORDS:
+        await extras.handle_cmd(uid, ev, cmd, arg)
+        return True
+    # تنظیمات سلف (کلمه/زمان/گپ/دکمه/ساعت) فقط از دکمه‌های .پنل انجام می‌شوند؛
+    # دستورهای ریپلایی و سریع (.کپی، .غیرفعال کپی، .ریاکشن، .ایموجی، .ساعت) توی چت کار می‌کنن.
+    if cmd not in ("panel", "copy", "off", "react", "emoji", "clock"):
+        try:
+            await ev.delete()
+        except Exception:
+            pass
+        return True
     now = time.time()
     h = [t for t in _cmd_hist.get(uid, []) if now - t < 60]
     if len(h) >= 40:
@@ -986,6 +1163,8 @@ async def _handle_dot(uid, ev):
     _cmd_hist[uid] = h
     try:
         if cmd == "panel":
+            if await send_inline_panel(uid, ev):
+                return True
             if ev.chat_id == uid:      # Saved Messages: پنل همون‌جا بالا میاد
                 await ev.edit(_panel_text(uid), parse_mode=None)
             else:                      # گپ عمومی: پیام دستور پاک می‌شه و پنل می‌ره توی چت ربات
@@ -993,8 +1172,7 @@ async def _handle_dot(uid, ev):
                     await ev.delete()
                 except Exception:
                     pass
-                tx, kb = _panel(uid)
-                await _botref[0].send_message(uid, _panel_text(uid), reply_markup=kb)
+                await send_panel(_botref[0], uid)
             return True
         if cmd == "off":
             what = norm(re.sub(r"^فعال\s*", "", arg or ""))
@@ -1004,6 +1182,11 @@ async def _handle_dot(uid, ev):
                 await _say(uid, ev, await clock_set(uid, on=False))
             else:
                 await _say(uid, ev, "❓ مثل: .غیرفعال کپی   یا   .غیرفعال ساعت")
+            return True
+        if cmd == "react":
+            msg_out = await react_start(uid, ev, arg)
+            if msg_out:
+                await _say(uid, ev, msg_out)
             return True
         if cmd == "emoji":
             msg_out = await emoji_send(uid, ev, arg)
@@ -1103,29 +1286,137 @@ async def _handle_dot(uid, ev):
     return True
 
 
+# ---------- آنلاین‌بودن و بازتاب تایپینگ ----------
+def _sync_presence(uid):
+    """شروع/توقف تازه‌سازی وضعیت آنلاین و تایپینگ بر اساس تنظیمات ذخیره‌شده."""
+    client = _clients.get(uid)
+    if not client:
+        return
+    tasks = _feature_tasks.setdefault(uid, [])
+    # پاک‌کردن تسک‌های قبلی این قابلیت‌ها؛ تسک‌های ساعت/اسلات جدا هستند.
+    for task in tasks:
+        task.cancel()
+    tasks.clear()
+    d = _pget(uid)
+    if d.get("always_online"):
+        async def online_loop():
+            from telethon.tl.functions.account import UpdateStatusRequest
+            while uid in _clients and _pget(uid).get("always_online"):
+                try:
+                    await client(UpdateStatusRequest(offline=False))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.info("online refresh failed for %s: %s", uid, exc)
+                await asyncio.sleep(120)
+        tasks.append(asyncio.create_task(online_loop()))
+
+async def _mirror_typing(uid, client, update):
+    """وقتی هر کاربری در هر گفت‌وگویی تایپ می‌کند، تایپینگ را در مقصد انتخابی نشان بده."""
+    try:
+        d = _pget(uid)
+        target = d.get("typing_target_id")
+        if not d.get("typing_mode") or not target:
+            return
+        from telethon.tl.types import UpdateUserTyping, UpdateChatUserTyping, UpdateChannelUserTyping
+        if not isinstance(update, (UpdateUserTyping, UpdateChatUserTyping, UpdateChannelUserTyping)):
+            return
+        # محدودسازی نرخ: از ایجاد درخواست‌های پیاپی در گروه‌های شلوغ جلوگیری می‌کند.
+        now = time.monotonic()
+        if now - _typing_emit_at.get(uid, 0) < 3.5:
+            return
+        _typing_emit_at[uid] = now
+        from telethon.tl.functions.messages import SetTypingRequest
+        from telethon.tl.types import SendMessageTypingAction, SendMessageCancelAction
+        peer = await client.get_input_entity(int(target))
+        await client(SetTypingRequest(peer=peer, action=SendMessageTypingAction()))
+        async def clear_later():
+            await asyncio.sleep(4)
+            try:
+                await client(SetTypingRequest(peer=peer, action=SendMessageCancelAction()))
+            except Exception:
+                pass
+        asyncio.create_task(clear_later())
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.debug("typing mirror failed for %s: %s", uid, exc)
+
+# ---------- امکانات تکمیلی پنل ----------
+_FONT_MAPS = {
+    "ساده": None,
+    "بولد": str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇"),
+    "ایتالیک": str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", "𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡𝘢𝘣𝘤𝘥𝘦𝘧𝘨𝘩𝘪𝘫𝘬𝘭𝘮𝘯𝘰𝘱𝘲𝘳𝘴𝘵𝘶𝘷𝘸𝘹𝘺𝘻"),
+    "مونو": str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", "𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉𝚊𝚋𝚌𝚍𝚎𝚏𝚐𝚑𝚒𝚓𝚔𝚕𝚖𝚗𝚘𝚙𝚚𝚛𝚜𝚝𝚞𝚟𝚠𝚡𝚢𝚣"),
+}
+
+def _feature_panel(uid):
+    d = _pget(uid)
+    def status(k): return "روشن" if d.get(k) else "خاموش"
+    target = d.get("typing_target_name") or "انتخاب نشده"
+    rows = [
+        [B("همیشه آنلاین: " + status("always_online"), callback_data="self:ft:always_online")],
+        [B("تایپینگ: " + status("typing_mode"), callback_data="self:ft:typing_mode")],
+        [B("انتخاب گپ تایپینگ", callback_data="self:typing_chats")],
+        [B("حذف مقصد تایپینگ", callback_data="self:typing_clear")],
+        [B("حالت متن: " + d.get("font_mode", "ساده"), callback_data="self:fonts")],
+        [B("راهنمای ترجمه", callback_data="self:translate_help")],
+        [B("راهنمای تگ اعضا", callback_data="self:tag_help")],
+        [B("بازگشت", callback_data="self:home")],
+    ]
+    return ("<b>تنظیمات تکمیلی</b>\n\n"
+            "<b>همیشه آنلاین:</b> در زمان اتصال سلف، وضعیت آنلاین هر ۲ دقیقه تازه‌سازی می‌شود؛ محدودیت‌های سمت تلگرام همچنان ممکن است اثر بگذارند.\n"
+            f"<b>مقصد تایپینگ:</b> {target}\n"
+            "با روشن‌بودن تایپینگ، وقتی در گفت‌وگوهای اکانت فعالیت تایپ دیده شود، وضعیت تایپ برای مدت کوتاه در مقصد انتخابی نمایش داده می‌شود.\n"
+            "<b>ترجمه:</b> روی پیام موردنظر ریپلای کن و بنویس <code>.ترجمه</code>.\n"
+            "<b>حالت متن:</b> روی پیام‌های بعدی اعمال می‌شود؛ برای فارسی از قالب‌بندی تلگرام استفاده می‌شود."), KB(rows)
+
+async def _translate_text(text):
+    # Google Translate endpoint; requires server internet access.
+    import urllib.parse, urllib.request, json as _json
+    url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=fa&dt=t&q=" + urllib.parse.quote(text[:3500])
+    def _get():
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            data = _json.loads(r.read().decode("utf-8"))
+        return "".join(part[0] for part in data[0] if part and part[0])
+    return await asyncio.to_thread(_get)
+
 # ---------- پنل کاربر ----------
-def _panel(uid):
-    row = get_row(uid)
-    sl = slots_of(row)
-    on = uid in _clients
-    lines = ["🤖 <b>سلف روبی</b>\n",
-             f"🔌 اتصال: {'✅ وصل' if on else '❌ قطع'}",
-             f"⚙️ وضعیت: {'⏸ متوقف' if row.paused else '▶️ فعال'}\n",
-             "هر اسلات: کلمه رو هر چند ثانیه (تایمر) خودش توی گپ انتخابی می‌گه و بعدش دکمه‌ی انتخابی (چپ/وسط/راست) رو می‌زنه؛ لازم نیست چیزی بفرستی.",
-             "💡 از داخل چت هم می‌تونی تنظیم کنی (مثلاً توی Saved Messages): <code>.پنل</code> ، <code>.کلمه فلان</code> ، <code>.زمان 5</code> ، <code>.دکمه وسط</code> ، <code>.گپ</code>\n",
-             "🕒 ساعت زنده کنار اسم: دکمه‌ی «ساعت» یا <code>.ساعت</code> — 🪞 کپی پروفایل: روی پیام کاربر ریپلای کن <code>.کپی</code> و برای برگشت <code>.غیرفعال کپی</code>\n"]
-    kb = []
-    for i in range(MAX_SLOTS):
-        s = sl[i] if i < len(sl) else None
-        if s and s.get("word"):
-            t = f"{i + 1}️⃣ «{s['word']}» {(s.get('title') or '💬؟')[:12]} {POS[s.get('pos', 'n')]}"
-        else:
-            t = f"{i + 1}️⃣ ➕ تنظیم کلمه"
-        kb.append([B(t[:60], callback_data=f"self:s:{i}")])
-    kb.append([B("🕒 ساعت" + (" ✅" if _pget(uid).get("clock_on") else ""), callback_data="self:clk")])
-    kb.append([B("🔌 قطع اتصال" if on else "🔗 اتصال اکانت", callback_data="self:disc" if on else "self:conn")])
-    kb.append([B("▶️ فعال‌سازی" if row.paused else "⏸ توقف موقت", callback_data="self:tog")])
-    return "\n".join(lines), KB(kb)
+def _panel(uid, name=""):
+    """همون پنل اصلی (.پنل): کپشن کوتاه + دکمه‌ها؛ بدون متن توضیحی بلند."""
+    return _inl_caption(name), _inl_kb(uid, private=True)
+
+
+async def send_panel(bot, uid, name=""):
+    """پنل اصلی رو با بنر (اگه باشه) توی چت ربات می‌فرسته."""
+    cap, kb = _panel(uid, name)
+    url = os.environ.get("SELF_BANNER_URL", "").strip()
+    photo = url or _banner.get("file_id")
+    if photo:
+        try:
+            return await bot.send_photo(uid, photo=photo, caption=cap[:1024], reply_markup=kb)
+        except Exception as e:  # noqa: BLE001
+            logger.info("send_panel photo: %s", e)
+    return await bot.send_message(uid, cap, reply_markup=kb)
+
+
+class _PhotoMsg:
+    """جای q.message وقتی پنل به‌صورت عکس (بنر) فرستاده شده؛ ویرایش از طریق کپشن."""
+    is_inline = False
+
+    def __init__(self, msg):
+        self.m = msg
+
+    async def edit_text(self, text, reply_markup=None, parse_mode=None, **kw):
+        try:
+            await self.m.edit_caption(caption=text[:1024], reply_markup=reply_markup, parse_mode=parse_mode)
+        except Exception as e:  # noqa: BLE001
+            if "not modified" not in str(e).lower():
+                logger.info("photo panel edit: %s", e)
+
+    async def reply_text(self, text, **kw):
+        return await self.m.reply_text(text, **kw)
 
 
 def _slot_panel(uid, i):
@@ -1167,27 +1458,39 @@ async def cmd_self(update, context):
         return
     if not _allowed(u.id):
         raise ApplicationHandlerStop   # برای کسی که سلف نداره هیچ پیامی نمی‌آد
-    t, kb = _panel(u.id)
-    await update.effective_message.reply_text(t, reply_markup=kb, parse_mode="HTML")
+    await send_panel(context.bot, u.id, u.first_name or "")
 
 
 async def cb_user(update, context):
     q = update.callback_query
     uid = q.from_user.id
+    if not await _owner_gate(q):
+        return
     if not _allowed(uid):
         await q.answer()
         return
-    p = q.data.split(":")
+    p = _parse_cb(q)[0].split(":")
     a = p[1]
     ud = context.user_data
+    qm = q.message or _InlineMsg(context.bot, q.inline_message_id, uid)
+    if q.message is not None and getattr(q.message, "photo", None):
+        qm = _PhotoMsg(q.message)
     await q.answer()
     if not (a == "e" and p[3] == "word"):
         _capture.pop(uid, None)
 
+    import extras
+    if a in extras.CB_ACTIONS:
+        await extras.handle_cb(uid, a, p, qm, context)
+        return
+
     async def home():
         ud.pop("self_st", None)
-        t, kb = _panel(uid)
-        await q.message.edit_text(t, reply_markup=kb, parse_mode="HTML")
+        if getattr(qm, "is_inline", False):
+            await _inl_edit(context.bot, qm.imid, _inl_caption(q.from_user.first_name or ""), _inl_kb(uid))
+            return
+        t, kb = _panel(uid, q.from_user.first_name or "")
+        await qm.edit_text(t, reply_markup=kb)
 
     if a == "home":
         await home()
@@ -1200,10 +1503,74 @@ async def cb_user(update, context):
     elif a == "s":
         i = int(p[2])
         t, kb = _slot_panel(uid, i)
-        await q.message.edit_text(t, reply_markup=kb, parse_mode="HTML")
+        await qm.edit_text(t, reply_markup=kb, parse_mode="HTML")
+    elif a == "games":
+        t, kb = _games_panel(uid)
+        await qm.edit_text(t, reply_markup=kb)
+    elif a == "features":
+        await home()
+    elif a == "ft":
+        key = p[2]
+        d = _pget(uid)
+        d[key] = not bool(d.get(key))
+        _pput(uid, d)
+        if key in ("always_online", "typing_mode"):
+            _sync_presence(uid)
+            if key == "typing_mode" and d.get(key) and not d.get("typing_target_id"):
+                # با روشن‌کردن تایپینگ، انتخاب مقصد را مستقیم باز کن.
+                if uid not in _clients:
+                    await qm.edit_text("اول اکانتت را وصل کن.", reply_markup=KB([[B("بازگشت", callback_data="self:home")]]))
+                    return
+                try:
+                    dialogs = await _dialogs(_clients[uid])
+                    rows = [[B(name[:50], callback_data=f"self:typing_set:{cid}")] for cid, name, _ in dialogs[:35]]
+                    rows.append([B("بازگشت", callback_data="self:home")])
+                    await qm.edit_text("گپی را انتخاب کن که وضعیت تایپ در آن نمایش داده شود:", reply_markup=KB(rows))
+                    return
+                except Exception:
+                    pass
+        await home()
+    elif a == "typing_chats":
+        if uid not in _clients:
+            await qm.edit_text("اول اکانتت را وصل کن.", reply_markup=KB([[B("بازگشت", callback_data="self:home")]]))
+            return
+        dialogs = await _dialogs(_clients[uid])
+        rows = [[B(name[:50], callback_data=f"self:typing_set:{cid}")] for cid, name, _ in dialogs[:35]]
+        rows.append([B("بازگشت", callback_data="self:home")])
+        await qm.edit_text("گپی را انتخاب کن که وضعیت تایپ در آن نمایش داده شود:", reply_markup=KB(rows))
+    elif a == "typing_set":
+        try:
+            target_id = int(p[2])
+            client = _clients.get(uid)
+            entity = await client.get_entity(target_id) if client else None
+            title = getattr(entity, "title", None) or getattr(entity, "first_name", None) or getattr(entity, "username", None) or str(target_id)
+            d = _pget(uid); d["typing_target_id"] = target_id; d["typing_target_name"] = str(title)[:70]; d["typing_mode"] = True; _pput(uid, d)
+            _sync_presence(uid)
+            await home()
+        except Exception as exc:
+            await qm.edit_text("انتخاب مقصد انجام نشد: " + str(exc)[:100], reply_markup=KB([[B("بازگشت", callback_data="self:home")]]))
+    elif a == "typing_clear":
+        d = _pget(uid); d.pop("typing_target_id", None); d.pop("typing_target_name", None); _pput(uid, d)
+        _sync_presence(uid)
+        await home()
+    elif a == "fonts":
+        d = _pget(uid)
+        current = d.get("font_mode", "ساده")
+        rows = [[B(name + (" (انتخاب‌شده)" if name == current else ""), callback_data="self:font:" + name)] for name in _FONT_MAPS]
+        rows.append([B("بازگشت", callback_data="self:home")])
+        await qm.edit_text("فونت پیام‌های بعدی را انتخاب کن:", reply_markup=KB(rows))
+    elif a == "font":
+        name = ":".join(p[2:])
+        if name in _FONT_MAPS:
+            d = _pget(uid); d["font_mode"] = name; _pput(uid, d)
+        await home()
+    elif a == "translate_help":
+        await qm.edit_text("برای ترجمه، در اکانت متصل روی پیام متنی ریپلای کن و بنویس .ترجمه\nترجمه به فارسی انجام می‌شود و به اینترنت سرور نیاز دارد.", reply_markup=KB([[B("بازگشت", callback_data="self:home")]]))
+    elif a == "tag_help":
+        await qm.edit_text("برای تگ محدود اعضا در گروه بنویس .تگ اعضا\nبرای جلوگیری از اسپم، در هر اجرا حداکثر ۱۰ عضو منشن می‌شوند. ممکن است تلگرام دسترسی یا اطلاعات بعضی اعضا را محدود کند.", reply_markup=KB([[B("بازگشت", callback_data="self:home")]]))
     elif a == "clk":
         tx, kb = _clock_panel(uid)
-        await q.message.edit_text(tx, reply_markup=kb, parse_mode="HTML")
+        await qm.edit_text(tx, reply_markup=kb, parse_mode="HTML")
     elif a in ("clkt", "clkf"):
         if uid not in _clients:
             await q.answer("اول اکانتت رو وصل کن.", show_alert=True)
@@ -1216,7 +1583,7 @@ async def cb_user(update, context):
             await q.answer(res[:180], show_alert=True)
         tx, kb = _clock_panel(uid)
         try:
-            await q.message.edit_text(tx, reply_markup=kb, parse_mode="HTML")
+            await qm.edit_text(tx, reply_markup=kb, parse_mode="HTML")
         except Exception:
             pass
     elif a == "tm":
@@ -1225,7 +1592,7 @@ async def cb_user(update, context):
         kb = [[B(fmt_delay(x), callback_data=f"self:t:{i}:{x}") for x in pre[:3]],
               [B(fmt_delay(x), callback_data=f"self:t:{i}:{x}") for x in pre[3:]],
               [B("✏️ عدد دلخواه", callback_data=f"self:e:{i}:delay")], [B("🔙 بازگشت", callback_data=f"self:s:{i}")]]
-        await q.message.edit_text("⏱ هر چند ثانیه خودش کلمه رو بگه و دکمه رو بزنه؟", reply_markup=KB(kb))
+        await qm.edit_text("⏱ هر چند ثانیه خودش کلمه رو بگه و دکمه رو بزنه؟", reply_markup=KB(kb))
     elif a == "t":
         i, v = int(p[2]), int(p[3])
         if 0 <= v <= MAX_DELAY:
@@ -1233,7 +1600,7 @@ async def cb_user(update, context):
             sl[i]["delay"] = v
             _put_slots(uid, sl)
         tx, kb = _slot_panel(uid, i)
-        await q.message.edit_text(tx, reply_markup=kb, parse_mode="HTML")
+        await qm.edit_text(tx, reply_markup=kb, parse_mode="HTML")
     elif a == "e" and p[3] == "word":
         i = int(p[2])
         sl = _get_slots(uid)
@@ -1244,7 +1611,7 @@ async def cb_user(update, context):
             await q.answer("اول گپ رو انتخاب کن (دکمه‌ی 💬 گپ).", show_alert=True)
             return
         _capture[uid] = {"slot": i, "chat": sl[i]["chat"], "ts": time.time()}
-        await q.message.edit_text(
+        await qm.edit_text(
             f"📝 الان از <b>اکانت خودت</b> توی گپ «{sl[i].get('title')}» کلمه‌ی دلخواهت رو بفرست.\n"
             "همون لحظه خودکار ثبت می‌شه؛ لازم نیست اینجا تایپ کنی. (۵ دقیقه فرصت داری)",
             parse_mode="HTML", reply_markup=KB([[B("🔙 انصراف", callback_data=f"self:s:{i}")]]))
@@ -1252,10 +1619,13 @@ async def cb_user(update, context):
         i, f = int(p[2]), p[3]
         ud["self_st"] = {"step": f, "slot": i}
         ask = {"delay": "⏱ هر چند ثانیه خودکار بگه؟ مثلاً <code>30</code> (ثانیه) یا <code>5 دقیقه</code> (حداقل ۵ ثانیه، حداکثر ۶۰ دقیقه):"}[f]
-        await q.message.edit_text(ask, parse_mode="HTML", reply_markup=KB([[B("🔙 بازگشت", callback_data=f"self:s:{i}")]]))
+        if getattr(qm, "is_inline", False):      # ورودی متنی باید توی چت خود ربات تایپ بشه
+            await context.bot.send_message(uid, ask + "\n\n(همین‌جا توی چت ربات بنویس)", parse_mode="HTML")
+            return
+        await qm.edit_text(ask, parse_mode="HTML", reply_markup=KB([[B("🔙 بازگشت", callback_data=f"self:s:{i}")]]))
     elif a == "pm":
         i = int(p[2])
-        await q.message.edit_text("🎯 کدوم دکمه‌ی پیام ربات زده بشه؟\n(⬜ خالی = هیچ دکمه‌ای زده نشه)", reply_markup=KB([
+        await qm.edit_text("🎯 کدوم دکمه‌ی پیام ربات زده بشه؟\n(⬜ خالی = هیچ دکمه‌ای زده نشه)", reply_markup=KB([
             [B(POS["l"], callback_data=f"self:p:{i}:l"), B(POS["m"], callback_data=f"self:p:{i}:m"), B(POS["r"], callback_data=f"self:p:{i}:r")],
             [B(POS["n"], callback_data=f"self:p:{i}:n")], [B("🔙 بازگشت", callback_data=f"self:s:{i}")]]))
     elif a == "p":
@@ -1266,7 +1636,7 @@ async def cb_user(update, context):
             sl[i].setdefault("delay", 0)
             _put_slots(uid, sl)
         t, kb = _slot_panel(uid, i)
-        await q.message.edit_text(t, reply_markup=kb, parse_mode="HTML")
+        await qm.edit_text(t, reply_markup=kb, parse_mode="HTML")
     elif a == "cp":
         i, pg = int(p[2]), int(p[3])
         c = _clients.get(uid)
@@ -1279,7 +1649,7 @@ async def cb_user(update, context):
         dl = ud["self_dl"]
         per = 8
         pg = max(0, min(pg, max(0, (len(dl) - 1) // per)))
-        kb = [[B(("👥 " if g else "🤖 ") + n[:28], callback_data=f"self:cs:{i}:{pg * per + k}")] for k, (cid, n, g) in enumerate(dl[pg * per:(pg + 1) * per])]
+        kb = [[B(("گروه | " if g else "ربات | ") + n[:28], callback_data=f"self:cs:{i}:{pg * per + k}")] for k, (cid, n, g) in enumerate(dl[pg * per:(pg + 1) * per])]
         nav = []
         if pg > 0:
             nav.append(B("◀️", callback_data=f"self:cp:{i}:{pg}"))
@@ -1288,7 +1658,7 @@ async def cb_user(update, context):
         if nav:
             kb.append(nav)
         kb.append([B("🔙 بازگشت", callback_data=f"self:s:{i}")])
-        await q.message.edit_text("💬 کلمه توی کدوم گپ گفته بشه؟ (گروه‌ها و چت ربات‌های دیگه)" if dl else "گپی پیدا نشد.", reply_markup=KB(kb))
+        await qm.edit_text("💬 کلمه توی کدوم گپ گفته بشه؟ (گروه‌ها و چت ربات‌های دیگه)" if dl else "گپی پیدا نشد.", reply_markup=KB(kb))
     elif a == "cs":
         i, k = int(p[2]), int(p[3])
         dl = ud.get("self_dl") or []
@@ -1300,7 +1670,7 @@ async def cb_user(update, context):
         sl[i].setdefault("delay", 0)
         _put_slots(uid, sl)
         t, kb = _slot_panel(uid, i)
-        await q.message.edit_text("✅ گپ انتخاب شد.\n\n" + t, reply_markup=kb, parse_mode="HTML")
+        await qm.edit_text("✅ گپ انتخاب شد.\n\n" + t, reply_markup=kb, parse_mode="HTML")
     elif a == "d":
         i = int(p[2])
         sl = _get_slots(uid)
@@ -1309,15 +1679,15 @@ async def cb_user(update, context):
         await home()
     elif a == "conn":
         if not configured():
-            await q.message.edit_text("⚠️ سلف هنوز روی سرور راه‌اندازی نشده (SELF_API_ID / SELF_API_HASH). به پشتیبانی بگو.",
+            await qm.edit_text("⚠️ سلف هنوز روی سرور راه‌اندازی نشده (SELF_API_ID / SELF_API_HASH). به پشتیبانی بگو.",
                                       reply_markup=KB([[B("🔙", callback_data="self:home")]]))
             return
         ud["self_st"] = {"step": "phone"}
-        await q.message.edit_text(
+        await qm.edit_text(
             "🔗 <b>اتصال اکانت</b>\n\n⚠️ سلف از اکانت شخصی خودت استفاده می‌کنه؛ ریسکش با خودته و روی روباهیو کار نمی‌کنه. "
             "هر وقت خواستی «قطع اتصال» رو بزن تا سشن کامل بسته بشه.\n\n👇 دکمه‌ی «اشتراک شماره من» رو از منوی پایین بزن.",
             parse_mode="HTML", reply_markup=KB([[B("🔙 بازگشت", callback_data="self:home")]]))
-        await q.message.reply_text("📱 شماره‌ی خودت رو با دکمه‌ی پایین بفرست:", reply_markup=ReplyKeyboardMarkup(
+        await qm.reply_text("📱 شماره‌ی خودت رو با دکمه‌ی پایین بفرست:", reply_markup=ReplyKeyboardMarkup(
             [[KeyboardButton("📱 اشتراک شماره من", request_contact=True)], [KeyboardButton("لغو")]], resize_keyboard=True, one_time_keyboard=True))
     elif a in ("k", "kx", "ky", "kc"):
         st = ud.get("self_st")
@@ -1328,7 +1698,7 @@ async def cb_user(update, context):
             ud.pop("self_st", None)
             ud.pop("self_code", None)
             await _drop_login(uid)
-            await q.message.edit_text("لغو شد.")
+            await qm.edit_text("لغو شد.")
             return
         if a == "k" and len(code) < 8:
             code += p[2]
@@ -1338,14 +1708,14 @@ async def cb_user(update, context):
             if len(code) < 5:
                 await context.bot.send_message(uid, "❗️ کد حداقل ۵ رقمه.")
                 return
-            await q.message.edit_text("⏳ در حال بررسی کد...")
+            await qm.edit_text("⏳ در حال بررسی کد...")
             ud["self_code"] = ""
             await _sign_in(uid, context, code=code)
             return
         ud["self_code"] = code
-        await _send_keypad(context.bot, uid, context, edit_msg=q.message)
+        await _send_keypad(context.bot, uid, context, edit_msg=qm)
     elif a == "disc":
-        await q.message.edit_text("🔌 اتصال قطع بشه و سشن اکانتت کامل بسته بشه؟",
+        await qm.edit_text("🔌 اتصال قطع بشه و سشن اکانتت کامل بسته بشه؟",
                                   reply_markup=KB([[B("✅ بله، قطع کن", callback_data="self:discy"), B("لغو", callback_data="self:home")]]))
     elif a == "discy":
         await stop_client(uid, logout=True, restore=True)
@@ -1423,9 +1793,9 @@ async def _sign_in(uid, context, code=None, password=None):
     ud.pop("self_st", None)
     ud.pop("self_code", None)
     ok = await start_client(uid)
-    tx, kb = _panel(uid)
-    await bot.send_message(uid, ("✅ اکانت وصل شد!\n\n" if ok else "⚠️ ذخیره شد ولی اتصال بالا نیومد.\n\n") + tx,
-                           reply_markup=kb, parse_mode="HTML")
+    if not ok:
+        await bot.send_message(uid, "⚠️ ذخیره شد ولی اتصال بالا نیومد.")
+    await send_panel(bot, uid)
 
 
 async def user_text(update, context):
@@ -1450,6 +1820,11 @@ async def user_text(update, context):
     if not _allowed(uid):
         ud.pop("self_st", None)
         return
+    import extras
+    if st.get("step") in extras.TEXT_STEPS:
+        ud.pop("self_st", None)
+        await extras.handle_text(uid, st, text, msg, context)
+        raise ApplicationHandlerStop
     raise_stop = True
     try:
         if text in ("لغو", "/cancel"):
@@ -1528,8 +1903,359 @@ async def on_contact(update, context):
     raise ApplicationHandlerStop
 
 
+
+
+# ---------- پنل اینلاین (وقتی «پنل» یا .پنل می‌نویسی، پیامت به پنل تصویری ربات تبدیل می‌شه) ----------
+# نیازمند: توی BotFather برای ربات /setinline بزن (Inline mode روشن باشه).
+# عکس بنر: فایل banner.jpg (یا banner.png) رو کنار selfbot.py توی ریپو بذار، یا SELF_BANNER_URL = آدرس https عکس؛ بدون اون یه بنر خودکار ساخته می‌شه.
+_banner = {"file_id": None}
+_panel_msg = {}     # uid -> (chat_id, message_id) آخرین پنلی که فرستاده شده
+
+CMDS_TEXT = (
+    "› دستورات سلف\n\n"
+    "پنل  ← همین پنل\n"
+    ".کلمه فلان  ← کلمه‌ی اسلات\n"
+    ".زمان 10s  ← تایمر\n"
+    ".دکمه چپ | وسط | راست | خالی\n"
+    ".گپ  ← همین گپ (یا .گپ اسم گروه)\n"
+    ".ساعت  ← ساعت زنده کنار اسم\n"
+    ".کپی  ← (ریپلای) کپی پروفایل | .غیرفعال کپی\n"
+    ".ذخیره  ← (ریپلای روی مدیا) ذخیره توی Saved Messages\n"
+    ".ایموجی متن  ← ایموجی پریمیوم\n"
+    ".ریاکشن 🔥❤👍  ← (ریپلای) تا ۳ ریاکشن روی همون پیام\n"
+    ".حساب 2+2 | .قیمت دلار | .تاریخ | .اذان | .کوتاه لینک\n"
+    ".استوری  ← ذخیرهٔ استوری | .سکوت / .بلاک  ← (ریپلای)\n"
+    "راهنمای کامل: پنل ← امکانات بیشتر ← صفحهٔ بعد"
+)
+
+
+def _make_banner():
+    import io
+    from PIL import Image, ImageDraw, ImageFont
+    W, H = 1280, 360
+    img = Image.new("RGB", (W, H))
+    px = img.load()
+    for x in range(W):
+        for y in range(H):
+            t = x / W
+            px[x, y] = (int(18 + 70 * t), int(6 + 14 * t), int(48 + 120 * t * (1 - 0.35 * y / H)))
+    d = ImageDraw.Draw(img)
+    d.ellipse((50, 50, 310, 310), outline=(190, 150, 255), width=8)
+    d.ellipse((72, 72, 288, 288), fill=(245, 242, 255))
+    try:
+        big, mid, small = (ImageFont.load_default(size=n) for n in (110, 46, 34))
+    except Exception:  # noqa: BLE001
+        big = mid = small = ImageFont.load_default()
+    d.text((180, 180), "S", font=big, fill=(70, 30, 150), anchor="mm")
+    d.line((360, 70, 360, 290), fill=(190, 150, 255), width=4)
+    d.text((400, 130), "SELF PANEL", font=big, fill=(255, 255, 255), anchor="lm")
+    d.text((404, 235), "fast   -   simple   -   private", font=mid, fill=(205, 185, 255), anchor="lm")
+    d.rectangle((0, H - 10, W, H), fill=(150, 90, 255))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=90)
+    buf.seek(0)
+    return buf
+
+
+async def prepare_banner(app):
+    """بنر رو یه بار می‌سازه و با آپلود به ادمین، file_id می‌گیره (پیام بعدش پاک می‌شه)."""
+    if os.environ.get("SELF_BANNER_URL", "").strip() or not ADMIN_IDS:
+        return
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        mine = next((os.path.join(here, n) for n in ("banner.jpg", "banner.jpeg", "banner.png") if os.path.exists(os.path.join(here, n))), None)
+        if mine:       # عکس خودت: فایل banner.jpg کنار selfbot.py
+            with open(mine, "rb") as f:
+                m = await app.bot.send_photo(chat_id=min(ADMIN_IDS), photo=f.read(), disable_notification=True)
+        else:
+            m = await app.bot.send_photo(chat_id=min(ADMIN_IDS), photo=_make_banner(), disable_notification=True)
+        _banner["file_id"] = m.photo[-1].file_id
+        try:
+            await m.delete()
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning("self banner: %s", e)
+
+
+def _inl_caption(name):
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo(CLOCK_TZ)).strftime("%H:%M")
+    except Exception:  # noqa: BLE001
+        now = datetime.now(timezone.utc).strftime("%H:%M")
+    return f"› Panel {name} {now}".replace("  ", " ")
+
+
+_panel_ctx = {}     # uid -> {"chat":..., "reply": آیدی پیامی که پنل روش ریپلای شده}
+
+
+def _inl_kb(uid, private=False):
+    row = get_row(uid)
+    clock = bool(_pget(uid).get("clock_on"))
+    paused = bool(row and row.paused)
+    rows = [
+        [B("ساعت" + (" (روشن)" if clock else ""), callback_data="self:clk", style="success" if clock else "primary"),
+         B("تنظیم بازی", callback_data="self:games", style="primary")],
+        [B("ریاکشن", callback_data="selfi:react", style="primary"),
+         B("کپی پروفایل", callback_data="selfi:copy", style="primary")],
+        [B("فعال‌سازی" if paused else "توقف موقت", callback_data="self:tog", style="success" if paused else "danger")],
+    ]
+    if private:
+        rows.pop(1)   # ریاکشن/کپی نیاز به ریپلای در چت دارند؛ در چت ربات نمایش داده نمی‌شوند
+    d = _pget(uid)
+    def _st(k): return "روشن" if d.get(k) else "خاموش"
+    def _sty(k): return "success" if d.get(k) else "primary"
+    rows.insert(2, [B("همیشه آنلاین: " + _st("always_online"), callback_data="self:ft:always_online", style=_sty("always_online")),
+                    B("تایپینگ: " + _st("typing_mode"), callback_data="self:ft:typing_mode", style=_sty("typing_mode"))])
+    tgt = d.get("typing_target_name")
+    trow = [B(("گپ تایپینگ: " + str(tgt)[:18]) if tgt else "انتخاب گپ تایپینگ", callback_data="self:typing_chats", style="primary")]
+    if tgt:
+        trow.append(B("حذف مقصد", callback_data="self:typing_clear", style="danger"))
+    rows.insert(3, trow)
+    rows.insert(4, [B("حالت متن: " + d.get("font_mode", "ساده"), callback_data="self:fonts", style="primary")])
+    rows.insert(5, [B("راهنمای ترجمه", callback_data="self:translate_help", style="primary"),
+                    B("راهنمای تگ اعضا", callback_data="self:tag_help", style="primary")])
+    rows.append([B("امکانات بیشتر", callback_data="self:more", style="success")])
+    last = [B("دستورات سلف", callback_data="selfi:cmds", style="primary")]
+    uname = getattr(_botref[0], "username", "") if _botref[0] else ""
+    if private:
+        rows.append([B("🔌 قطع اتصال" if uid in _clients else "🔗 اتصال اکانت",
+                       callback_data="self:disc" if uid in _clients else "self:conn", style="danger" if uid in _clients else "success")])
+    elif uname:
+        last.insert(0, B("تنظیمات سلف", url=f"https://t.me/{uname}?start=panel", style="primary"))
+    rows.append(last)
+    rows.append([B("بستن پنل", callback_data="selfi:close", style="danger")])
+    return KB(rows)
+
+
+def _inl_back_kb():
+    return KB([[B("بازگشت", callback_data="self:home", style="primary")],
+               [B("بستن پنل", callback_data="selfi:close", style="danger")]])
+
+
+def _games_panel(uid):
+    sl = slots_of(get_row(uid))
+    lines = ["› تنظیم بازی", "", "هر اسلات: کلمه + گپ + تایمر + دکمه. بعد از تنظیم، سلف خودش کلمه رو می‌گه و دکمه رو می‌زنه.", ""]
+    kb = []
+    for i in range(MAX_SLOTS):
+        s = sl[i] if i < len(sl) else {}
+        lines.append(_slot_line(i, s))
+        t = f"{i + 1}. «{s['word']}» {(s.get('title') or '')[:12]} {POS[s.get('pos', 'n')]}" if s.get("word") else f"{i + 1}. تنظیم کلمه"
+        kb.append([B(t[:60], callback_data=f"self:s:{i}", style="primary")])
+    kb.append([B("بازگشت", callback_data="self:home", style="primary")])
+    return "\n".join(lines)[:1000], KB(kb)
+
+
+async def on_inline_query(update, context):
+    iq = update.inline_query
+    uid = iq.from_user.id
+    if not (_allowed(uid) or uid in ADMIN_IDS):
+        await iq.answer([], cache_time=0, is_personal=True)
+        return
+    cap = _inl_caption(iq.from_user.first_name or "")
+    kb = _lock_kb(_inl_kb(uid), uid)
+    rid = f"panel{int(time.time())}"
+    url = os.environ.get("SELF_BANNER_URL", "").strip()
+    if url:
+        res = InlineQueryResultPhoto(id=rid, photo_url=url, thumbnail_url=url, caption=cap, reply_markup=kb)
+    elif _banner["file_id"]:
+        res = InlineQueryResultCachedPhoto(id=rid, photo_file_id=_banner["file_id"], caption=cap, reply_markup=kb)
+    else:
+        res = InlineQueryResultArticle(id=rid, title="Panel", input_message_content=InputTextMessageContent(cap), reply_markup=kb)
+    await iq.answer([res], cache_time=0, is_personal=True)
+
+
+_inl_owner = {}   # inline_message_id -> صاحب پنل
+
+
+def _parse_cb(q):
+    """callback_data → (داده‌ی اصلی، آیدی صاحب پنل یا None)."""
+    base, _, owner = (q.data or "").partition("|")
+    return base, (int(owner) if owner.isdigit() else None)
+
+
+def _lock_kb(kb, uid):
+    """به همه‌ی دکمه‌های پنل اینلاین آیدی صاحب رو می‌چسبونه تا کس دیگه‌ای نتونه بزنه."""
+    if uid is None or kb is None or not getattr(kb, "inline_keyboard", None):
+        return kb
+    rows = []
+    for row in kb.inline_keyboard:
+        nr = []
+        for b in row:
+            cd = b.callback_data
+            if cd and "|" not in cd and len(cd) + len(str(uid)) + 1 <= 64:
+                b = _IKB(b.text, callback_data=f"{cd}|{uid}", api_kwargs=dict(b.api_kwargs or {}))
+            nr.append(b)
+        rows.append(nr)
+    return KB(rows)
+
+
+async def _owner_gate(q):
+    """True یعنی اجازه‌ی ادامه؛ وگرنه به کاربرِ غیرصاحب پیام رد می‌ده."""
+    base, owner = _parse_cb(q)
+    if q.inline_message_id and owner is None:
+        await q.answer("🔒 این پنل قدیمیه؛ توی چت دوباره «.پنل» بنویس.", show_alert=True)
+        return False
+    if owner is not None and q.from_user.id != owner:
+        await q.answer("🔒 این پنل مال کس دیگه‌ایه. خودت توی ربات سلف رو فعال کن و پنل خودت رو بیار.", show_alert=True)
+        return False
+    if q.inline_message_id and owner is not None:
+        _inl_owner[q.inline_message_id] = owner
+    return True
+
+
+async def _inl_edit(bot, imid, text, kb, parse_mode=None):
+    kb = _lock_kb(kb, _inl_owner.get(imid))
+    try:
+        await bot.edit_message_caption(inline_message_id=imid, caption=text[:1024], reply_markup=kb, parse_mode=parse_mode)
+        return
+    except Exception as e:  # noqa: BLE001
+        if "not modified" in str(e).lower():
+            return
+    try:
+        await bot.edit_message_text(text, inline_message_id=imid, reply_markup=kb, parse_mode=parse_mode)
+    except Exception as e:  # noqa: BLE001
+        logger.info("self inline edit: %s", e)
+
+
+class _InlineMsg:
+    """جای q.message برای پیام‌های اینلاین (ربات فقط inline_message_id داره)."""
+    is_inline = True
+
+    def __init__(self, bot, imid, uid):
+        self.bot, self.imid, self.uid = bot, imid, uid
+
+    async def edit_text(self, text, reply_markup=None, parse_mode=None, **kw):
+        await _inl_edit(self.bot, self.imid, text, reply_markup, parse_mode)
+
+    async def reply_text(self, text, **kw):
+        return await self.bot.send_message(self.uid, text, **kw)
+
+
+class _FakeEv:
+    is_reply = True
+
+    def __init__(self, client, chat, mid):
+        self.client, self.chat, self.mid = client, chat, mid
+
+    async def get_reply_message(self):
+        return await self.client.get_messages(self.chat, ids=self.mid)
+
+
+_REACT_SETS = {"h": ["❤"], "f": ["🔥"], "l": ["👍"], "a": ["❤", "🔥", "👍"]}
+
+
+async def cb_inline(update, context):
+    q = update.callback_query
+    uid = q.from_user.id
+    if not await _owner_gate(q):
+        return
+    if not _allowed(uid):
+        await q.answer("این پنل برای تو نیست.", show_alert=True)
+        return
+    p = _parse_cb(q)[0].split(":")
+    a = p[1]
+    imid = q.inline_message_id
+    bot = context.bot
+    ctx = _panel_ctx.get(uid) or {}
+    client = _clients.get(uid)
+    if a == "close":
+        await q.answer()
+        pm = _panel_msg.pop(uid, None)
+        if pm and client:
+            try:
+                await client.delete_messages(pm[0], [pm[1]])
+                return
+            except Exception:  # noqa: BLE001
+                pass
+        if imid:
+            await _inl_edit(bot, imid, "پنل بسته شد.", None)
+        elif q.message:
+            try:
+                await q.message.delete()
+            except Exception:  # noqa: BLE001
+                pass
+    elif a == "cmds" and (imid or q.message):
+        await q.answer()
+        if imid:
+            await _inl_edit(bot, imid, CMDS_TEXT, _inl_back_kb())
+        else:
+            tgt = _PhotoMsg(q.message) if getattr(q.message, "photo", None) else q.message
+            await tgt.edit_text(CMDS_TEXT, reply_markup=_inl_back_kb())
+    elif a == "react" and imid:
+        await q.answer()
+        kb = KB([[B("قلب", callback_data="selfi:r:h", style="danger"), B("آتش", callback_data="selfi:r:f", style="danger"),
+                  B("لایک", callback_data="selfi:r:l", style="success")],
+                 [B("هر سه (پریمیوم)", callback_data="selfi:r:a", style="primary")],
+                 [B("بازگشت", callback_data="self:home", style="primary")]])
+        tx = "› ریاکشن\n\n" + ("روی پیامی که این پنل رو بهش ریپلای کردی ریاکشن می‌زنه." if ctx.get("reply")
+                               else "اول روی پیام کاربر ریپلای کن و بنویس پنل؛ بعد ریاکشن بزن.")
+        await _inl_edit(bot, imid, tx, kb)
+    elif a == "r":
+        if not client or not ctx.get("reply"):
+            await q.answer("این پنل رو باید روی پیام کاربر ریپلای کنی (روی پیامش ریپلای بزن و بنویس پنل).", show_alert=True)
+            return
+        try:
+            from telethon.tl.functions.messages import SendReactionRequest
+            from telethon.tl.types import ReactionEmoji
+            me = await client.get_me()
+            emos = _REACT_SETS.get(p[2], ["❤"])[: 3 if getattr(me, "premium", False) else 1]
+            await client(SendReactionRequest(peer=ctx["chat"], msg_id=ctx["reply"], reaction=[ReactionEmoji(emoticon=e) for e in emos]))
+            await q.answer("ریاکشن زده شد.")
+        except Exception as e:  # noqa: BLE001
+            logger.info("self panel react %s: %s", uid, e)
+            await q.answer("نشد: " + str(e)[:150], show_alert=True)
+    elif a == "copy" and imid:
+        await q.answer()
+        kb = KB([[B("کپی پروفایل کاربر", callback_data="selfi:cp1", style="success")],
+                 [B("برگشت به پروفایل خودم", callback_data="selfi:cp0", style="danger")],
+                 [B("بازگشت", callback_data="self:home", style="primary")]])
+        tx = "› کپی پروفایل\n\n" + ("اسم، بیو و عکس صاحب اون پیام کپی می‌شه." if ctx.get("reply")
+                                   else "اول روی پیام کاربر ریپلای کن و بنویس پنل؛ بعد کپی بزن.")
+        await _inl_edit(bot, imid, tx, kb)
+    elif a in ("cp1", "cp0") and imid:
+        if a == "cp1" and (not client or not ctx.get("reply")):
+            await q.answer("این پنل رو باید روی پیام کاربر ریپلای کنی.", show_alert=True)
+            return
+        await q.answer("در حال انجام...")
+        if a == "cp1":
+            res = await copy_on(uid, _FakeEv(client, ctx["chat"], ctx["reply"]))
+        else:
+            res = await copy_off(uid)
+        await _inl_edit(bot, imid, res, _inl_back_kb())
+    else:
+        await q.answer()
+
+
+async def send_inline_panel(uid, ev):
+    """پیام دستور رو پاک می‌کنه و پنل اینلاین ربات رو توی همون گپ می‌فرسته. اگه نشد False."""
+    client = _clients.get(uid)
+    bot = _botref[0]
+    uname = getattr(bot, "username", None) if bot else None
+    if not client or not uname:
+        return False
+    try:
+        res = await client.inline_query(uname, "panel", entity=ev.chat_id)
+        if not res:
+            return False
+        sent = await res[0].click(ev.chat_id, reply_to=ev.reply_to_msg_id if ev.is_reply else None)
+        _panel_ctx[uid] = {"chat": ev.chat_id, "reply": ev.reply_to_msg_id if ev.is_reply else None}
+        if sent is not None:
+            _panel_msg[uid] = (ev.chat_id, sent.id)
+        try:
+            await ev.delete()
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.info("self inline panel %s: %s", uid, e)
+        return False
+
+
 # ---------- پنل مدیر ----------
 ADMIN_IDS = set()
+SUPPORT_IDS = set()   # فقط پنل پشتیبانی؛ هیچ دسترسی مدیریتی ندارند
 
 
 def admin_menu_kb():
@@ -1537,6 +2263,12 @@ def admin_menu_kb():
                [B("⏹ غیرفعال‌سازی کاربر", callback_data="selfa:off")],
                [B("🗑 حذف کامل (خروج از سشن)", callback_data="selfa:del")],
                [B("📋 لیست کاربران سلف", callback_data="selfa:list")],
+               [B("🎁 ساخت کد هدیه", callback_data="gift:new")],
+               [B("🎟 کدهای هدیه", callback_data="gift:list")],
+               [B("🏷 ساخت کد تخفیف", callback_data="adm:dnew")],
+               [B("🏷 کدهای تخفیف", callback_data="adm:dlist")],
+               [B("📊 آمار ربات", callback_data="adm:stats")],
+               [B("📢 اطلاعیهٔ همگانی", callback_data="adm:bc")],
                [B("🔙 بازگشت", callback_data="admin:back")]])
 
 
@@ -1615,6 +2347,8 @@ def register(app, admin_ids):
     ADMIN_IDS.clear()
     ADMIN_IDS.update(admin_ids)
     app.add_handler(CommandHandler("self", cmd_self), group=-5)
+    app.add_handler(InlineQueryHandler(on_inline_query), group=-5)
+    app.add_handler(CallbackQueryHandler(cb_inline, pattern=r"^selfi:"), group=-5)
     app.add_handler(CallbackQueryHandler(cb_user, pattern=r"^self:"), group=-5)
     app.add_handler(CallbackQueryHandler(cb_admin, pattern=r"^selfa:"), group=-5)
     app.add_handler(MessageHandler(filters.CONTACT & filters.ChatType.PRIVATE, on_contact), group=-5)
